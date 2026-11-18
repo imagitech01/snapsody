@@ -85,6 +85,49 @@ test('timeline: two separate repeated sections, and a repeat after a forward sig
   assert.deepEqual(order(bars), [1, 1, 2, 3, 2, 3, 4])
 })
 
+test('timeline: without a forward sign a repeat goes back to the last double bar line', () => {
+  // Exercise 82: |: run :| G – || run :| G – ||
+  const bars = [
+    barOf('C', { right: '<repeat direction="backward"/>' }),
+    barOf('G', { right: '<bar-style>light-light</bar-style>' }),
+    barOf('D', { right: '<repeat direction="backward"/>' }),
+    barOf('G', { right: '<bar-style>light-light</bar-style>' }),
+  ]
+  assert.deepEqual(order(bars), [1, 1, 2, 3, 3, 4])
+  // The double bar line may also be written as the next bar's left bar line.
+  const left = [
+    barOf('C'),
+    barOf('D', { left: '<bar-style>light-light</bar-style>' }),
+    barOf('E', { right: '<repeat direction="backward"/>' }),
+  ]
+  assert.deepEqual(order(left), [1, 2, 3, 2, 3])
+})
+
+test('timeline: an end-repeat is not a place to go back to; a repeat played in full is not taken again', () => {
+  // A :|| B :|| C: the second repeat goes back to the beginning, and A's repeat is not taken again.
+  const back = (times?: number): string => `<repeat direction="backward"${times ? ` times="${times}"` : ''}/>`
+  assert.deepEqual(order([barOf('C', { right: back() }), barOf('D', { right: back() }), barOf('E')]), [1, 1, 2, 1, 2, 3])
+  assert.deepEqual(order([barOf('C', { right: back(3) }), barOf('D', { right: back() }), barOf('E')]), [1, 1, 1, 2, 1, 2, 3])
+  // After a section with a forward sign, a lone end-repeat goes back to that forward sign.
+  const bars = [
+    barOf('C'),
+    barOf('D', { left: '<repeat direction="forward"/>', right: back() }),
+    barOf('E', { right: back() }),
+    barOf('F'),
+  ]
+  assert.deepEqual(order(bars), [1, 2, 2, 3, 2, 3, 4])
+})
+
+test('timeline: a double bar line inside a section with a forward sign does not move the repeat', () => {
+  const bars = [
+    barOf('C', { left: '<repeat direction="forward"/>' }),
+    barOf('D', { right: '<bar-style>light-light</bar-style>' }),
+    barOf('E', { right: '<repeat direction="backward"/>' }),
+    barOf('F'),
+  ]
+  assert.deepEqual(order(bars), [1, 2, 3, 1, 2, 3, 4])
+})
+
 test('timeline: no repeats means one pass in score order; bar positions are exact beats', () => {
   const timeline = tenorTimeline(scoreOf([barOf('C'), barOf('D')]))
   assert.deepEqual(

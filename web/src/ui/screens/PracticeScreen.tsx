@@ -193,6 +193,7 @@ function Practising({ opened }: { opened: Opened }) {
             incrementDisabled={tempo >= TEMPO_MAX}
             onDecrement={() => session.setTempo(tempo - 1)}
             onIncrement={() => session.setTempo(tempo + 1)}
+            repeat
           />
           <button type="button" class="metronome-toggle" aria-pressed={metronome} aria-label={t('practice.metronome')} onClick={() => session.toggleMetronome()}>
             <Icon name="metronome" />

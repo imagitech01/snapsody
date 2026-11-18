@@ -268,6 +268,29 @@ test('practise: the tempo and the metronome are set at once and remembered; Rest
     await metronome.click()
     assert.equal(await metronome.getAttribute('aria-pressed'), 'true')
 
+    // Holding a button keeps stepping, faster the longer it is held; letting go stops it (and does not step once more).
+    await freeze(page)
+    await faster.hover()
+    await page.mouse.down()
+    assert.equal(await tempoOf(page), '62', 'a press steps at once')
+    await page.clock.runFor(350)
+    assert.equal(await tempoOf(page), '62', 'a short press steps once')
+    await page.clock.runFor(650) // 1 s held: repeats at 400, 550, 685, 806 and 916 ms
+    assert.equal(await tempoOf(page), '67')
+    await page.mouse.up()
+    await page.clock.runFor(1000)
+    assert.equal(await tempoOf(page), '67', 'letting go stops it')
+    // Held down to the end of the range: it stops there, with the button disabled.
+    await slower.hover()
+    await page.mouse.down()
+    await page.clock.runFor(10_000)
+    await page.mouse.up()
+    assert.equal(await tempoOf(page), '30')
+    assert.equal(await slower.isDisabled(), true)
+    await faster.click()
+    assert.equal(await tempoOf(page), '31', 'a click after a hold steps once')
+    await page.clock.resume()
+
     // The ends of the range disable the buttons (30 to 200).
     while (!(await slower.isDisabled())) await slower.click()
     assert.equal(await tempoOf(page), '30')

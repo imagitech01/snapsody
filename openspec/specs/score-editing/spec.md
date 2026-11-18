@@ -53,6 +53,10 @@ The user SHALL be able to change the piece's key signature, time signature and t
 - **WHEN** the user changes the key signature from no sharps to one sharp
 - **THEN** every F without its own accidental is treated as F♯ in display and playback
 
+#### Scenario: Hold to change the tempo marking quickly
+- **WHEN** the user holds a button of the tempo marking down and then undoes
+- **THEN** the marking keeps changing while the button is held, and one undo takes the whole hold back
+
 ### Requirement: Edits keep bars consistent
 After each edit, the app SHALL re-run the bar-length check and SHALL mark the bars that no longer add up, without blocking the edit.
 

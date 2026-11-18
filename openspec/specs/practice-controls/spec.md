@@ -24,6 +24,10 @@ The user SHALL be able to set any tempo from 30 to 200 beats per minute. Changin
 - **WHEN** the user changes the tempo during playback in bar 6
 - **THEN** playback continues from the current note at the new tempo
 
+#### Scenario: Hold to change quickly
+- **WHEN** the user holds the Faster or Slower button down
+- **THEN** the tempo keeps changing by one beat per minute, faster the longer the button is held, until the button is let go or the end of the range is reached
+
 ### Requirement: Default and remembered tempo
 A piece SHALL start at the tempo given by its metronome mark, or else a typical tempo for its tempo word (for example Moderato), or else 80 beats per minute. Tempo markings come from the user (score-editing), since recognition does not read them. The tempo the user last chose for a piece SHALL be remembered for that piece.
 

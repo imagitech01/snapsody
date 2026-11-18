@@ -14,8 +14,11 @@ import { Chip, SelectField } from './controls.tsx'
  */
 export interface ToolProps {
   session: EditorSession
-  /** Runs an edit of the score as one undo step; when it cannot be done, the reason is shown instead. */
-  run: (edit: (score: Score) => unknown, failure?: FailureKey) => void
+  /**
+   * Runs an edit of the score as one undo step, or with `amend` as part of the last one (the steps of a
+   * held button); when it cannot be done, the reason is shown instead.
+   */
+  run: (edit: (score: Score) => unknown, failure?: FailureKey, options?: { amend?: boolean }) => void
 }
 
 /** The texts that say why a change did not happen (none of them has a parameter). */

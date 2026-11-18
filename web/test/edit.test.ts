@@ -216,6 +216,24 @@ test('session: undo of a delete restores the note with the same id; redo deletes
   assert.equal(session.canRedo, false)
 })
 
+test('session: an amending edit is undone together with the one before it (a held button)', () => {
+  const session = new EditSession(three())
+  const before = serializeMusicXml(session.score)
+  session.apply((sc) => ed.stepPitch(sc, 'a', 1))
+  const first = serializeMusicXml(session.score)
+  session.apply((sc) => ed.stepPitch(sc, 'b', 1))
+  session.apply((sc) => ed.stepPitch(sc, 'b', 1), { amend: true })
+  session.apply((sc) => ed.stepPitch(sc, 'b', 1), { amend: true })
+  session.undo()
+  assert.equal(serializeMusicXml(session.score), first, 'the three steps of b are one undo step')
+  session.undo()
+  assert.equal(serializeMusicXml(session.score), before)
+  assert.equal(session.canUndo, false)
+  // With nothing to amend, it is an undo step of its own.
+  session.apply((sc) => ed.stepPitch(sc, 'a', 1), { amend: true })
+  assert.equal(session.canUndo, true)
+})
+
 test('session: a failed edit changes nothing and is not an undo step', () => {
   const session = new EditSession(three())
   const before = serializeMusicXml(session.score)

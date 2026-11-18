@@ -1,5 +1,5 @@
 import type { Instrument } from '../instruments/instruments.ts'
-import type { Measure, Note, Pitch, Score, TimeSignature, WedgeItem } from '../score/model.ts'
+import type { Barline, Measure, Note, Pitch, Score, TimeSignature, WedgeItem } from '../score/model.ts'
 import { isNote, isWedge } from '../score/model.ts'
 import type { Frac } from '../score/rational.ts'
 import { ZERO, add, cmp, frac, mul, sub } from '../score/rational.ts'
@@ -212,10 +212,16 @@ export interface PlayedBar {
   pass: number
 }
 
+const DOUBLE_BAR_STYLES = new Set(['light-light', 'light-heavy', 'heavy-light', 'heavy-heavy'])
+
+const isDoubleBar = (b: Barline | undefined): boolean => !!b && !b.repeat && !!b.style && DOUBLE_BAR_STYLES.has(b.style)
+
 /**
  * The order in which the bars are played. A backward repeat sends playback back to the last forward
- * repeat (or the start, or just after the previous backward repeat) until it has been played `times`
- * times (default 2); a measure inside a numbered ending is played only on the passes it names.
+ * repeat until it has been played `times` times (default 2); without a forward repeat it goes back to
+ * the last double bar line, or else the start. A backward repeat is not itself a place to go back to.
+ * A repeat that was already played in full is not taken again when a later repeat goes back over it.
+ * A measure inside a numbered ending is played only on the passes it names.
  * D.C./D.S./coda are not followed.
  */
 export function expandMeasureOrder(measures: Measure[]): PlayedBar[] {
@@ -224,6 +230,11 @@ export function expandMeasureOrder(measures: Measure[]): PlayedBar[] {
   const guard = measures.length * 200 + 1000
   let sectionStart = 0
   let sectionPass = 1
+  // A forward repeat in the current section: a double bar line inside it (a key change, say) does
+  // not move the place the repeat goes back to.
+  let forwardSign = false
+  // The furthest bar reached: a backward repeat before it was already played in full.
+  let furthest = 0
   let i = 0
   let jumped = false
   while (i < measures.length && order.length < guard) {
@@ -231,6 +242,9 @@ export function expandMeasureOrder(measures: Measure[]): PlayedBar[] {
     if (!jumped && m.leftBarline?.repeat === 'forward') {
       sectionStart = i
       sectionPass = 1
+      forwardSign = true
+    } else if (!jumped && !forwardSign && sectionPass === 1 && i > 0 && (isDoubleBar(m.leftBarline) || isDoubleBar(measures[i - 1]!.rightBarline))) {
+      sectionStart = i
     }
     jumped = false
     const ending = endings[i]
@@ -239,7 +253,9 @@ export function expandMeasureOrder(measures: Measure[]): PlayedBar[] {
       continue
     }
     order.push({ barIndex: i, pass: sectionPass })
-    if (m.rightBarline?.repeat === 'backward') {
+    const replaying = i < furthest
+    furthest = Math.max(furthest, i)
+    if (m.rightBarline?.repeat === 'backward' && !replaying) {
       const times = Math.max(1, m.rightBarline.times ?? 2)
       if (sectionPass < times) {
         sectionPass++
@@ -247,12 +263,15 @@ export function expandMeasureOrder(measures: Measure[]): PlayedBar[] {
         jumped = true
         continue
       }
-      sectionStart = i + 1
+      // The section is over; the next repeat without a forward sign goes back to where this one did,
+      // unless a forward repeat or a double bar line comes first.
       sectionPass = 1
+      forwardSign = false
     } else if (ending && m.rightBarline?.ending && m.rightBarline.ending.type !== 'start') {
       // The last ending of a section was played without a repeat sign: the section is over.
       sectionStart = i + 1
       sectionPass = 1
+      forwardSign = false
     }
     i++
   }

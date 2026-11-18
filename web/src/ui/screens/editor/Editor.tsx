@@ -92,10 +92,10 @@ export function Editor({ session }: { session: EditorSession }) {
     setMessage(null)
   }
 
-  /** Runs an edit as one undo step; an edit that cannot be done says why and changes nothing. */
-  const run = (edit: (score: Score) => unknown, failure: FailureKey = 'editor.error.edit'): void => {
+  /** Runs an edit as one undo step (or as part of the last, `amend`); an edit that cannot be done says why and changes nothing. */
+  const run = (edit: (score: Score) => unknown, failure: FailureKey = 'editor.error.edit', options: { amend?: boolean } = {}): void => {
     try {
-      session.apply(edit)
+      session.apply(edit, options)
       setMessage(null)
       setSaveError(null)
     } catch (error) {

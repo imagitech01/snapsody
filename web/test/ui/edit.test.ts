@@ -470,6 +470,17 @@ test('edit: the Score tab changes the key and the time signature, which draws th
     assert.equal(await textOf(tempo.getByRole('status')), '64 BPM')
     await tempo.getByRole('button', { name: 'Lower the written tempo' }).click()
     assert.equal(await textOf(tempo.getByRole('status')), '62 BPM')
+    // Held down, it keeps stepping, and the whole hold is one undo step.
+    const now = await page.evaluate(() => Date.now())
+    await page.clock.pauseAt(new Date(now + 10))
+    await tempo.getByRole('button', { name: 'Raise the written tempo' }).hover()
+    await page.mouse.down()
+    await page.clock.runFor(1000) // the press and repeats at 400, 550, 685, 806 and 916 ms
+    await page.mouse.up()
+    assert.equal(await textOf(tempo.getByRole('status')), '74 BPM')
+    await page.getByRole('button', { name: 'Undo' }).click()
+    assert.equal(await textOf(tempo.getByRole('status')), '62 BPM', 'one undo takes the whole hold back')
+    await page.clock.resume()
     await save(page).click()
     await onScreen(page, 'practice')
     assert.match((await app.file(`pieces/${ode}/${JSON.parse((await app.file(`pieces/${ode}/piece.json`))!).score}`)) ?? '', /<per-minute>62<\/per-minute>/)

@@ -9,7 +9,8 @@ import type { ToolProps } from './NoteTab.tsx'
  * The Score tab (frame 06.3, spec `score-editing` "Flags shown for review", design D14): what holds for the
  * whole score. The key signature, the time signature and the written tempo, all at the start of the piece
  * (what `core/score/edit.ts` changes). The tempo is the metronome mark printed in the book, in steps of two
- * beats per minute; the speed the user practises at is separate and is not changed here.
+ * beats per minute (holding a button keeps stepping, as one undo step); the speed the user practises at is
+ * separate and is not changed here.
  */
 
 /** The time signatures offered, as "beats/beat type"; the one the piece has is added when it is none of these. */
@@ -33,8 +34,11 @@ export function ScoreTab({ session, run }: ToolProps) {
 
   const keyLabel = (n: number): string => (n === 0 ? t('key.none') : n > 0 ? t('key.sharps', { count: n }) : t('key.flats', { count: -n }))
 
-  /** Moves the written tempo a step; with none yet it starts from the tempo the piece plays at now, counted in quarter notes. */
-  const step = (direction: 1 | -1): void => {
+  /**
+   * Moves the written tempo a step; with none yet it starts from the tempo the piece plays at now, counted in quarter notes.
+   * The steps of a held button (`repeated`) are one undo step with the first.
+   */
+  const step = (direction: 1 | -1, repeated: boolean): void => {
     const setup = tempoSetup(score)
     const base = written ?? Math.round((setup.defaultBpm * setup.unit.n) / setup.unit.d)
     const perMinute = clampTempo(base + direction * TEMPO_STEP)
@@ -45,6 +49,8 @@ export function ScoreTab({ session, run }: ToolProps) {
         ...(written !== undefined && marking?.beatUnit ? { beatUnit: marking.beatUnit } : {}),
         ...(written !== undefined && marking?.beatUnitDots ? { beatUnitDots: marking.beatUnitDots } : {}),
       }),
+      undefined,
+      { amend: repeated },
     )
   }
 
@@ -83,8 +89,9 @@ export function ScoreTab({ session, run }: ToolProps) {
         incrementLabel={t('score.tempo.higher')}
         decrementDisabled={!first || (written !== undefined && written <= clampTempo(0))}
         incrementDisabled={!first || (written !== undefined && written >= clampTempo(1000))}
-        onDecrement={() => step(-1)}
-        onIncrement={() => step(1)}
+        onDecrement={(repeated) => step(-1, repeated)}
+        onIncrement={(repeated) => step(1, repeated)}
+        repeat
       />
       <p class="editor-hint editor-hint--wide">{t('score.tempoHint')}</p>
     </div>

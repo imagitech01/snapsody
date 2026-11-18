@@ -253,12 +253,13 @@ export class EditorSession {
   /**
    * Applies an edit of `core/score/edit.ts` to the working score, as one undo step, and returns
    * what it returned. When that is the id of a note in the score (`insertNote`, `deleteNote`), the
-   * note is selected. Throws, changing nothing, when the edit throws (an `EditError` to show).
+   * note is selected. Throws, changing nothing, when the edit throws (an `EditError` to show). With
+   * `amend`, it is part of the last undo step (the steps of a held button are undone together).
    *
    *   session.apply((s) => stepPitch(s, id, -1))
    */
-  apply<T>(edit: (score: Score) => T): T {
-    const result = this.session.apply(edit)
+  apply<T>(edit: (score: Score) => T, options: { amend?: boolean } = {}): T {
+    const result = this.session.apply(edit, options)
     this.changed()
     if (typeof result === 'string' && findNote(this.session.score, result)) this.select(result)
     return result

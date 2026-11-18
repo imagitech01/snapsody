@@ -59,11 +59,19 @@ Playback SHALL play louder or softer according to printed dynamic marks (at leas
 - **THEN** each of the four notes sounds louder than the one before
 
 ### Requirement: Repeats followed
-Playback SHALL follow repeat signs and first/second endings in the order a player would. D.C., D.S., Coda and Fine instructions are outside this change and SHALL be played straight through.
+Playback SHALL follow repeat signs and first/second endings in the order a player would. An end-repeat sign SHALL send playback back to the last start-repeat sign. Without one, it goes back to the last double bar line, or else to the beginning. An end-repeat sign is never a place to go back to. A section SHALL be played twice unless a number of times is given. D.C., D.S., Coda and Fine instructions are outside this change and SHALL be played straight through.
 
 #### Scenario: Simple repeat
 - **WHEN** an exercise has bars 1–2, an end-repeat sign, then bar 3
 - **THEN** playback order is bars 1, 2, 1, 2, 3
+
+#### Scenario: End-repeat after a double bar line
+- **WHEN** an exercise has bar 1 with an end-repeat sign, bar 2, a double bar line, then bar 3 with an end-repeat sign and bar 4, and no start-repeat signs
+- **THEN** playback order is bars 1, 1, 2, 3, 3, 4
+
+#### Scenario: Two end-repeats without start-repeat signs
+- **WHEN** an exercise has bar 1 with an end-repeat sign, bar 2 with an end-repeat sign, then bar 3, and no start-repeat signs or double bar lines
+- **THEN** playback order is bars 1, 1, 2, 1, 2, 3
 
 #### Scenario: First and second endings
 - **WHEN** an exercise has a repeated section with a first and a second ending

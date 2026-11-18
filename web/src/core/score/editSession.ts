@@ -25,11 +25,14 @@ export class EditSession {
     return this.redoStack.length > 0
   }
 
-  /** Applies an edit; returns what the edit returned. Throws (changing nothing) when the edit does. */
-  apply<T>(edit: (score: Score) => T): T {
+  /**
+   * Applies an edit; returns what the edit returned. Throws (changing nothing) when the edit does. With
+   * `amend`, the edit carries on the last one (a button held down) and is undone together with it.
+   */
+  apply<T>(edit: (score: Score) => T, { amend = false }: { amend?: boolean } = {}): T {
     const copy = structuredClone(this.current)
     const result = edit(copy)
-    this.undoStack.push(this.current)
+    if (!amend || this.undoStack.length === 0) this.undoStack.push(this.current)
     this.current = copy
     this.redoStack = []
     return result
