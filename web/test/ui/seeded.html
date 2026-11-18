@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self'" />
+    <!-- The page lives in test/ui/, but the sample folders are served from the root (samples/<instrument>/): the player
+         resolves them against the page's base, as it does at the root on the phone. -->
+    <base href="/" />
+    <title>Snapsody (UI tests)</title>
+    <link rel="stylesheet" href="../../src/ui/styles/index.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./seeded.tsx"></script>
+  </body>
+</html>

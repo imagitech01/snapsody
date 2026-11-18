@@ -1,0 +1,122 @@
+Snapsody
+Copyright (C) 2026 the Snapsody authors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3 (see LICENSE).
+It is licensed under AGPL-3.0 because it includes homr, which is AGPL-3.0.
+
+The app bundles the third-party components below. Each licence was checked
+against the project's upstream repository or package metadata on 2026-11-17.
+
+Optical music recognition
+-------------------------
+homr 0.7.1 - AGPL-3.0
+  https://github.com/liebharc/homr
+  Vendored with a small patch set in vendor/homr (see vendor/PATCHES.md);
+  licence text in vendor/homr-licenses/.
+  homr's model weights (segnet, transformer encoder and decoder, bundled as
+  app assets) were partly trained on datasets with non-commercial terms
+  (for example Camera-PrIMuS, CC BY-NC). This is fine for this free app, and
+  must be reviewed before any commercial use.
+
+Score rendering
+---------------
+Verovio - LGPL-3.0 (GNU Lesser General Public License v3, with the GPL-3.0 text
+  it refers to)
+  https://github.com/rism-digital/verovio
+
+Model inference
+---------------
+LiteRT (formerly TensorFlow Lite), including its GPU delegate - Apache-2.0
+  https://github.com/google-ai-edge/LiteRT
+ONNX Runtime - MIT
+  https://github.com/microsoft/onnxruntime
+
+Playback samples
+----------------
+MuseScore_General 0.2 (MuseScore_General.sf2, SHA-256
+  ee51d2c4b1525e70f19a45909c4fd7a2e26d91d115fa89dbf5a6bc413d8b9bf3) - MIT License
+  https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/
+  The samples of seven General MIDI instruments (Tenor Sax, Alto Sax, Clarinet,
+  Grand Piano, Nylon String Guitar, Violin, Trumpet), converted to mono Ogg/Opus
+  by tools/samples/convert_soundfont.py into web/public/samples/ (tenor-sax,
+  alto-sax, clarinet, piano, guitar, violin, trumpet). How the SoundFont was
+  chosen and converted: docs/samples.md.
+
+  The SoundFont's licence file asks that these acknowledgements and copyright
+  notices be included in any derivative work:
+
+    FluidR3 (original version) by Frank Wen Copyright (c) 2000-02
+    Mono conversion (FluidR3Mono) by Michael Cowgill Copyright (c) 2014-17
+    Adaptation for MuseScore_General.sf2 by S. Christian Collins Copyright (c) 2018-19
+    Temple Blocks instrument provided by Ethan Winer Copyright (c) 2002
+    Drumline Cymbals provided by Michael Schorsch Copyright (c) 2016
+
+    MuseScore_General.sf2 is shared under the MIT license as described in COPYING,
+    as was FluidR3Mono and FluidR3 before it.
+
+    Mono version:  Copyright (c) 2014-16 Michael Cowgill
+    Copyright (c) 2000-2002, 2008 Frank Wen <getfrank@gmail.com>
+
+    Permission is hereby granted, free of charge, to any person
+    obtaining a copy of this software and associated documentation
+    files (the "Software"), to deal in the Software without
+    restriction, including without limitation the rights to use,
+    copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following
+    conditions:
+
+    The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+    OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+    OTHER DEALINGS IN THE SOFTWARE.
+
+  Of the samples used here, the piano is "Splendid Grand" for AKAI S5000, edited
+  by S. Christian Collins (public domain, confirmed with AKAI according to the
+  SoundFont's sample list). The trumpet is credited there as uncredited and public
+  domain. The saxophones, clarinet, guitar and violin are FluidR3 samples (the
+  original FluidR3 readme thanks Scott Hanan, Steve Aupperle and Chris Gillman for
+  the saxophones and Chris Prola for the clarinet).
+
+Python on Android
+-----------------
+Chaquopy - MIT
+  https://github.com/chaquo/chaquopy
+Python (CPython) 3.10 - PSF-2.0 (Python Software Foundation License Version 2)
+  https://www.python.org/
+numpy 1.26.2 - BSD-3-Clause
+  https://numpy.org/
+OpenCV 4.5.1 - Apache-2.0; opencv-python packaging - MIT
+  https://opencv.org/ , https://github.com/opencv/opencv-python
+Pillow - MIT-CMU (HPND)
+  https://python-pillow.org/
+typing_extensions - PSF-2.0
+  https://github.com/python/typing_extensions
+
+Android runtime libraries
+-------------------------
+All Apache-2.0 (licences read from their published Maven POMs):
+  - Kotlin standard library and kotlinx (coroutines, serialization)
+    https://kotlinlang.org/
+  - AndroidX: core, activity, webkit, lifecycle, savedstate, collection,
+    annotation, arch-core, startup, tracing, profileinstaller,
+    versionedparcelable, interpolator, navigationevent, concurrent-futures,
+    compose runtime-annotation
+    https://developer.android.com/jetpack/androidx
+  - Guava listenablefuture, JetBrains annotations, JSpecify
+
+Page capture
+------------
+Google ML Kit Document Scanner - proprietary, closed source, distributed through
+  Google Play services under the ML Kit Terms of Service
+  https://developers.google.com/ml-kit/terms
+  This component is not free software. It sits behind the PageSource interface
+  so an open implementation can replace it (for example for F-Droid).

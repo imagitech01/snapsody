@@ -1,0 +1,104 @@
+{
+ "format": 1,
+ "name": "Violin, from MuseScore_General 0.2, GM 41 \"Violin\"",
+ "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md.",
+ "source": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+ "notes": {
+  "55": {
+   "file": "55.ogg",
+   "sustainStart": 1.333104167,
+   "sustainEnd": 1.720979167,
+   "gain": 0.2855
+  },
+  "58": {
+   "file": "58.ogg",
+   "sustainStart": 1.121020833,
+   "sustainEnd": 1.4471875,
+   "gain": 0.2855
+  },
+  "61": {
+   "file": "61.ogg",
+   "sustainStart": 0.7131875,
+   "sustainEnd": 1.024666667,
+   "gain": 0.3584
+  },
+  "64": {
+   "file": "64.ogg",
+   "sustainStart": 0.658604167,
+   "sustainEnd": 1.004645833,
+   "gain": 0.283
+  },
+  "67": {
+   "file": "67.ogg",
+   "sustainStart": 1.025645833,
+   "sustainEnd": 1.362166667,
+   "gain": 0.3457
+  },
+  "70": {
+   "file": "70.ogg",
+   "sustainStart": 0.992625,
+   "sustainEnd": 1.306,
+   "gain": 0.3053
+  },
+  "73": {
+   "file": "73.ogg",
+   "sustainStart": 1.627395833,
+   "sustainEnd": 1.995333333,
+   "gain": 0.3431
+  },
+  "76": {
+   "file": "76.ogg",
+   "sustainStart": 1.058666667,
+   "sustainEnd": 1.455645833,
+   "gain": 0.3164
+  },
+  "79": {
+   "file": "79.ogg",
+   "sustainStart": 1.037458333,
+   "sustainEnd": 1.406625,
+   "gain": 0.4404
+  },
+  "82": {
+   "file": "82.ogg",
+   "sustainStart": 1.400020833,
+   "sustainEnd": 1.77775,
+   "gain": 0.3312
+  },
+  "85": {
+   "file": "85.ogg",
+   "sustainStart": 1.395604167,
+   "sustainEnd": 1.772020833,
+   "gain": 0.4719
+  },
+  "88": {
+   "file": "88.ogg",
+   "sustainStart": 1.223875,
+   "sustainEnd": 1.593895833,
+   "gain": 0.3574
+  },
+  "91": {
+   "file": "91.ogg",
+   "sustainStart": 1.023354167,
+   "sustainEnd": 1.400645833,
+   "gain": 0.4758
+  },
+  "94": {
+   "file": "94.ogg",
+   "sustainStart": 0.8623125,
+   "sustainEnd": 1.229166667,
+   "gain": 0.3316
+  },
+  "97": {
+   "file": "97.ogg",
+   "sustainStart": 0.609645833,
+   "sustainEnd": 1.001770833,
+   "gain": 0.5239
+  },
+  "100": {
+   "file": "100.ogg",
+   "sustainStart": 0.512645833,
+   "sustainEnd": 0.842375,
+   "gain": 0.5258
+  }
+ }
+}

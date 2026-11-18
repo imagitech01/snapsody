@@ -1,0 +1,201 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'com.chaquo.python'
+
+// The repository root (android/app -> ../..).
+def repo = rootProject.file('..')
+def web = new File(repo, 'web')
+
+// The packaged recognition models (tools/models/package_models.py, git-ignored). A worktree points
+// at the main checkout's copy with -Pia.modelAssets=<dir> instead of copying 150 MB.
+def modelAssets = findProperty('ia.modelAssets')?.with { new File(it.toString()) } ?: new File(repo, 'android/model-assets')
+
+android {
+    namespace = "app.snapsody"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "app.snapsody"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "0.1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+        ndk {
+            // Chaquopy's Python is native; the S24, the emulator and the target devices are arm64.
+            abiFilters 'arm64-v8a'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    androidResources {
+        // Models are memory-mapped by LiteRT / ONNX Runtime: keep them uncompressed.
+        noCompress += ['tflite', 'onnx']
+    }
+    sourceSets {
+        main {
+            // Used in place, so the 150 MB are not copied.
+            assets.srcDirs += modelAssets
+        }
+    }
+    testOptions {
+        // Plain JVM unit tests (src/test, docs/testing.md): android.util.Log and other platform
+        // stubs return defaults instead of throwing.
+        unitTests.returnDefaultValues = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        // Same as Capacitor's Java 21 (capacitor.build.gradle).
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+    }
+}
+
+/*
+ * The web layer (web/) is what Capacitor serves. `npm run sync:android` in web/ builds it (TypeScript
+ * check and Vite, into web/dist, Capacitor's webDir) and runs `cap sync android`, which copies it to
+ * src/main/assets/public/ and writes capacitor.config.json and capacitor.plugins.json (the npm
+ * plugins Capacitor registers) next to it. Runs before the assets are merged, so an APK always
+ * carries the current web build; the JVM unit tests (make test-quick) do not need it.
+ */
+def capacitorCli = new File(repo, 'tools/capacitor/node_modules/@capacitor/cli/bin/capacitor')
+def syncWeb = tasks.register('syncWeb', Exec) {
+    description = 'Builds web/ and copies it into the app with cap sync.'
+    workingDir web
+    commandLine 'npm', 'run', '-s', 'sync:android'
+    inputs.files(fileTree(new File(web, 'src')), fileTree(new File(web, 'public')))
+        .withPropertyName('webSources').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(['index.html', 'package.json', 'package-lock.json', 'capacitor.config.json', 'vite.config.ts', 'tsconfig.json']
+        .collect { new File(web, it) }).withPropertyName('webConfig').withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.dir('src/main/assets/public')
+    outputs.file('src/main/assets/capacitor.config.json')
+    outputs.file('src/main/assets/capacitor.plugins.json')
+    doFirst {
+        if (!capacitorCli.exists()) {
+            throw new GradleException("The Capacitor CLI is not installed. Run: (cd tools/capacitor && npm ci)")
+        }
+    }
+}
+
+/*
+ * Stages the vendored homr (vendor/homr) for Chaquopy without model files, compile caches or
+ * __pycache__ (models ship as app assets).
+ */
+def syncHomr = tasks.register('syncHomrPython', Sync) {
+    from(new File(repo, 'vendor/homr')) {
+        exclude '**/*.onnx', '**/*.coreml_cache/**', '**/__pycache__/**', '**/*.pyc'
+    }
+    into(layout.buildDirectory.dir('generated/python/homr'))
+}
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('PythonSources') }.configureEach { dependsOn(syncHomr) }
+
+chaquopy {
+    defaultConfig {
+        // The versions Chaquopy offers with OpenCV (archived photo-to-practice-mvp, gate-results.md "3.1").
+        version = "3.10"
+        // Build machine Python 3.10 (pip resolution and .pyc compilation). A worktree passes the main
+        // checkout's with -Pia.buildPython=<path>.
+        def buildPy = findProperty('ia.buildPython') ?: new File(repo, '.venv-py310/bin/python').with { it.exists() ? it.path : null }
+        if (buildPy) buildPython(buildPy)
+        pip {
+            install("numpy==1.26.2")
+            install("opencv-python==4.5.1.48")
+            install("pillow==11.0.0")
+            install("typing_extensions==4.16.0")
+        }
+        pyc {
+            // Keep source text in stack traces.
+            src = false
+        }
+    }
+    sourceSets {
+        main {
+            srcDir(layout.buildDirectory.dir('generated/python'))
+        }
+    }
+}
+
+def modelManifest = new File(modelAssets, 'models/models.json')
+def checkModelAssets = tasks.register('checkModelAssets') {
+    doLast {
+        def howTo = "Build and package the models first:\n" +
+            "  .venv-convert/bin/python -I tools/models/build_segnet.py --onnx <homr segnet fp16 onnx>\n" +
+            "  .venv-convert/bin/python -I tools/models/make_selftest_tile.py\n" +
+            "  python3 tools/models/package_models.py\n" +
+            "or point at packaged models elsewhere with -Pia.modelAssets=<dir>."
+        if (!modelManifest.exists()) throw new GradleException("Missing ${modelManifest}. ${howTo}")
+        def text = modelManifest.text
+        ['segnet', 'encoder', 'decoder', 'selftest_tile', 'selftest_reference'].each { role ->
+            if (!text.contains("\"role\": \"${role}\"")) throw new GradleException("${modelManifest} has no '${role}' entry. ${howTo}")
+        }
+    }
+}
+// On the asset merge, not preBuild: an APK without the models or the web build still fails, while
+// the JVM unit tests (make test-quick) run without either.
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') && !it.name.contains('UnitTest') }.configureEach {
+    dependsOn(checkModelAssets)
+    dependsOn(syncWeb)
+}
+
+// JVM unit tests name each failing test and show why (make test-quick, docs/testing.md).
+def bridgeFixtures = new File(repo, 'fixtures/bridge')
+tasks.withType(Test).configureEach {
+    // The plugin contract examples (fixtures/bridge/); an edited example reruns the tests.
+    inputs.dir(bridgeFixtures).withPropertyName('bridgeFixtures').withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty 'bridgeFixtures', bridgeFixtures.path
+    // At the quiet level, so the failures also show under make's `gradlew -q`.
+    testLogging {
+        quiet {
+            events 'failed', 'skipped'
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.core:core-ktx:$androidxCoreVersion"
+    implementation "androidx.activity:activity-ktx:$androidxActivityVersion"
+    implementation project(':capacitor-android')
+
+    // Model inference: segnet on LiteRT (GPU delegate or XNNPACK CPU), the transformer encoder and
+    // decoder on ONNX Runtime (CPU). LiteRT 1.4.x: the classic Interpreter + OpenCL GpuDelegate
+    // validated by the archived GPU pilot.
+    implementation 'com.google.ai.edge.litert:litert:1.4.2'
+    implementation 'com.google.ai.edge.litert:litert-gpu:1.4.2'
+    implementation 'com.google.ai.edge.litert:litert-gpu-api:1.4.2'
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.31.1'
+
+    // The Scanner plugin: ML Kit Document Scanner through Google Play services (proprietary; behind
+    // the plugin, so an open implementation can replace it).
+    implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0'
+
+    // JVM unit tests. The android.jar org.json is a stub, so the real one is added.
+    testImplementation "junit:junit:$junitVersion"
+    testImplementation 'org.json:json:20260814'
+    // The device smoke test (src/androidTest, docs/testing.md "Device layer"): ActivityScenario and
+    // the instrumentation runner. It drives the WebView with evaluateJavascript, so no Espresso.
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test:runner:$androidxTestRunnerVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'

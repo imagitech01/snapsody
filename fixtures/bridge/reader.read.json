@@ -1,0 +1,16 @@
+{
+  "plugin": "Reader",
+  "method": "read",
+  "description": "Reads the pages (data-relative paths, as Scanner.scan returns them) in order, as ONE job under one foreground service. The caller names the job (jobId) and listens to readerEvent before calling, so it misses no event. One job at a time.",
+  "request": {
+    "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b",
+    "pages": ["scans/f8cfbf27-3a1d-4c55-9b0e-2d7f6a1c9e40/page-1.jpg", "scans/f8cfbf27-3a1d-4c55-9b0e-2d7f6a1c9e40/page-2.jpg"]
+  },
+  "reply": { "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b" },
+  "errors": [
+    { "code": "invalid", "request": { "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b", "pages": [] }, "description": "No pages." },
+    { "code": "invalid", "request": { "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b", "pages": ["../outside.jpg"] }, "description": "A path the port does not accept." },
+    { "code": "not-found", "request": { "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b", "pages": ["scans/missing/page-1.jpg"] }, "description": "A page image that is not there." },
+    { "code": "failed", "description": "Another job is still running." }
+  ]
+}

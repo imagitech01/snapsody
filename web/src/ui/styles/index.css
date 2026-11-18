@@ -1,0 +1,11 @@
+/* The app's stylesheet (practice-app D3: plain CSS, design tokens as custom properties). It is linked
+   from index.html and from the component gallery (dev/gallery.html), never imported from a .ts file.
+   Order matters: tokens, then the base, then components, then the screens, then the score island, then the practice screen and its sheets. */
+@import './tokens.css';
+@import './base.css';
+@import './components.css';
+@import './screens.css';
+@import './score.css';
+@import './practice.css';
+@import './addMusic.css';
+@import './editor.css';

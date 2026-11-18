@@ -1,0 +1,7 @@
+{
+  "plugin": "Reader",
+  "event": "readerEvent",
+  "description": "Reading a page failed (an error in recognition). The job goes on with the next page (port.ts ReaderEvent).",
+  "payload": { "type": "failed", "page": 1, "pages": 2, "message": "The reading failed", "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b" },
+  "shape": { "optional": ["payload.jobId"], "enum": { "payload.type": ["failed"] } }
+}

@@ -1,0 +1,63 @@
+{
+  "soundfont": {
+    "title": "MuseScore_General 0.2",
+    "file": "MuseScore_General.sf2",
+    "url": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+    "sha256": "ee51d2c4b1525e70f19a45909c4fd7a2e26d91d115fa89dbf5a6bc413d8b9bf3",
+    "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md."
+  },
+  "defaults": {
+    "bank": 0,
+    "step": 3,
+    "velocity": 64,
+    "opusKbps": 80
+  },
+  "instruments": {
+    "tenor-sax": {
+      "name": "Tenor saxophone",
+      "gmProgram": 67,
+      "presetName": "Tenor Sax",
+      "range": [44, 76]
+    },
+    "alto-sax": {
+      "name": "Alto saxophone",
+      "gmProgram": 66,
+      "presetName": "Alto Sax",
+      "range": [49, 81]
+    },
+    "clarinet": {
+      "name": "B-flat clarinet",
+      "gmProgram": 72,
+      "presetName": "Clarinet",
+      "range": [50, 94]
+    },
+    "piano": {
+      "name": "Piano",
+      "gmProgram": 1,
+      "presetName": "Grand Piano",
+      "range": [21, 108],
+      "attack": "always",
+      "credit": "Piano samples: \"Splendid Grand\" for AKAI S5000, edited by S. Christian Collins; public domain (confirmed with AKAI)."
+    },
+    "guitar": {
+      "name": "Guitar (nylon)",
+      "gmProgram": 25,
+      "presetName": "Nylon String Guitar",
+      "range": [40, 71],
+      "attack": "always"
+    },
+    "violin": {
+      "name": "Violin",
+      "gmProgram": 41,
+      "presetName": "Violin",
+      "range": [55, 100]
+    },
+    "trumpet": {
+      "name": "B-flat trumpet",
+      "gmProgram": 57,
+      "presetName": "Trumpet",
+      "range": [52, 84],
+      "credit": "Trumpet samples: uncredited, public domain (per the SoundFont's sample sources list)."
+    }
+  }
+}

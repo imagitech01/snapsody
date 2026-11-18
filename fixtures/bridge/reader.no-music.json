@@ -1,0 +1,7 @@
+{
+  "plugin": "Reader",
+  "event": "readerEvent",
+  "description": "No music was found on a page (homr found no staffs, or no noteheads or clefs). The job goes on with the next page (port.ts ReaderEvent).",
+  "payload": { "type": "no-music", "page": 1, "pages": 2, "message": "No noteheads or clefs found", "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b" },
+  "shape": { "optional": ["payload.jobId", "payload.message"], "enum": { "payload.type": ["no-music"] } }
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Snapsody</string>
+    <string name="title_activity_main">Snapsody</string>
+    <string name="package_name">app.snapsody</string>
+    <string name="custom_url_scheme">app.snapsody</string>
+</resources>

@@ -1,0 +1,10 @@
+{
+  "plugin": "Reader",
+  "event": "readerEvent",
+  "description": "Progress within one page (port.ts ReaderEvent). The first page starts with stage queued at 0; the fraction goes from 0 to 1 within the page and never moves backwards. jobId is on the wire only: the adapter strips it.",
+  "payload": { "type": "progress", "page": 0, "pages": 2, "stage": "segment", "fraction": 0.23, "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b" },
+  "shape": {
+    "optional": ["payload.jobId"],
+    "enum": { "payload.type": ["progress"], "payload.stage": ["queued", "prepare", "segment", "detect", "read", "write"] }
+  }
+}

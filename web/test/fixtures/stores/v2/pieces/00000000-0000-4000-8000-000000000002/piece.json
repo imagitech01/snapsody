@@ -1,0 +1,67 @@
+{
+  "format": 2,
+  "id": "00000000-0000-4000-8000-000000000002",
+  "name": "Waltz study in G",
+  "created": "2026-11-18T14:05:00.000Z",
+  "lastPracticed": "2026-11-18T16:20:00.000Z",
+  "favorite": true,
+  "score": "score-1.musicxml",
+  "pages": [
+    {
+      "n": 1,
+      "firstBar": 1,
+      "lastBar": 8,
+      "staves": [
+        {
+          "box": {
+            "x": 0.034,
+            "y": 0.16,
+            "width": 0.933,
+            "height": 0.3
+          },
+          "firstBar": 1,
+          "lastBar": 5
+        },
+        {
+          "box": {
+            "x": 0.034,
+            "y": 0.593,
+            "width": 0.541,
+            "height": 0.253
+          },
+          "firstBar": 6,
+          "lastBar": 8
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "firstBar": 9,
+      "lastBar": 14,
+      "staves": [
+        {
+          "box": {
+            "x": 0.034,
+            "y": 0.137,
+            "width": 0.933,
+            "height": 0.309
+          },
+          "firstBar": 9,
+          "lastBar": 13
+        },
+        {
+          "box": {
+            "x": 0.034,
+            "y": 0.593,
+            "width": 0.179,
+            "height": 0.253
+          },
+          "firstBar": 14,
+          "lastBar": 14
+        }
+      ]
+    }
+  ],
+  "repairs": [],
+  "bars": 14
+}

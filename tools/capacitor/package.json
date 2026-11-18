@@ -1,0 +1,9 @@
+{
+  "name": "snapsody-capacitor-cli",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The Capacitor CLI for the Android build (practice-app task 10.1). Kept out of web/ so its @types/node does not reach web's type check. Run from web/ through `npm run cap -- <command>`.",
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2"
+  }
+}

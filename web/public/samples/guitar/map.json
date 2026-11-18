@@ -1,0 +1,53 @@
+{
+ "format": 1,
+ "attack": "always",
+ "name": "Guitar (nylon), from MuseScore_General 0.2, GM 25 \"Nylon String Guitar\"",
+ "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md.",
+ "source": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+ "notes": {
+  "40": {
+   "file": "40.ogg",
+   "gain": 0.3065
+  },
+  "43": {
+   "file": "43.ogg",
+   "gain": 0.3108
+  },
+  "46": {
+   "file": "46.ogg",
+   "gain": 0.2145
+  },
+  "49": {
+   "file": "49.ogg",
+   "gain": 0.2852
+  },
+  "52": {
+   "file": "52.ogg",
+   "gain": 0.2904
+  },
+  "55": {
+   "file": "55.ogg",
+   "gain": 0.2901
+  },
+  "58": {
+   "file": "58.ogg",
+   "gain": 0.2916
+  },
+  "61": {
+   "file": "61.ogg",
+   "gain": 0.3564
+  },
+  "64": {
+   "file": "64.ogg",
+   "gain": 0.3209
+  },
+  "67": {
+   "file": "67.ogg",
+   "gain": 0.3413
+  },
+  "70": {
+   "file": "70.ogg",
+   "gain": 0.4016
+  }
+ }
+}

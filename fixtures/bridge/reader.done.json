@@ -1,0 +1,18 @@
+{
+  "plugin": "Reader",
+  "event": "readerEvent",
+  "description": "A page was read: its raw MusicXML, as homr wrote it (port.ts ReaderEvent). Next to it, when homr's counts add up, where the page's staves are (each box as fractions 0..1 of the page image; the bars it holds, numbered from 1 on the page), and whether the page's time signature was estimated rather than read (design D7).",
+  "payload": {
+    "type": "done",
+    "page": 0,
+    "pages": 2,
+    "musicxml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><score-partwise version=\"4.0\"><part-list/></score-partwise>",
+    "staves": [
+      { "box": { "x": 0.0302, "y": 0.2096, "width": 0.9339, "height": 0.1537 }, "firstBar": 1, "lastBar": 5 },
+      { "box": { "x": 0.0302, "y": 0.6402, "width": 0.5443, "height": 0.1498 }, "firstBar": 6, "lastBar": 8 }
+    ],
+    "timeEstimated": false,
+    "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b"
+  },
+  "shape": { "optional": ["payload.jobId", "payload.staves", "payload.timeEstimated"], "enum": { "payload.type": ["done"] } }
+}

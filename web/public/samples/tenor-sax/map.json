@@ -1,0 +1,80 @@
+{
+ "format": 1,
+ "name": "Tenor saxophone, from MuseScore_General 0.2, GM 67 \"Tenor Sax\"",
+ "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md.",
+ "source": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+ "notes": {
+  "44": {
+   "file": "44.ogg",
+   "sustainStart": 1.9504375,
+   "sustainEnd": 2.491,
+   "gain": 0.3705
+  },
+  "47": {
+   "file": "47.ogg",
+   "sustainStart": 1.640125,
+   "sustainEnd": 2.0946875,
+   "gain": 0.3715
+  },
+  "50": {
+   "file": "50.ogg",
+   "sustainStart": 1.608208333,
+   "sustainEnd": 2.0986875,
+   "gain": 0.3808
+  },
+  "53": {
+   "file": "53.ogg",
+   "sustainStart": 1.271958333,
+   "sustainEnd": 1.673,
+   "gain": 0.339
+  },
+  "56": {
+   "file": "56.ogg",
+   "sustainStart": 1.939229167,
+   "sustainEnd": 2.421145833,
+   "gain": 0.3318
+  },
+  "59": {
+   "file": "59.ogg",
+   "sustainStart": 1.974166667,
+   "sustainEnd": 2.459875,
+   "gain": 0.3654
+  },
+  "62": {
+   "file": "62.ogg",
+   "sustainStart": 2.758645833,
+   "sustainEnd": 3.2564375,
+   "gain": 0.2903
+  },
+  "65": {
+   "file": "65.ogg",
+   "sustainStart": 2.584833333,
+   "sustainEnd": 3.036916667,
+   "gain": 0.4709
+  },
+  "68": {
+   "file": "68.ogg",
+   "sustainStart": 2.046375,
+   "sustainEnd": 2.551104167,
+   "gain": 0.337
+  },
+  "71": {
+   "file": "71.ogg",
+   "sustainStart": 2.301208333,
+   "sustainEnd": 2.792125,
+   "gain": 0.5131
+  },
+  "74": {
+   "file": "74.ogg",
+   "sustainStart": 2.013416667,
+   "sustainEnd": 2.554666667,
+   "gain": 0.5069
+  },
+  "76": {
+   "file": "76.ogg",
+   "sustainStart": 1.793770833,
+   "sustainEnd": 2.275979167,
+   "gain": 0.5067
+  }
+ }
+}

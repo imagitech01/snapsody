@@ -1,0 +1,312 @@
+/* The app's screens (practice-app group 12): the frame that holds a screen and the tab bar, and what the
+   home, library, favorites and settings draw beyond the shared components. Only tokens are used. The spacing
+   is denser than the frames (design D18): gutter 16, a gap of 20 between sections, 8 between rows, 12 to 16
+   inside a card; the frames' own numbers are in the comments where they differ. */
+
+/* ---- The frame ------------------------------------------------------------------------------- */
+
+/* The window is the app: the screen scrolls inside itself, the tab bar stays at the bottom. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+.app-main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-main > .screen {
+  flex: 1;
+  min-height: 0;
+}
+.fatal {
+  padding: calc(var(--safe-top) + var(--space-4)) var(--gutter);
+}
+
+/* The notice: what failed, over the foot of the screen, until the user goes on. */
+.notice {
+  position: absolute;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: var(--space-3);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+.notice-close {
+  flex: none;
+  min-height: var(--tap);
+  margin: calc(var(--space-3) * -1) calc(var(--space-2) * -1) calc(var(--space-3) * -1) 0; /* 44 to touch, in a row of about 40 */
+  padding: 0 var(--space-2);
+  color: var(--danger);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---- Shared by the screens ------------------------------------------------------------------- */
+
+/* A screen opened over another has no tab bar: its Back button sits above the header. */
+.screen-topbar {
+  padding: var(--space-1) var(--gutter) 0;
+}
+
+/* A section title with a link at the end ("In your rotation", "See all"). */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 1.25rem;
+  margin: var(--gap-section) 0 var(--space-3); /* the frames' 32px and 15px */
+}
+.section-head .button--link {
+  margin-block: -0.75rem;
+  /* the frames end the link 8px inside the gutter */
+  margin-right: var(--space-2);
+}
+
+.row-stack {
+  display: grid;
+  gap: var(--gap-list);
+}
+
+/* The label over a group of rows ("3 FAVORITES", "GLOBAL DEFAULT") sits 8px above them. */
+.t-eyebrow + .row-stack,
+.t-eyebrow + .card {
+  margin-top: var(--space-2);
+}
+
+/* The invitation of an empty home or library, and the card of an empty favorites list. */
+.invite-title {
+  font-size: var(--fs-18);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+.invite-body {
+  margin-top: var(--space-2);
+  color: var(--ink-muted);
+  font-size: var(--fs-14);
+}
+.invite-action {
+  margin-top: var(--space-4);
+}
+.invite-hint {
+  margin-top: var(--space-2);
+}
+
+/* The muted note card of frames 07 and 03.2: a title and one or two lines. */
+.note-card {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+.note-icon {
+  flex: none;
+  margin-top: 0.0625rem;
+  color: var(--primary);
+}
+.note-title {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  line-height: 1.25;
+}
+.note-card .note-title {
+  font-size: var(--fs-14);
+}
+.note-title + .note-line {
+  margin-top: var(--space-1);
+}
+.note-line {
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+}
+.card--muted:has(> .note-title) {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+.card--muted:has(> .note-card) {
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+}
+
+/* ---- Home (frame 01) ------------------------------------------------------------------------- */
+
+.continue-eyebrow {
+  color: var(--ink-on-dark-muted);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.continue-title {
+  margin-top: var(--space-2);
+  font-size: var(--fs-20);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.continue-meta {
+  margin-top: var(--space-1);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  line-height: 1.2;
+}
+.continue-note {
+  margin-top: var(--space-1);
+  color: var(--ink-on-dark-muted);
+  font-size: var(--fs-12);
+  line-height: 1.25;
+}
+.continue-action {
+  margin: var(--space-3) -0.25rem -0.25rem;
+}
+.home-rotation .section-head {
+  margin-top: var(--gap-section);
+}
+.home-rotation > .t-caption {
+  margin-top: 0;
+}
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  margin-top: var(--space-3);
+}
+/* "Alle muziek bekijken →" and "Muziek toevoegen" stay on one line each; on a narrower window the two wrap as a pair. */
+.home-actions .button {
+  white-space: nowrap;
+}
+.home-footnote {
+  margin-top: var(--space-3);
+}
+/* With no continue card the rotation starts the page. */
+.screen-body > .home-rotation:first-child .section-head {
+  margin-top: 0;
+}
+
+/* ---- Library (frame 03.1) -------------------------------------------------------------------- */
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--tap);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-button);
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+}
+.search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--fs-14);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.search-input::placeholder {
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+  opacity: 1;
+}
+/* The field has its own clear button. */
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.search-input:focus-visible {
+  outline: none;
+}
+.search-field:has(.search-input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.search-field .icon-button {
+  margin-right: calc(var(--space-3) * -1);
+}
+.library-section .section-head {
+  margin-top: var(--gap-block); /* the frame puts the title 30px below the field */
+}
+.library-empty {
+  padding: var(--space-4) 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-14);
+  overflow-wrap: anywhere;
+}
+.library-add {
+  margin-top: var(--gap-section);
+}
+.library-add .t-caption {
+  margin-top: var(--space-2);
+}
+.library-problem {
+  margin-top: var(--space-2);
+}
+/* The row's trailing buttons: the bin and the star sit together. */
+.list-row--compact .list-row-trailing {
+  margin-right: calc(var(--space-2) * -1);
+}
+
+/* ---- Favorites (frame 03.2) ------------------------------------------------------------------ */
+
+.favorites-section {
+  margin-top: var(--gap-block);
+}
+.favorites-tip {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+/* ---- Settings (frame 07) --------------------------------------------------------------------- */
+
+.settings-section {
+  margin-top: var(--gap-block);
+}
+.credits {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.credits-line {
+  margin-top: var(--space-2);
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.credits-name {
+  margin-top: var(--space-2);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.credits-notices {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.settings-offline {
+  margin-top: var(--space-4);
+}

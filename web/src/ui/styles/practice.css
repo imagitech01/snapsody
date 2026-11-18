@@ -1,0 +1,455 @@
+/* Practising a piece (practice-app group 13): the practice screen in portrait (frame 02.1) and landscape
+   (frame 02.2), and the sheets over it: tools (02.4) and loop (02.3). Only tokens are used; the odd values
+   are the frames' own and are written as rem. Denser than the frames (design D17, D18): controls of 44 to 48,
+   a header of one row about 48 high, and in landscape the header and the controls in one bar on top, so the
+   score gets the rest of the height. */
+
+/* ---- The screen ------------------------------------------------------------------------------ */
+
+.practice {
+  overflow: hidden;
+}
+
+/* Back, the piece's title and the tools: one row about 48 high (design D19: no bar position here). */
+.practice-header {
+  flex: none;
+  display: grid;
+  grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap);
+  grid-template-areas: 'back title more';
+  align-items: center;
+  column-gap: var(--space-2);
+  min-height: 3rem;
+  padding: 0 var(--space-2);
+}
+.practice-header > :first-child {
+  grid-area: back;
+  align-self: center;
+}
+.practice-header > :last-child {
+  grid-area: more;
+  align-self: center;
+}
+.practice-title {
+  grid-area: title;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-18);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The score: one white surface that the island fills and scrolls inside. */
+.practice-score {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: var(--space-1) var(--space-3) 0;
+}
+.practice-score--empty {
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+}
+.practice-score .score-island {
+  position: absolute;
+  inset: 0;
+  height: auto;
+}
+
+/* The count-in: the click that sounds, large over the score. */
+.practice-count {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.practice-count span {
+  display: grid;
+  place-items: center;
+  width: 5rem;
+  height: 5rem;
+  border-radius: 50%;
+  background: var(--primary-tint);
+  color: var(--primary);
+  font-size: 3rem;
+  font-variant-numeric: var(--font-numeric);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+}
+
+/* "Return to playing": over the foot of the score, while the view is not following. */
+.practice-return {
+  position: absolute;
+  inset: auto 0 var(--space-3);
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.practice-return .button {
+  pointer-events: auto;
+  box-shadow: 0 0.125rem 0.5rem rgb(16 42 34 / 0.22);
+}
+
+.practice-problem {
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+.practice-problem--over {
+  position: absolute;
+  inset: var(--space-2) var(--space-2) auto;
+  z-index: 3;
+  margin: 0;
+}
+
+/* ---- The controls ---------------------------------------------------------------------------- */
+
+/* Smaller than the frames (design D17, D18): the music gets the room. Nothing is under the 44px touch target. */
+.practice-controls {
+  flex: none;
+  display: grid;
+  row-gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+/* Restart, Play and Loop: Restart and Loop have the same shape, at the same distance from Play. */
+.practice-row--main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--space-3);
+  padding: 0 var(--space-4);
+}
+.practice-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.practice-action--restart {
+  justify-self: start;
+}
+.practice-action .icon-button {
+  border-radius: var(--radius-md);
+}
+.practice-action-label,
+.loop-label {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.play-button {
+  display: grid;
+  place-items: center;
+  width: 4rem;
+  height: 3rem;
+  border-radius: var(--radius-lg);
+  background: var(--primary);
+  color: var(--on-primary);
+  transition: filter var(--t-fast), transform var(--t-fast);
+}
+.play-button:active {
+  filter: brightness(0.94);
+  transform: scale(0.97);
+}
+.loop-button {
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.loop-icon {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--ink);
+  transition: filter var(--t-fast), transform var(--t-fast);
+}
+.loop-button:active .loop-icon {
+  filter: brightness(0.94);
+  transform: scale(0.96);
+}
+.loop-button--on .loop-icon {
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+.loop-button--on .loop-label {
+  color: var(--primary);
+  font-weight: var(--fw-semibold);
+}
+/* The tempo and the metronome. */
+.practice-row--tune {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  column-gap: var(--space-3);
+  padding: 0 var(--space-4);
+}
+.practice-controls .stepper--large {
+  min-width: 0;
+  height: 3rem;
+  padding: 0 0.125rem;
+  border-radius: var(--radius-md);
+}
+.metronome-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 3rem;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+  transition: background var(--t-fast);
+}
+.metronome-toggle .icon {
+  flex: none;
+}
+.metronome-toggle[aria-pressed='true'] {
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+.metronome-text {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.metronome-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.metronome-state {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+}
+
+/* ---- Landscape (frame 02.2) ------------------------------------------------------------------ */
+
+/* One bar about 48 high on top: back, the piece with its bar under it (ellipsis), Restart, Play, the tempo, the
+   metronome as an icon, Loop and the tools. The score gets all the height under it. The header and the controls
+   stay two elements in the page (portrait needs them apart); here the header's own children and the controls
+   are the cells of one grid. The side insets (the camera cutout) are the screen's padding. */
+@media (orientation: landscape) {
+  .practice {
+    display: grid;
+    grid-template-columns: var(--tap) minmax(4rem, 1fr) auto var(--tap);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    padding-inline: calc(var(--safe-left) + var(--space-2)) calc(var(--safe-right) + var(--space-2));
+    padding-top: calc(var(--safe-top) + var(--space-1));
+  }
+  .practice-header {
+    display: contents;
+  }
+  .practice-header > :first-child {
+    grid-column: 1;
+    grid-row: 1 / 3;
+  }
+  .practice-header > :last-child {
+    grid-column: 4;
+    grid-row: 1 / 3;
+  }
+  .practice-title {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    align-self: center;
+  }
+  .practice-controls {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0;
+  }
+  .practice-row {
+    display: contents;
+  }
+  .practice-row--main > .loop-button {
+    order: 1;
+  }
+  .practice-action-label {
+    display: none;
+  }
+  .practice-score {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin: var(--space-1) 0 var(--space-2);
+  }
+  .practice-problem {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .play-button {
+    width: 3.5rem;
+    height: var(--tap);
+    border-radius: var(--radius-md);
+  }
+  /* Loop: an icon like Restart, tinted while a loop is on; its words are its name for a screen reader. */
+  .loop-button {
+    flex-direction: row;
+    gap: 0;
+  }
+  .loop-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .practice-controls .stepper--large {
+    flex: 0 0 auto;
+    min-width: 9.5rem;
+    height: var(--tap);
+    padding: 0;
+    border-radius: var(--radius-sm);
+  }
+  /* The metronome: an icon that shows its state by its tint; its name is the button's. */
+  .metronome-toggle {
+    flex: none;
+    justify-content: center;
+    width: var(--tap);
+    height: var(--tap);
+    padding: 0;
+  }
+  .metronome-text {
+    display: none;
+  }
+  .practice-count span {
+    width: 4rem;
+    height: 4rem;
+    font-size: 2.25rem;
+  }
+}
+
+/* ---- Sheets over the practice screen --------------------------------------------------------- */
+
+.sheet-rows {
+  display: grid;
+  gap: var(--space-2);
+}
+.sheet .row-stack {
+  gap: var(--gap-list);
+}
+.sheet-foot {
+  margin-top: var(--gap-section);
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+}
+.sheet-foot--small {
+  margin-top: var(--space-4);
+  font-size: var(--fs-11);
+}
+.sheet-foot--center {
+  text-align: center;
+}
+.sheet-heading {
+  margin: var(--gap-section) 0 var(--space-2);
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+  line-height: 1.25;
+}
+.sheet-hint {
+  margin: var(--space-3) 0 var(--space-5);
+}
+.sheet-line {
+  margin-top: var(--space-4);
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+}
+.sheet-action {
+  margin-top: var(--space-5);
+}
+.sheet-action--next {
+  margin-top: var(--space-2);
+}
+.sheet .sheet-line + .sheet-action {
+  margin-top: var(--space-3);
+}
+.sheet .card--muted {
+  padding: var(--space-3);
+}
+
+/* The loop: two boxes with a bar each (a native list chooses it, drawn over the box). */
+.bar-fields {
+  display: flex;
+  gap: var(--space-3);
+}
+.bar-field {
+  position: relative;
+  flex: 1;
+  display: grid;
+  gap: var(--space-1);
+  height: 4rem;
+  padding: var(--space-2) var(--space-3) 0;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.bar-field-label {
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  line-height: 0.9375rem;
+}
+.bar-field-value {
+  font-size: var(--fs-20);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: var(--fw-semibold);
+  line-height: 1.5rem;
+}
+.bar-field .icon {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  color: var(--ink-muted);
+}
+.bar-field-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.bar-field:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.loop-note {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  line-height: 1rem;
+}
+.loop-note-small {
+  margin-top: var(--space-2);
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+  line-height: 0.875rem;
+}

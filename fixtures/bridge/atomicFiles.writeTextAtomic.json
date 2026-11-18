@@ -1,0 +1,12 @@
+{
+  "plugin": "AtomicFiles",
+  "method": "writeTextAtomic",
+  "description": "The port's Files.writeTextAtomic (design D4): writes <path>.tmp-<suffix>, fsyncs it, renames it over the target in one step (Os.rename) and fsyncs the folder; creates the folders above the target. suffix is tempSuffix() of web/src/platform/atomicWrite.ts; the plugin makes one when it is left out. The path is relative to the app's data folder.",
+  "request": { "path": "pieces/3b0c9d6e-1f2a-4b3c-8d4e-5f6a7b8c9d0e/practice.json", "text": "{\"bar\":12,\"tempo\":72}", "suffix": "0mwm3nbwg-k3j5h2q9" },
+  "reply": {},
+  "errors": [
+    { "code": "invalid", "request": { "path": "../outside.json", "text": "{}" }, "description": "A path the port does not accept." },
+    { "code": "exists", "request": { "path": "pieces", "text": "{}" }, "description": "The target is a folder." }
+  ],
+  "shape": { "optional": ["request.suffix"] }
+}

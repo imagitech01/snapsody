@@ -1,0 +1,24 @@
+{
+  "plugin": "Scanner",
+  "method": "scan",
+  "description": "Opens ML Kit's document scanner (BASE mode, gallery import) for up to maxPages pages (1 to 10; 10 when left out). The user crops, reorders and retakes in the scanner. The pages are copied upright into the app's data folder and returned as data-relative paths, in the order the user left them. Leaving the scanner without pages is a result (cancelled), not an error.",
+  "request": { "maxPages": 10 },
+  "replies": [
+    {
+      "cancelled": false,
+      "pages": [
+        { "path": "scans/f8cfbf27-3a1d-4c55-9b0e-2d7f6a1c9e40/page-1.jpg", "width": 3721, "height": 349 },
+        { "path": "scans/f8cfbf27-3a1d-4c55-9b0e-2d7f6a1c9e40/page-2.jpg", "width": 3625, "height": 392 }
+      ]
+    },
+    { "cancelled": true, "pages": [] }
+  ],
+  "errors": [
+    {
+      "code": "unavailable",
+      "description": "The scanner cannot run on this phone right now: Google Play services missing or outdated, the scanner module not available, no usable camera."
+    },
+    { "code": "invalid", "request": { "maxPages": 11 }, "description": "maxPages outside 1 to 10." }
+  ],
+  "shape": { "optional": ["request.maxPages"] }
+}

@@ -1,0 +1,13 @@
+{
+  "appId": "app.snapsody",
+  "appName": "Snapsody",
+  "webDir": "dist",
+  "android": {
+    "path": "../android"
+  },
+  "plugins": {
+    "SystemBars": {
+      "style": "LIGHT"
+    }
+  }
+}

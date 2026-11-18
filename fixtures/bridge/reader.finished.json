@@ -1,0 +1,10 @@
+{
+  "plugin": "Reader",
+  "event": "readerEvent",
+  "description": "The job's last event, exactly once: done when it ran through every page (whatever each page gave), cancelled after cancel, failed when the job itself broke or could not start, with a message (port.ts ReaderEvent).",
+  "payload": { "type": "finished", "pages": 2, "status": "failed", "message": "Python could not start", "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b" },
+  "shape": {
+    "optional": ["payload.jobId", "payload.message"],
+    "enum": { "payload.type": ["finished"], "payload.status": ["done", "cancelled", "failed"] }
+  }
+}

@@ -1,0 +1,80 @@
+{
+ "format": 1,
+ "name": "B-flat trumpet, from MuseScore_General 0.2, GM 57 \"Trumpet\"",
+ "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md. Trumpet samples: uncredited, public domain (per the SoundFont's sample sources list).",
+ "source": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+ "notes": {
+  "52": {
+   "file": "52.ogg",
+   "sustainStart": 0.325854167,
+   "sustainEnd": 0.82975,
+   "gain": 0.6535
+  },
+  "55": {
+   "file": "55.ogg",
+   "sustainStart": 0.274020833,
+   "sustainEnd": 0.69775,
+   "gain": 0.654
+  },
+  "58": {
+   "file": "58.ogg",
+   "sustainStart": 0.230416667,
+   "sustainEnd": 0.586729167,
+   "gain": 0.6504
+  },
+  "61": {
+   "file": "61.ogg",
+   "sustainStart": 0.193770833,
+   "sustainEnd": 0.793020833,
+   "gain": 0.6488
+  },
+  "64": {
+   "file": "64.ogg",
+   "sustainStart": 0.1629375,
+   "sustainEnd": 0.666833333,
+   "gain": 0.6535
+  },
+  "67": {
+   "file": "67.ogg",
+   "sustainStart": 0.182,
+   "sustainEnd": 0.579645833,
+   "gain": 0.4805
+  },
+  "70": {
+   "file": "70.ogg",
+   "sustainStart": 0.153041667,
+   "sustainEnd": 0.487416667,
+   "gain": 0.4797
+  },
+  "73": {
+   "file": "73.ogg",
+   "sustainStart": 0.3054375,
+   "sustainEnd": 0.687791667,
+   "gain": 0.5267
+  },
+  "76": {
+   "file": "76.ogg",
+   "sustainStart": 0.286645833,
+   "sustainEnd": 0.7845,
+   "gain": 0.449
+  },
+  "79": {
+   "file": "79.ogg",
+   "sustainStart": 0.241041667,
+   "sustainEnd": 0.6596875,
+   "gain": 0.4483
+  },
+  "82": {
+   "file": "82.ogg",
+   "sustainStart": 0.2026875,
+   "sustainEnd": 0.554729167,
+   "gain": 0.4474
+  },
+  "84": {
+   "file": "84.ogg",
+   "sustainStart": 0.338645833,
+   "sustainEnd": 0.721583333,
+   "gain": 0.4919
+  }
+ }
+}

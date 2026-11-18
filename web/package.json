@@ -1,0 +1,31 @@
+{
+  "name": "snapsody-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\"",
+    "test:ui": "node test/ui/run.ts",
+    "cap": "node ../tools/capacitor/node_modules/@capacitor/cli/bin/capacitor",
+    "sync:android": "npm run build && npm run -s cap -- sync android"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  },
+  "dependencies": {
+    "@capacitor-community/keep-awake": "8.0.1",
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/device": "8.0.3",
+    "@capacitor/filesystem": "8.1.5",
+    "@preact/signals": "2.11.4",
+    "preact": "11.1.1",
+    "verovio": "6.4.0"
+  }
+}

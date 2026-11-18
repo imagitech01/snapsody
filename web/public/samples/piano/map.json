@@ -1,0 +1,129 @@
+{
+ "format": 1,
+ "attack": "always",
+ "name": "Piano, from MuseScore_General 0.2, GM 1 \"Grand Piano\"",
+ "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md. Piano samples: \"Splendid Grand\" for AKAI S5000, edited by S. Christian Collins; public domain (confirmed with AKAI).",
+ "source": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+ "notes": {
+  "21": {
+   "file": "21.ogg",
+   "gain": 0.3147
+  },
+  "24": {
+   "file": "24.ogg",
+   "gain": 0.3176
+  },
+  "27": {
+   "file": "27.ogg",
+   "gain": 0.3612
+  },
+  "30": {
+   "file": "30.ogg",
+   "gain": 0.325
+  },
+  "33": {
+   "file": "33.ogg",
+   "gain": 0.3052
+  },
+  "36": {
+   "file": "36.ogg",
+   "gain": 0.371
+  },
+  "39": {
+   "file": "39.ogg",
+   "gain": 0.3545
+  },
+  "42": {
+   "file": "42.ogg",
+   "gain": 0.324
+  },
+  "45": {
+   "file": "45.ogg",
+   "gain": 0.3042
+  },
+  "48": {
+   "file": "48.ogg",
+   "gain": 0.3528
+  },
+  "51": {
+   "file": "51.ogg",
+   "gain": 0.3435
+  },
+  "54": {
+   "file": "54.ogg",
+   "gain": 0.2604
+  },
+  "57": {
+   "file": "57.ogg",
+   "gain": 0.2952
+  },
+  "60": {
+   "file": "60.ogg",
+   "gain": 0.2766
+  },
+  "63": {
+   "file": "63.ogg",
+   "gain": 0.2532
+  },
+  "66": {
+   "file": "66.ogg",
+   "gain": 0.2574
+  },
+  "69": {
+   "file": "69.ogg",
+   "gain": 0.264
+  },
+  "72": {
+   "file": "72.ogg",
+   "gain": 0.2085
+  },
+  "75": {
+   "file": "75.ogg",
+   "gain": 0.2054
+  },
+  "78": {
+   "file": "78.ogg",
+   "gain": 0.2476
+  },
+  "81": {
+   "file": "81.ogg",
+   "gain": 0.39
+  },
+  "84": {
+   "file": "84.ogg",
+   "gain": 0.2679
+  },
+  "87": {
+   "file": "87.ogg",
+   "gain": 0.2413
+  },
+  "90": {
+   "file": "90.ogg",
+   "gain": 0.2531
+  },
+  "93": {
+   "file": "93.ogg",
+   "gain": 0.2959
+  },
+  "96": {
+   "file": "96.ogg",
+   "gain": 0.292
+  },
+  "99": {
+   "file": "99.ogg",
+   "gain": 0.5142
+  },
+  "102": {
+   "file": "102.ogg",
+   "gain": 0.5111
+  },
+  "105": {
+   "file": "105.ogg",
+   "gain": 0.5305
+  },
+  "108": {
+   "file": "108.ogg",
+   "gain": 0.6685
+  }
+ }
+}

@@ -1,0 +1,80 @@
+/* Only for the component gallery (dev/gallery.html): its page layout and the sheet mocks of Figma frames 02.4 and 02.3.
+   Everything a component looks like comes from src/ui/styles. */
+
+.gallery {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: var(--safe-top) var(--space-4) var(--space-10);
+}
+.gallery--wide {
+  max-width: none;
+}
+.gallery h1 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--fs-24);
+}
+.gallery-section {
+  margin-top: var(--space-8);
+}
+.gallery-section > h2 {
+  margin-bottom: var(--space-3);
+  font-size: var(--fs-18);
+}
+.gallery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.gallery-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+.gallery-icons span {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.gallery-thumb {
+  width: 3rem;
+  height: 3.375rem;
+  border-radius: var(--radius-thumb);
+  background: var(--thumb);
+}
+.gallery-island {
+  height: 20rem;
+  margin-top: var(--space-3);
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-11);
+}
+.swatch-chip {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-thumb);
+  border: 1px solid var(--line);
+}
+.type-samples p {
+  margin: var(--space-1) 0;
+}
+.type-samples code {
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-regular);
+}

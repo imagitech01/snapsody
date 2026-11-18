@@ -1,0 +1,137 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import * as ed from '../src/core/score/edit.ts'
+import type { Score } from '../src/core/score/model.ts'
+import { indexScore, renderedNoteIds, unmappedNotes } from '../src/core/score/noteMap.ts'
+import { parseMusicXml } from '../src/core/score/musicxml.ts'
+import { renderScore } from '../src/core/score/render.ts'
+import { COMMITTED_FIXTURE, LOCAL_EXERCISE_87, read, skipUnless } from './helpers.ts'
+import { n, scoreOf } from './playbackHelpers.ts'
+
+async function checkRender(xml: string) {
+  const score = parseMusicXml(xml)
+  const [svg, ...more] = await renderScore(score, { width: 360 })
+  assert.ok(svg)
+  assert.equal(more.length, 0, 'one page, scrolled vertically')
+  const index = indexScore(score)
+  return { score, svg, index }
+}
+
+test('render: every model note and rest of the fixture has a rendered element with its id', async () => {
+  const { svg, index } = await checkRender(read(COMMITTED_FIXTURE))
+  assert.ok(index.size > 10)
+  assert.deepEqual(unmappedNotes(svg, index), [])
+  // The note ids are the SVG ids, in score order, and nothing else is drawn as a note.
+  assert.deepEqual(renderedNoteIds(svg), [...index.keys()])
+  assert.equal(index.get('a1')?.bar, '1', 'the id given in the XML survives')
+})
+
+test('render: the fixture shows clef, key, metre, tuplet, slur and staccato', async () => {
+  const { svg } = await checkRender(read(COMMITTED_FIXTURE))
+  for (const cls of ['clef', 'keySig', 'meterSig', 'tuplet', 'slur', 'artic']) {
+    assert.match(svg, new RegExp(`class="${cls}[" ]`), `${cls} is drawn`)
+  }
+  assert.match(svg, /<svg[^>]*viewBox=/)
+})
+
+test('render: a narrower page makes more systems, not wider ones', async () => {
+  const score = parseMusicXml(read(COMMITTED_FIXTURE))
+  const count = (svg: string | undefined) => (svg?.match(/class="system"/g) ?? []).length
+  const [wide] = await renderScore(score, { width: 1200 })
+  const [narrow] = await renderScore(score, { width: 300 })
+  assert.ok(count(narrow) > count(wide), `${count(narrow)} systems at 300px vs ${count(wide)} at 1200px`)
+})
+
+test('render: exercise 87 (local) maps all notes and shows 3/4, G major, triplets, slurs, staccato', { skip: skipUnless(LOCAL_EXERCISE_87) }, async () => {
+  const { svg, index } = await checkRender(read(LOCAL_EXERCISE_87))
+  assert.deepEqual(unmappedNotes(svg, index), [])
+  for (const cls of ['clef', 'keySig', 'meterSig', 'tuplet', 'slur', 'artic']) assert.match(svg, new RegExp(`class="${cls}[" ]`))
+})
+
+// --- tenuto, accent, fermata and hairpins (practice-app task 4.3) ---
+//
+// Verovio 6.4 draws them as groups of these classes, each holding a SMuFL glyph (`<use xlink:href="#E4A4-…">`):
+//   tenuto   <g class="artic">     E4A4 (above) / E4A5 (below)
+//   accent   <g class="artic">     E4A0 / E4A1       (staccato is an `artic` too: E4A2 / E4A3)
+//   fermata  <g class="fermata">   E4C0 / E4C1
+//   hairpin  <g class="hairpin">   a <polyline> of three points: the apex first on a crescendo's left, a diminuendo's right
+// Tenuto, accent and staccato share a class, so they are told apart by their glyph.
+
+const TENUTO = /^E4A[45]$/
+const ACCENT = /^E4A[01]$/
+const STACCATO = /^E4A[23]$/
+const FERMATA = /^E4C[01]$/
+
+/** The glyph codes (like "E4A4") drawn inside the groups of one class, in document order. */
+function glyphsOf(svg: string, cls: string): string[] {
+  return [...svg.matchAll(new RegExp(`<g [^>]*class="${cls}">\\s*<use xlink:href="#([0-9A-F]{4})-`, 'g'))].map((m) => m[1]!)
+}
+
+/** The shape of each hairpin: 'crescendo' when the polyline's apex (its middle point) is left of its ends. */
+function hairpinShapes(svg: string): string[] {
+  return [...svg.matchAll(/<g [^>]*class="hairpin">\s*<polyline[^>]* points="([^"]*)"/g)].map((m) => {
+    const [first, apex] = m[1]!.trim().split(/\s+/).map((p) => Number(p.split(',')[0]))
+    return apex! < first! ? 'crescendo' : 'diminuendo'
+  })
+}
+
+/** Two bars of four notes, high and low (so stems go both ways): ids a-d and e-h. */
+const twoBars = (): Score =>
+  scoreOf([
+    { body: n({ id: 'a', step: 'D', octave: 4 }) + n({ id: 'b', step: 'A', octave: 5 }) + n({ id: 'c', step: 'E', octave: 4 }) + n({ id: 'd', step: 'G', octave: 5 }) },
+    { body: n({ id: 'e', step: 'F', octave: 4 }) + n({ id: 'f', step: 'B', octave: 5 }) + n({ id: 'g', step: 'G', octave: 4 }) + n({ id: 'h', step: 'C', octave: 5 }) },
+  ])
+
+test('render: tenuto, accent, fermata and a crescendo and diminuendo made with the editing operations are drawn', async () => {
+  const score = twoBars()
+  ed.toggleTenuto(score, 'a')
+  ed.toggleTenuto(score, 'f')
+  ed.toggleAccent(score, 'b')
+  ed.toggleFermata(score, 'c')
+  ed.addWedge(score, 'crescendo', 'a', 'd')
+  ed.addWedge(score, 'diminuendo', 'e', 'h')
+  const [svg] = await renderScore(score, { width: 900 })
+  assert.ok(svg)
+  assert.deepEqual(glyphsOf(svg, 'artic').filter((g) => TENUTO.test(g)).length, 2, 'two tenuto marks')
+  assert.deepEqual(glyphsOf(svg, 'artic').filter((g) => ACCENT.test(g)).length, 1, 'one accent')
+  assert.equal(glyphsOf(svg, 'artic').length, 3, 'and no other articulation')
+  assert.equal(glyphsOf(svg, 'fermata').filter((g) => FERMATA.test(g)).length, 1, 'one fermata')
+  assert.deepEqual(hairpinShapes(svg), ['crescendo', 'diminuendo'])
+  // The marks add no note: every model note is still drawn, in order, and nothing else is taken for one.
+  const index = indexScore(score)
+  assert.deepEqual(unmappedNotes(svg, index), [])
+  assert.deepEqual(renderedNoteIds(svg), [...index.keys()])
+})
+
+test('render: the same score without the marks draws none of them (staccato is an artic too, and stays apart)', async () => {
+  const score = twoBars()
+  ed.toggleStaccato(score, 'a')
+  const [svg] = await renderScore(score, { width: 900 })
+  assert.ok(svg)
+  assert.deepEqual(glyphsOf(svg, 'artic').filter((g) => STACCATO.test(g)).length, 1, 'the staccato is drawn')
+  assert.equal(glyphsOf(svg, 'artic').filter((g) => TENUTO.test(g) || ACCENT.test(g)).length, 0, 'but no tenuto or accent')
+  assert.equal(glyphsOf(svg, 'fermata').length, 0)
+  assert.deepEqual(hairpinShapes(svg), [])
+  assert.ok(!/class="hairpin"|class="fermata"/.test(svg), 'not even the classes')
+})
+
+test('render: a hairpin over a barline and a fermata on a rest are drawn', async () => {
+  const score = twoBars()
+  ed.noteToRest(score, 'd')
+  ed.toggleFermata(score, 'd')
+  ed.addWedge(score, 'crescendo', 'c', 'f')
+  const [svg] = await renderScore(score, { width: 900 })
+  assert.deepEqual(hairpinShapes(svg!), ['crescendo'])
+  assert.equal(glyphsOf(svg!, 'fermata').filter((g) => FERMATA.test(g)).length, 1)
+  assert.deepEqual(unmappedNotes(svg!, indexScore(score)), [])
+})
+
+test('render: the committed fixture shows its tenuto, accent, fermata and hairpins', async () => {
+  const { svg } = await checkRender(read(COMMITTED_FIXTURE))
+  const artic = glyphsOf(svg, 'artic')
+  assert.equal(artic.filter((g) => TENUTO.test(g)).length, 1, 'tenuto')
+  assert.equal(artic.filter((g) => ACCENT.test(g)).length, 1, 'accent')
+  assert.equal(glyphsOf(svg, 'fermata').filter((g) => FERMATA.test(g)).length, 1, 'fermata')
+  const shapes = hairpinShapes(svg)
+  assert.ok(shapes.includes('crescendo') && shapes.includes('diminuendo'), `both hairpins (${shapes.join(', ')})`)
+})

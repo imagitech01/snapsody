@@ -1,0 +1,150 @@
+/*
+ * Design tokens (practice-app task 11.1, design D3, D14).
+ *
+ * Read by hand from the Figma frames (01 Practice home, 02.3 Loop setup, 02.4 More tools, 03.1 Library,
+ * 06.1 Edit score, 07 Settings): the file has no Figma variables, so these are the values the frames use,
+ * named by role. Differences from the frames are recorded in docs/design/deviations.md. Since design D18 the app
+ * is denser than the frames (gutter 16, a 44px button, a 56px tab bar, one step smaller type per role): the
+ * `--fs-N` tokens still mean N px, and the role rules (`.t-*` and the components) pick the smaller one.
+ *
+ * The app has one look: Figma has no dark design, so the colour scheme is light on purpose. The values a
+ * component may use are the custom properties below; a hex colour or a pixel size inside a component rule
+ * is a token that is missing from this file.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Colour ---------------------------------------------------------------------------- */
+
+  /* Surfaces, from the screen outwards. */
+  --bg: #f7f6f1;              /* the screen */
+  --surface: #ffffff;         /* cards, list rows, the score */
+  --surface-muted: #e6ece5;   /* controls, search field, the note card, chips */
+  --surface-dark: #203c36;    /* the "continue practicing" card */
+  --thumb: #eef1e9;           /* score thumbnail in a list row */
+
+  /* Text. */
+  --ink: #203c36;             /* titles and body */
+  --ink-muted: #64746e;       /* captions, subtitles, eyebrows, inactive tabs */
+  --ink-on-dark: #ffffff;
+  --ink-on-dark-muted: #b8cdc4;
+
+  /* The one accent. */
+  --primary: #136d58;         /* primary buttons, links, active tab text, toggles on */
+  --primary-tint: #e2f1e8;    /* selected row, play button, the playing bar */
+  --on-primary: #ffffff;
+
+  /* Lines. */
+  --line: #d9dfd7;            /* dividers, the tab bar's top line */
+  --line-strong: #cad4cc;     /* sheet handle, toggle off */
+  --line-card: #e1e5dc;       /* border of the editor's cards */
+  --line-control: #a1ada4;    /* radio off */
+  --thumb-line: #9faea2;      /* staff lines in a thumbnail */
+  --scroll-thumb: #a7bcaf;    /* scroll position in the score surface */
+
+  /* Danger (Delete note, a destructive confirm). */
+  --danger: #9d3f2d;
+  --danger-tint: #fae8e2;
+
+  /* The score. */
+  --score-ink: #203c36;
+  --mark-selected: #71c9a6;   /* the selected note in the editor (shown at 40%) */
+  --mark-loop: #c05621;
+  --mark-start: #2f855a;
+  --mark-flagbar: #b7791f;
+  --mark-flag: #c53030;
+
+  /* Overlays. */
+  --scrim: rgb(16 42 34 / 0.38);   /* #102a22 at 38% behind a sheet or a dialog */
+  --focus: #136d58;
+
+  /* ---- Type ------------------------------------------------------------------------------ */
+
+  /* Inter in the frames. It is not bundled (the app is offline and has no font file yet), so the system
+     font stands in; see deviations.md. Inter comes first so that adding the font changes nothing else. */
+  --font: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-numeric: tabular-nums;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* The sizes the frames use, in px. */
+  --fs-10: 0.625rem;   /* eyebrow (uppercase), editor labels */
+  --fs-11: 0.6875rem;  /* tab label, captions in a row */
+  --fs-12: 0.75rem;    /* small text, links in a section header */
+  --fs-13: 0.8125rem;  /* subtitle, Close, secondary button */
+  --fs-14: 0.875rem;   /* row title in a list, buttons */
+  --fs-15: 0.9375rem;  /* sheet row title, large button */
+  --fs-16: 1rem;       /* card row title, section label */
+  --fs-18: 1.125rem;   /* sheet title, practice title, dialog title */
+  --fs-19: 1.1875rem;  /* (frames: section title on the home) */
+  --fs-20: 1.25rem;    /* continue card title, the tempo value, a bar number in the loop sheet */
+  --fs-22: 1.375rem;   /* screen title */
+  --fs-24: 1.5rem;     /* (frames: sheet title, practice header) */
+  --fs-28: 1.75rem;    /* (frames: large card title) */
+  --fs-30: 1.875rem;   /* (frames: screen title, the tempo value) */
+
+  --lh-tight: 1.2;
+  --lh-body: 1.35;
+
+  /* ---- Radius ---------------------------------------------------------------------------- */
+
+  --radius-sheet: 28px;   /* top corners of a sheet */
+  --radius-card: 20px;    /* the "continue practicing" card */
+  --radius-surface: 18px; /* the score surface */
+  --radius-lg: 16px;      /* tempo control, tool cards */
+  --radius-row: 15px;     /* a list row on the home */
+  --radius-md: 14px;      /* list rows, primary button, tabs, rows in a sheet */
+  --radius-button: 13px;  /* secondary and small buttons, search field */
+  --radius-sm: 12px;      /* segments, small square buttons */
+  --radius-xs: 10px;      /* steppers, selectors, the editor's track */
+  --radius-thumb: 8px;
+  --radius-pill: 999px;
+
+  /* ---- Spacing --------------------------------------------------------------------------- */
+
+  /* A 4px unit. The frames' gutter is 24px and a list's gap is 12 to 14px; the app's (D18) is 16px and 8px. */
+  --space-1: 0.25rem;  /* 4 */
+  --space-2: 0.5rem;   /* 8 */
+  --space-3: 0.75rem;  /* 12 */
+  --space-4: 1rem;     /* 16 */
+  --space-5: 1.25rem;  /* 20 */
+  --space-6: 1.5rem;   /* 24 */
+  --space-8: 2rem;     /* 32 */
+  --space-10: 2.5rem;  /* 40 */
+
+  --gutter: var(--space-4);          /* the frames' 24 (D18) */
+  --gap-section: 1.25rem;            /* between sections: the frames' 32 */
+  --gap-block: var(--space-4);       /* between blocks inside a section: the frames' 24 */
+  --gap-list: var(--space-2);        /* between rows of a list: the frames' 12 to 14 */
+  --pad-card: var(--space-4);        /* inside a card or a sheet: the frames' 20 to 24 */
+
+  /* ---- Sizes ----------------------------------------------------------------------------- */
+
+  --tap: 2.75rem;               /* 44: the smallest touch target */
+  --button-h: 2.75rem;          /* 44: primary button (the frames' 52) */
+  --button-h-small: 2.75rem;    /* 44: secondary button */
+  --tab-bar-h: 3.5rem;          /* 56: the tab bar, above the bottom inset (the frames' 66) */
+  --toggle-w: 2.25rem;          /* 36 */
+  --toggle-h: 1.375rem;         /* 22 */
+  --sheet-max-w: 35rem;
+  --content-max-w: 40rem;
+
+  /* ---- Motion ---------------------------------------------------------------------------- */
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --t-fast: 120ms;
+  --t-sheet: 220ms;
+
+  /* ---- Safe areas ------------------------------------------------------------------------ */
+
+  /* The notch, the status bar and the navigation gesture bar, as the WebView reports them
+     (viewport-fit=cover in index.html). 0 where there is none. Frames show a 48px status bar and a
+     26px strip below the tab bar: the review page's mock sets these two to those values. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}

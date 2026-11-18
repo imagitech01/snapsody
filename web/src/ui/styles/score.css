@@ -1,0 +1,116 @@
+/* The score island (practice-app task 11.3): the scroller, the engraved score, the bar box and the
+   cursor line, and the marks on notes. See web/src/ui/scoreIsland.ts. */
+
+/* The island is its own scroller: the practice screen gives it a height (a flex child that may shrink). */
+.score-island {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-2);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.score-island::-webkit-scrollbar {
+  width: 3px;
+}
+.score-island::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: var(--scroll-thumb);
+}
+.score-island[data-error]::after {
+  content: attr(data-error);
+  display: block;
+  padding: var(--space-4);
+  color: var(--danger);
+  font-size: var(--fs-12);
+}
+
+.score-surface {
+  position: relative;
+}
+/* The drawing is above the bar box, so the staff and the notes show on the tint. */
+.score-host {
+  position: relative;
+  z-index: 1;
+}
+.score-bar {
+  position: absolute;
+  z-index: 0;
+  border-radius: var(--radius-thumb);
+  background: var(--primary-tint);
+  pointer-events: none;
+}
+.score-cursor {
+  position: absolute;
+  z-index: 2;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--primary);
+  pointer-events: none;
+}
+
+.score-view {
+  min-height: 4em;
+  color: var(--score-ink);
+  touch-action: pan-y;
+}
+.score-view svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Marks on notes and rests: the sounding note, a loop, the start, a flagged bar and note, the selection. */
+.score-view g.note.hl,
+.score-view g.note.hl *,
+.score-view g.rest.hl,
+.score-view g.rest.hl *,
+.score-view g.note.mk-sel,
+.score-view g.note.mk-sel *,
+.score-view g.rest.mk-sel,
+.score-view g.rest.mk-sel * {
+  fill: var(--primary);
+  stroke: var(--primary);
+}
+.score-view g.note.mk-loop,
+.score-view g.note.mk-loop *,
+.score-view g.rest.mk-loop,
+.score-view g.rest.mk-loop * {
+  fill: var(--mark-loop);
+  stroke: var(--mark-loop);
+}
+.score-view g.note.mk-start,
+.score-view g.note.mk-start *,
+.score-view g.rest.mk-start,
+.score-view g.rest.mk-start * {
+  fill: var(--mark-start);
+  stroke: var(--mark-start);
+}
+.score-view g.note.mk-flagbar,
+.score-view g.note.mk-flagbar *,
+.score-view g.rest.mk-flagbar,
+.score-view g.rest.mk-flagbar * {
+  fill: var(--mark-flagbar);
+  stroke: var(--mark-flagbar);
+}
+.score-view g.note.mk-flag,
+.score-view g.note.mk-flag *,
+.score-view g.rest.mk-flag,
+.score-view g.rest.mk-flag * {
+  fill: var(--mark-flag);
+  stroke: var(--mark-flag);
+}
+/* The sounding note wins over a mark when both are on it. */
+.score-view g.note.hl,
+.score-view g.note.hl *,
+.score-view g.rest.hl,
+.score-view g.rest.hl * {
+  fill: var(--primary);
+  stroke: var(--primary);
+}

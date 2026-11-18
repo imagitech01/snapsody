@@ -1,0 +1,517 @@
+/* The editor (practice-app group 15, frames 06.1 to 06.3): the header with the title field, the score card with
+   its three pills, the strip of the original photo, the three tabs of tools, and Save & practice at the foot.
+   Only tokens are used; the odd pixel values are the frames' own and are marked as such. Denser than the frames
+   (design D18): gutter 16, gaps 8 to 12, the title 22, and every control at least 44 x 44. See
+   web/src/ui/screens/editor/ and docs/design/deviations.md (06.x). */
+
+/* ---- The frame ------------------------------------------------------------------------------- */
+
+/* The foot stays where it is; everything above it scrolls (the frame fits 900px, a phone may be lower). */
+.editor {
+  padding-bottom: var(--safe-bottom);
+}
+.editor-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 0 var(--gutter) var(--space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---- Header ---------------------------------------------------------------------------------- */
+
+.editor-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* the back icon (44 wide, its glyph 10px in) starts a little left of the gutter, as in the frame */
+  margin: 0 0 0 calc(var(--space-3) * -1);
+}
+.editor-topbar .t-eyebrow {
+  flex: 1;
+}
+.editor-topbar .button--link {
+  min-height: var(--tap);
+  color: var(--ink-muted);
+  font-weight: var(--fw-regular);
+  margin-right: calc(var(--space-2) * -1);
+}
+.editor-title-field {
+  display: block;
+  margin-top: var(--space-1);
+}
+.editor-caption {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--ink-muted);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-medium);
+}
+.editor-title-input {
+  display: block;
+  width: 100%;
+  height: var(--tap);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.editor-title-input[aria-invalid='true'] {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+/* ---- The score card -------------------------------------------------------------------------- */
+
+.editor-main {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.editor-score-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  overflow: hidden;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.editor-nav {
+  display: grid;
+  grid-template-columns: 112fr 110fr 110fr;
+  gap: var(--space-1);
+}
+.editor-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-width: 0;
+  min-height: var(--tap); /* the frame's pills are 30px */
+  padding: 0 var(--space-2);
+  border-radius: 0.5625rem;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editor-pill:active {
+  filter: brightness(0.94);
+}
+
+/* What needs checking: how many, the way to the next, and what the current one says. Not in the frames. */
+.editor-warnings {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--mark-flagbar) 14%, var(--surface));
+}
+.editor-warnings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.editor-warnings-count {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+}
+.editor-warnings-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--mark-flagbar);
+}
+.editor-warnings .editor-text-button {
+  margin-block: calc(var(--space-1) * -1); /* 44 to touch, in a row of about 36 */
+}
+.editor-warnings-text {
+  margin-top: var(--space-1);
+  color: var(--ink);
+  font-size: var(--fs-11);
+  line-height: 1.35;
+}
+
+.editor-score {
+  height: 11rem; /* the frame's score is 180px high; the page scrolls when the phone is lower than the tools need */
+}
+/* The island tints the bar of the selection; the cursor line of the practice screen has no meaning here. */
+.editor .score-cursor {
+  display: none;
+}
+/* The selected note is green also when it is flagged (the flag is in the text above the score). */
+.editor .score-view g.note.mk-sel,
+.editor .score-view g.note.mk-sel *,
+.editor .score-view g.rest.mk-sel,
+.editor .score-view g.rest.mk-sel * {
+  fill: var(--primary);
+  stroke: var(--primary);
+}
+
+/* ---- The photo ------------------------------------------------------------------------------- */
+
+.editor-photo {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 4rem;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.editor-photo--empty {
+  justify-content: flex-start;
+  padding: var(--space-3) var(--space-4);
+}
+/* The crop is as wide as it can be, but not taller than 6rem: a tall crop is narrower, never stretched. */
+.editor-photo-crop {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  width: min(100%, calc(6rem * var(--aspect, 5)));
+  aspect-ratio: var(--aspect, 5);
+}
+.editor-photo-crop > img {
+  position: absolute;
+  display: block;
+  max-width: none;
+}
+.editor-photo-whole {
+  display: block;
+  width: 100%;
+  max-height: 12rem;
+  object-fit: contain;
+}
+.editor-photo-label,
+.editor-photo-preview {
+  position: absolute;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+}
+.editor-photo-label {
+  left: var(--space-3);
+  top: var(--space-3);
+  padding: 0.3125rem 0.625rem;
+  border-radius: var(--radius-sm);
+  line-height: 1.2;
+}
+.editor-photo-preview {
+  right: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-xs);
+}
+.editor-photo-preview:active {
+  filter: brightness(0.94);
+}
+
+/* ---- The tools ------------------------------------------------------------------------------- */
+
+.editor-tools {
+  padding: var(--space-2) 0 var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.editor-tools > .segmented {
+  margin: 0 var(--space-2);
+}
+.editor-tools-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-3);
+}
+.editor-selection {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+}
+.editor-text-button {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0 var(--space-1);
+  color: var(--primary);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+}
+.editor-text-button:disabled {
+  color: var(--ink-muted);
+  font-weight: var(--fw-medium);
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  gap: var(--space-2) var(--space-2);
+  align-items: center;
+  padding: var(--space-1) var(--space-3) 0;
+}
+.editor-grid--score {
+  grid-template-columns: 1fr 11rem;
+  row-gap: var(--space-2);
+}
+.editor-field-label {
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+}
+.editor-row-pitch,
+.editor-row-length {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.editor-row-length {
+  gap: var(--space-2);
+}
+.editor-row-pitch .stepper {
+  flex: none;
+}
+.editor-row-pitch .editor-select,
+.editor-row-length .editor-select {
+  flex: 1;
+  min-width: 0;
+}
+.editor-row-length .editor-chip {
+  flex: none;
+  width: 4rem;
+  padding: 0 var(--space-1);
+}
+.editor-row-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+.editor-grid--score .stepper--compact {
+  width: 100%;
+}
+.editor-hint {
+  color: var(--ink-muted);
+  font-size: var(--fs-10);
+  line-height: 1.4;
+}
+.editor-hint--pick {
+  font-size: var(--fs-11);
+}
+.editor-hint--wide {
+  grid-column: 1 / -1;
+}
+.editor--waiting .editor-hint {
+  font-size: var(--fs-14);
+}
+
+/* A choice from a list, drawn as the frames' "Natural ⌄": the native select, so the phone's own picker opens. */
+.editor-select {
+  position: relative;
+  display: block;
+}
+.editor-select select {
+  display: block;
+  width: 100%;
+  height: var(--tap);
+  padding: 0 1.25rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-align: center;
+  text-align-last: center;
+  text-overflow: ellipsis;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.editor-select select:disabled {
+  opacity: 0.45;
+}
+.editor-select-chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  transform: translateY(-50%);
+  color: var(--ink-muted);
+  pointer-events: none;
+}
+
+/* A button of the tools: on or off, or just a thing to do. */
+.editor-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+  text-align: center;
+  transition: filter var(--t-fast), transform var(--t-fast);
+}
+.editor-chip:active:not(:disabled) {
+  filter: brightness(0.94);
+  transform: scale(0.97);
+}
+.editor-chip:disabled {
+  opacity: 0.45;
+}
+.editor-chip.is-on {
+  background: var(--primary-tint);
+  box-shadow: inset 0 0 0 1px var(--primary);
+  color: var(--primary);
+}
+/* Waiting for the notes of a slur, a tie or a hairpin. */
+.editor-chip.is-picking {
+  outline: 2px dashed var(--primary);
+  outline-offset: -3px;
+  color: var(--primary);
+}
+.editor-chip--danger {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+.editor-chip-dot {
+  flex: none;
+  width: 0.5625rem;
+  height: 0.5625rem;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+.editor-chip.is-on .editor-chip-dot {
+  background: currentColor;
+}
+
+.editor-marks {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) 0;
+}
+.editor-marks-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.editor-marks-grid .editor-chip {
+  font-size: var(--fs-10);
+}
+
+/* Why a change did not happen. */
+.editor-message,
+.editor-save-error {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xs);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  line-height: 1.35;
+}
+.editor-message {
+  margin: var(--space-2) var(--space-3) 0;
+}
+
+/* ---- The foot -------------------------------------------------------------------------------- */
+
+.editor-actions {
+  flex: none;
+  padding: var(--space-2) var(--gutter);
+  background: var(--bg);
+}
+.editor-save-error {
+  margin-bottom: var(--space-2);
+}
+.editor-save-hint {
+  margin-top: var(--space-2);
+  text-align: center;
+  font-size: var(--fs-11);
+}
+
+/* ---- The two sheets -------------------------------------------------------------------------- */
+
+.editor-pages {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.editor-page {
+  display: grid;
+  gap: var(--space-2);
+}
+.editor-page-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.editor-page-title {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.editor-page-bars {
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+}
+.editor-page-photo {
+  display: block;
+  width: 100%;
+  min-height: 4rem;
+  max-height: 18rem;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+.editor-goto {
+  display: flex;
+  gap: var(--space-3);
+}
+.editor-goto-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--button-h);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-16);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.editor-goto-input[aria-invalid='true'] {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+.editor-goto-error {
+  margin-top: var(--space-3);
+  color: var(--danger);
+  font-size: var(--fs-13);
+}

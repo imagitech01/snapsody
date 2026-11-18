@@ -1,0 +1,7 @@
+{
+  "plugin": "Reader",
+  "method": "cancel",
+  "description": "Stops the job: the page being read is abandoned (it sends no result), the rest are skipped, and finished with status cancelled follows. cancelled is false when jobId is not the running job (it has finished, or never ran).",
+  "request": { "jobId": "7f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b" },
+  "replies": [{ "cancelled": true }, { "cancelled": false }]
+}

@@ -1,0 +1,43 @@
+// Top-level build file of the Snapsody Android app (Capacitor 8, openspec practice-app D1 and task 10.1).
+// The toolchain is the one the spike settled (openspec/changes/archive/2026-11-18-practice-app/evidence/spike.md):
+// AGP 8.13.2, Gradle 8.14.3, Kotlin 2.2.20, Chaquopy 17.2.0, Java 21.
+
+buildscript {
+    // The Kotlin version @capacitor/filesystem 8.1.5 defaults to (it reads rootProject.ext.kotlin_version).
+    ext.kotlin_version = '2.2.20'
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.2'
+        // Kotlin for our plugins and the recognition code, Chaquopy for homr (it supports AGP 7.3-9.5).
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath 'com.chaquo.python:gradle:17.2.0'
+    }
+}
+
+apply from: "variables.gradle"
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}
+
+// Only the app has an instrumented test (the device smoke test, src/androidTest). The Capacitor and
+// plugin libraries' own androidTest variants are not built: theirs is the template's, and its
+// classpath does not even resolve (duplicate Kotlin stdlib classes). So `./gradlew
+// assembleDebugAndroidTest` builds the smoke test alone.
+subprojects {
+    plugins.withId('com.android.library') {
+        androidComponents {
+            beforeVariants(selector().all()) { variant -> variant.androidTest.enable = false }
+        }
+    }
+}

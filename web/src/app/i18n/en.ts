@@ -1,0 +1,332 @@
+/*
+ * The English catalogue (practice-app design D13, spec `app-shell` "English and Dutch").
+ *
+ * Every text the app shows is a key here. `nl.ts` is typed from this file, so TypeScript fails the
+ * build when Dutch lacks a key (or has one more), and when a message is plural in one language and
+ * not in the other. The values are written as constants so that `index.ts` can read each
+ * message's `{placeholder}` names from its type and ask for exactly those parameters:
+ *
+ *   t('library.summary.bars', { count: 24 })     // "24 bars"
+ *   t('bar.position', { bar: 2, bars: 12 })      // "Bar 2 of 12"
+ *
+ * - A plural message is `{ one, other }`; `index.ts` picks the form with `Intl.PluralRules` from the
+ *   `count` parameter, and it is the only plural rule English and Dutch need.
+ * - Keys are `area.name`, flat. Instrument names are not here: they live in `core/instruments`.
+ * - The words are the plain ones of the spec ("piece", "bar", "reading pages"). None of them may be a
+ *   technical term (`app-shell` "Name and words"); `i18n.test.ts` scans both catalogues for them.
+ * - Screens that have no exported Figma frame yet (settings, the add-music screens, the editor's
+ *   Marks and Score tabs, the sheets) use strings taken from the specs and are provisional: the UI
+ *   groups 12-15 add or reword keys when they build those screens.
+ */
+
+/** A message that depends on a count: the form is chosen with `Intl.PluralRules` from `{count}`. */
+export interface PluralForms {
+  readonly one: string
+  readonly other: string
+}
+
+export const en = {
+  // ---- The app ------------------------------------------------------------------------------
+  'app.name': 'Snapsody',
+
+  // ---- Shared -------------------------------------------------------------------------------
+  'common.back': 'Back',
+  'common.cancel': 'Cancel',
+  'common.close': 'Close',
+  'common.delete': 'Delete',
+  'common.discard': 'Discard',
+  'common.done': 'Done',
+  'common.next': 'Next',
+  'common.off': 'Off',
+  'common.ok': 'OK',
+  'common.on': 'On',
+  'common.previous': 'Previous',
+  'common.retry': 'Try again',
+  'common.save': 'Save',
+
+  // ---- Counts and positions -----------------------------------------------------------------
+  'unit.pages': { one: '{count} page', other: '{count} pages' },
+  'unit.bars': { one: '{count} bar', other: '{count} bars' },
+  'unit.bpm': '{count} BPM',
+  'bar.label': 'Bar {bar}',
+  'bar.range': 'Bars {from}–{to}',
+  'bar.position': 'Bar {bar} of {bars}',
+  'page.label': 'Page {page}',
+
+  // ---- Tabs ---------------------------------------------------------------------------------
+  'tab.barLabel': 'Main areas',
+  'tab.practice': 'Practice',
+  'tab.library': 'Library',
+  'tab.settings': 'Settings',
+
+  // ---- Practice home (frame 01, spec `practice-home`) ---------------------------------------
+  'home.title': 'Let’s practise',
+  'home.subtitle': 'Pick up where you left off.',
+  'home.subtitle.pick': 'Choose a piece to start.',
+  'home.continue.title': 'Continue practising',
+  'home.continue.action': 'Continue practising',
+  'home.rotation.title': 'In your rotation',
+  'home.rotation.all': 'See all',
+  'home.rotation.empty': 'Star a piece and it appears here.',
+  'home.rotation.play': 'Play “{name}”',
+  'home.browse': 'Browse all music',
+  'home.addMusic': 'Add music',
+  'home.first.title': 'Add your first music',
+  'home.first.body': 'Photograph the pages, and Snapsody plays them.',
+  'home.footnote': 'Your place and tempo are kept for next time.',
+
+  // ---- Library and favorites (frames 03.1, 03.2; spec `piece-library`) ----------------------
+  'library.title': 'My music',
+  'library.subtitle': 'All your music, ready when you are.',
+  'library.section': 'All your music',
+  'library.favorites': 'Favorites',
+  'library.search': 'Search your music',
+  'library.searchClear': 'Clear search',
+  'library.noMatch': 'Nothing matches “{query}”.',
+  'library.empty.title': 'No music yet',
+  'library.empty.body': 'Add music to start practising.',
+  'library.addMusic': 'Add music',
+  'library.addHint': 'Scan full pages or just the part you need.',
+  'library.summary.practised': 'Practised {when}',
+  'library.summary.added': 'Added {when}',
+  'library.star': 'Add “{name}” to favorites',
+  'library.unstar': 'Remove “{name}” from favorites',
+  'library.deleteRow': 'Delete “{name}”',
+  'library.delete.title': 'Delete this piece?',
+  'library.delete.body': '“{name}”, its photos and its practice settings will be removed from this phone.',
+  'library.delete.confirm': 'Delete',
+  'library.problem.damaged': 'A piece in your library could not be opened.',
+  'library.problem.unsupported': 'A piece in your library was made by another version of Snapsody and cannot be opened.',
+  'favorites.title': 'Favorites',
+  'favorites.subtitle': 'Your small, focused practice list.',
+  'favorites.note.title': 'Keep your practice close',
+  'favorites.note.star': 'Star any piece to find it here.',
+  'favorites.note.repeat': 'A little repetition goes a long way.',
+  'favorites.count': { one: '{count} favorite', other: '{count} favorites' },
+  'favorites.tip': 'Tap a star again to remove a favorite.',
+  'favorites.empty.title': 'No favorites yet',
+  'favorites.empty.body': 'Star a piece in the library, or while you practise, and it appears here.',
+
+  // ---- Practising a piece (frames 02.1-02.4; specs `practice-controls`, `score-playback`, `instruments`) ---
+  'practice.score': 'Score',
+  'practice.more': 'Practice tools',
+  'practice.returnToPlaying': 'Return to playing',
+  'practice.restart': 'Restart',
+  'practice.play': 'Play',
+  'practice.pause': 'Pause',
+  'practice.loopOff': 'Loop off',
+  'practice.loopOn': 'Loop {from}–{to}',
+  'practice.tempo': 'Tempo',
+  'practice.tempo.unit': 'BPM',
+  'practice.tempo.slower': 'Slower',
+  'practice.tempo.faster': 'Faster',
+  'practice.metronome': 'Metronome',
+  'practice.metronomeOn': 'Metronome on',
+  'practice.metronomeOff': 'Metronome off',
+  'practice.countIn': 'Count-in',
+  'practice.countIn.beat': 'Count-in {n} of {of}',
+  'practice.error.sound': 'The sound of this instrument could not be loaded.',
+  'tools.title': 'Practice tools',
+  'tools.subtitle': 'Everything else, only when you need it.',
+  'tools.foot': 'Your score stays open while you adjust these.',
+  'tools.goToBar': 'Go to bar',
+  'tools.goToBar.input': 'Bar number',
+  'tools.goToBar.show': 'Show',
+  'tools.goToBar.invalid': 'Enter a bar from 1 to {bars}.',
+  'tools.edit': 'Edit score',
+  'tools.edit.hint': 'Correct notes, marks, or score settings',
+  'tools.favorite': 'Favorite',
+  'tools.favorite.hint': 'Keep in your practice rotation',
+  'practice.countIn.hint': 'One bar of clicks before the music starts, in every piece',
+  'loop.title': 'Repeat a passage',
+  'loop.subtitle': 'Set a range, then keep playing along.',
+  'loop.from': 'From bar',
+  'loop.to': 'To bar',
+  'loop.rest': 'Rest between repeats',
+  'loop.rest.hint': 'Off by default. No pause while playing along.',
+  'loop.note': 'The selected bars repeat until you stop.',
+  'loop.note.restart': 'Restart takes you back to the loop’s first bar.',
+  'loop.set': 'Start looping bars {from}–{to}',
+  'loop.clear': 'Switch loop off',
+  'loop.foot': 'Your range is kept when you return to this piece.',
+
+  // ---- Instrument families (names come from core/instruments) ---------------------------------
+  'family.woodwind': 'Woodwind',
+  'family.keyboard': 'Keyboard',
+  'family.string': 'Strings',
+  'family.brass': 'Brass',
+
+  // ---- Adding music (frame 05, spec `score-capture`, `score-recognition`) --------------------
+  'add.title': 'Add music',
+  'add.hint.title': 'Before you scan',
+  'add.hint.crop': 'Crop each page to the music you want to practise.',
+  'add.hint.next': 'If the music continues on the next page, add that page too.',
+  'add.hint.dontShow': "Don't show this again",
+  'add.hint.continue': 'Open the scanner',
+  'add.unavailable.title': 'The page scanner is not available',
+  'add.unavailable.body': 'The page scanner is not available on this phone right now. Updating Google Play services may help.',
+  'add.reading.title': 'Reading your pages',
+  'add.reading.body': 'Snapsody is reading your pages and making a new piece.',
+  'add.reading.bodyExisting': 'Snapsody is reading the new pages and adding them to “{name}”.',
+  'add.reading.page': 'Reading page {page} of {pages}',
+  'add.reading.state.done': 'Read',
+  'add.reading.state.current': 'Reading…',
+  'add.reading.state.waiting': 'Waiting',
+  'add.reading.progress': '{percent}%',
+  'add.reading.cancel': 'Cancel',
+  'add.noMusic.title': 'No music found',
+  'add.noMusic.body': 'There is no music on page {page}. Scan it again, cropped to the music.',
+  'add.noMusic.again': 'Scan again',
+  'add.failed.title': 'Reading did not work',
+  'add.failed.page': 'Page {page} could not be read.',
+  'add.failed.body': 'Something went wrong while reading your pages. Nothing was added.',
+  'add.saveFailed': 'The piece could not be saved. There may not be enough space on your phone.',
+  'add.scanning': 'Opening the page scanner…',
+  'add.saving': 'Saving your piece…',
+  'add.saveFailed.title': 'The piece was not saved',
+  'add.reading.pageLabel': 'Page {page}',
+  'add.reading.keepOpen': 'Keep this screen open. It won’t take long.',
+
+  // ---- Editing a piece (frames 06.1-06.3, spec `score-editing`) ------------------------------
+  'editor.eyebrow': 'Score editor',
+  'editor.title': 'Edit score',
+  'editor.nameLabel': 'Title',
+  'editor.nameEmpty': 'Give the piece a name.',
+  'editor.cancel': 'Cancel',
+  'editor.pages': 'Pages {page} / {pages}',
+  'editor.goToBar': 'Go to bar…',
+  'editor.addPages': '+ Add pages',
+  'editor.photo': 'Photo {page} · Bar {bar}',
+  'editor.preview': 'Preview bar {bar}',
+  'editor.undo': 'Undo',
+  'editor.redo': 'Redo',
+  'editor.selection.note': 'Bar {bar} · Note {note}',
+  'editor.selection.rest': 'Bar {bar} · Rest {note}',
+  'editor.selection.none': 'Tap a note to edit it.',
+  'editor.save': 'Save & practice',
+  'editor.saveHint': 'You can return to edit this score at any time.',
+  'editor.saveFailed': 'The piece could not be saved. Your edits are still here.',
+  'editor.discard.title': 'Discard your edits?',
+  'editor.discard.body': 'You have edits that are not saved. If you leave now, they are lost.',
+  'editor.discard.confirm': 'Discard',
+  'editor.discard.keep': 'Keep editing',
+  'editor.tab.note': 'Note',
+  'editor.tab.marks': 'Marks',
+  'editor.tab.score': 'Score',
+  'warnings.count': { one: '{count} thing to check', other: '{count} things to check' },
+  'warnings.next': 'Next',
+  'warnings.previous': 'Previous',
+  'warning.bar-length': 'Bar {bar} adds up to {counted} beats but {beats}/{beatType} needs {beats}.',
+  'warning.out-of-range': 'Bar {bar}: {pitch} is outside the written range of the instrument ({instrument}, {low}–{high}); it may be a misread.',
+  'warning.time-signature-inferred': 'No time signature was found, so {beats}/{beatType} was worked out from the bar lengths. Check that it is right.',
+  'warning.time-signature-missing': 'No time signature was found, and the bars do not agree on one length.',
+
+  // The editor screen (frames 06.1-06.3)
+  'editor.tabs': 'Editing tools',
+  'editor.loading': 'Opening the piece…',
+  'editor.scoreLabel': 'Score',
+  'editor.photo.none': 'Tap a bar to see it in your photo.',
+  'editor.photo.alt': 'Photo of page {page}',
+  'editor.preview.stop': 'Stop preview',
+  'editor.saveConflict': 'This piece was changed since you opened it, so your edits were not saved. Go back and open it again.',
+  'editor.addPages.title': 'Save your edits first?',
+  'editor.addPages.body': 'Adding pages opens this piece again, so edits that are not saved would be lost.',
+  'editor.addPages.confirm': 'Save and add pages',
+  'editor.pages.title': 'Page photos',
+  'editor.pages.goTo': 'Go to bar {bar}',
+  'editor.error.edit': 'That change is not possible here.',
+  'editor.warnings': 'Things to check',
+
+  // The Note tab
+  'note.pitch': 'Pitch',
+  'note.pitch.up': 'Pitch up',
+  'note.pitch.down': 'Pitch down',
+  'note.accidental': 'Accidental',
+  'accidental.sharp': 'Sharp',
+  'accidental.flat': 'Flat',
+  'accidental.natural': 'Natural',
+  'accidental.none': 'None',
+  'note.length': 'Length',
+  'length.whole': 'Whole (1/1)',
+  'length.half': 'Half (1/2)',
+  'length.quarter': 'Quarter (1/4)',
+  'length.eighth': 'Eighth (1/8)',
+  'length.16th': 'Sixteenth (1/16)',
+  'note.dotted': 'Dotted',
+  'note.triplet': 'Triplet',
+  'note.toRest': 'Make rest',
+  'note.toNote': 'Make note',
+  'note.before': '+ Note before',
+  'note.after': '+ Note after',
+  'note.restBefore': '+ Rest before',
+  'note.restAfter': '+ Rest after',
+  'note.delete': 'Delete note',
+  'note.rest': 'Rest',
+
+  // The Marks tab
+  'mark.staccato': 'Staccato',
+  'mark.tenuto': 'Tenuto',
+  'mark.accent': 'Accent',
+  'mark.fermata': 'Fermata',
+  'mark.slur': 'Slur',
+  'mark.tie': 'Tie',
+  'mark.crescendo': 'Crescendo',
+  'mark.diminuendo': 'Diminuendo',
+  'mark.pickFirst': 'Tap the first note.',
+  'mark.pickLast': 'Now tap the last note.',
+  'mark.hint.pair': 'Slur or tie: tap the first and last notes.',
+  'mark.hint.remove': 'Tap an active mark to remove it.',
+  'mark.error.slur': 'A slur joins two different notes, from the first to the last. A rest cannot start or end it.',
+  'mark.error.tie': 'A tie joins a note to the next note, and both need the same pitch.',
+  'mark.error.wedge': 'A crescendo or diminuendo needs a note under it and cannot overlap another one.',
+
+  // The Score tab
+  'score.key': 'Key',
+  'score.time': 'Time signature',
+  'score.tempo': 'Tempo marking',
+  'score.tempoWord': 'Tempo word',
+  'score.tempoBpm': 'Beats per minute',
+  'score.whole': 'Whole score',
+  'score.tempoHint': 'Written tempo · practice speed stays separate.',
+  'score.tempo.lower': 'Lower the written tempo',
+  'score.tempo.higher': 'Raise the written tempo',
+  'score.time.none': 'Not set',
+  'key.none': 'No sharps or flats',
+  'key.sharps': { one: '{count} sharp', other: '{count} sharps' },
+  'key.flats': { one: '{count} flat', other: '{count} flats' },
+
+  // ---- Settings (frame 07, specs `app-shell`, `instruments`) --------------------------------
+  'settings.title': 'Settings',
+  'settings.instrument': 'Default instrument',
+  'settings.subtitle': 'A familiar sound makes learning easier.',
+  'settings.language': 'Language',
+  'settings.language.device': 'Same as the phone',
+  'settings.language.deviceIs': 'Same as the phone ({language})',
+  'settings.credits': 'Credits',
+  'settings.offline': 'Snapsody works without a network. Your photos, music and practice stay on this phone.',
+  'settings.saveFailed': 'This setting could not be saved, so it will be lost when you close the app.',
+  'language.en': 'English',
+  'language.nl': 'Nederlands',
+  'credits.title': 'Credits',
+  'credits.sounds': 'Instrument sounds',
+  'credits.intro': 'The instrument sounds in Snapsody are recordings shared under open licences:',
+  'credits.licence': 'Licence: {licence}',
+  'credits.source': 'Source: {source}',
+  'credits.notices': 'The licence asks that these credits are included:',
+
+  // ---- Errors -------------------------------------------------------------------------------
+  'error.generic': 'Something went wrong. Please try again.',
+  'error.pieceMissing': 'This piece no longer exists.',
+  'error.pieceDamaged': 'This piece cannot be opened. Its files may be damaged.',
+} as const satisfies Record<string, string | PluralForms>
+
+/** The key of every message. */
+export type MessageKey = keyof typeof en
+
+/**
+ * What a catalogue of any language must be: every key of `en`, a plural message exactly where `en`
+ * has one. `nl.ts` is declared with this type, so a missing or extra key does not compile.
+ */
+export type Catalogue = {
+  readonly [K in MessageKey]: (typeof en)[K] extends string ? string : PluralForms
+}

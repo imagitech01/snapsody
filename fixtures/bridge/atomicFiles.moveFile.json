@@ -1,0 +1,15 @@
+{
+  "plugin": "AtomicFiles",
+  "method": "moveFile",
+  "description": "The port's Files.rename for a file (design D4): one rename (Os.rename) that replaces an existing target file in one step, never a delete first; creates the folders above the target. Folders are moved with the Filesystem plugin. Paths are relative to the app's data folder.",
+  "request": {
+    "from": "pieces/3b0c9d6e-1f2a-4b3c-8d4e-5f6a7b8c9d0e/piece.json.tmp-0mwm3nbwg-k3j5h2q9",
+    "to": "pieces/3b0c9d6e-1f2a-4b3c-8d4e-5f6a7b8c9d0e/piece.json"
+  },
+  "reply": {},
+  "errors": [
+    { "code": "not-found", "request": { "from": "pieces/missing.json", "to": "pieces/other.json" }, "description": "Nothing at from." },
+    { "code": "exists", "request": { "from": "settings.json", "to": "pieces" }, "description": "The target is a folder." },
+    { "code": "invalid", "request": { "from": "pieces", "to": "elsewhere" }, "description": "from is a folder." }
+  ]
+}

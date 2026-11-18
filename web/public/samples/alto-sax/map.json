@@ -1,0 +1,80 @@
+{
+ "format": 1,
+ "name": "Alto saxophone, from MuseScore_General 0.2, GM 66 \"Alto Sax\"",
+ "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md.",
+ "source": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+ "notes": {
+  "49": {
+   "file": "49.ogg",
+   "sustainStart": 0.4844375,
+   "sustainEnd": 0.9899375,
+   "gain": 0.3355
+  },
+  "52": {
+   "file": "52.ogg",
+   "sustainStart": 0.508479167,
+   "sustainEnd": 0.9331875,
+   "gain": 0.3323
+  },
+  "55": {
+   "file": "55.ogg",
+   "sustainStart": 0.791770833,
+   "sustainEnd": 1.231083333,
+   "gain": 0.3372
+  },
+  "58": {
+   "file": "58.ogg",
+   "sustainStart": 0.846479167,
+   "sustainEnd": 1.284291667,
+   "gain": 0.3731
+  },
+  "61": {
+   "file": "61.ogg",
+   "sustainStart": 0.844166667,
+   "sustainEnd": 1.270375,
+   "gain": 0.3043
+  },
+  "64": {
+   "file": "64.ogg",
+   "sustainStart": 0.8021875,
+   "sustainEnd": 1.202979167,
+   "gain": 0.3794
+  },
+  "67": {
+   "file": "67.ogg",
+   "sustainStart": 0.44325,
+   "sustainEnd": 0.8769375,
+   "gain": 0.2947
+  },
+  "70": {
+   "file": "70.ogg",
+   "sustainStart": 0.319604167,
+   "sustainEnd": 0.752895833,
+   "gain": 0.3469
+  },
+  "73": {
+   "file": "73.ogg",
+   "sustainStart": 0.388458333,
+   "sustainEnd": 0.7718125,
+   "gain": 0.3154
+  },
+  "76": {
+   "file": "76.ogg",
+   "sustainStart": 0.3520625,
+   "sustainEnd": 0.7285,
+   "gain": 0.3167
+  },
+  "79": {
+   "file": "79.ogg",
+   "sustainStart": 0.603833333,
+   "sustainEnd": 0.993229167,
+   "gain": 0.444
+  },
+  "81": {
+   "file": "81.ogg",
+   "sustainStart": 0.4959375,
+   "sustainEnd": 0.880854167,
+   "gain": 0.2682
+  }
+ }
+}

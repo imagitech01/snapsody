@@ -1,0 +1,104 @@
+{
+ "format": 1,
+ "name": "B-flat clarinet, from MuseScore_General 0.2, GM 72 \"Clarinet\"",
+ "license": "MIT License. Copyright (c) 2000-2002, 2008 Frank Wen (FluidR3); (c) 2014-2017 Michael Cowgill (FluidR3Mono); (c) 2018-2020 S. Christian Collins (MuseScore_General). See NOTICE and docs/samples.md.",
+ "source": "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf2",
+ "notes": {
+  "50": {
+   "file": "50.ogg",
+   "sustainStart": 0.5881875,
+   "sustainEnd": 0.915145833,
+   "gain": 0.2464
+  },
+  "53": {
+   "file": "53.ogg",
+   "sustainStart": 0.494583333,
+   "sustainEnd": 0.815333333,
+   "gain": 0.2455
+  },
+  "56": {
+   "file": "56.ogg",
+   "sustainStart": 0.705083333,
+   "sustainEnd": 1.013416667,
+   "gain": 0.2665
+  },
+  "59": {
+   "file": "59.ogg",
+   "sustainStart": 0.349375,
+   "sustainEnd": 0.689708333,
+   "gain": 0.2591
+  },
+  "62": {
+   "file": "62.ogg",
+   "sustainStart": 0.303416667,
+   "sustainEnd": 0.6100625,
+   "gain": 0.2564
+  },
+  "65": {
+   "file": "65.ogg",
+   "sustainStart": 0.148375,
+   "sustainEnd": 0.4576875,
+   "gain": 0.3213
+  },
+  "68": {
+   "file": "68.ogg",
+   "sustainStart": 0.212416667,
+   "sustainEnd": 0.515854167,
+   "gain": 0.265
+  },
+  "71": {
+   "file": "71.ogg",
+   "sustainStart": 0.214479167,
+   "sustainEnd": 0.518625,
+   "gain": 0.216
+  },
+  "74": {
+   "file": "74.ogg",
+   "sustainStart": 0.134270833,
+   "sustainEnd": 0.440770833,
+   "gain": 0.3084
+  },
+  "77": {
+   "file": "77.ogg",
+   "sustainStart": 0.046395833,
+   "sustainEnd": 0.3471875,
+   "gain": 0.2121
+  },
+  "80": {
+   "file": "80.ogg",
+   "sustainStart": 0.0926875,
+   "sustainEnd": 0.393833333,
+   "gain": 0.2504
+  },
+  "83": {
+   "file": "83.ogg",
+   "sustainStart": 0.087,
+   "sustainEnd": 0.3908125,
+   "gain": 0.2105
+  },
+  "86": {
+   "file": "86.ogg",
+   "sustainStart": 0.073145833,
+   "sustainEnd": 0.376291667,
+   "gain": 0.2105
+  },
+  "89": {
+   "file": "89.ogg",
+   "sustainStart": 0.061520833,
+   "sustainEnd": 0.362270833,
+   "gain": 0.2105
+  },
+  "92": {
+   "file": "92.ogg",
+   "sustainStart": 0.051729167,
+   "sustainEnd": 0.352791667,
+   "gain": 0.2105
+  },
+  "94": {
+   "file": "94.ogg",
+   "sustainStart": 0.046083333,
+   "sustainEnd": 0.3465,
+   "gain": 0.2105
+  }
+ }
+}

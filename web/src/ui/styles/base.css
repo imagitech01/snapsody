@@ -1,0 +1,162 @@
+/* Base styles: the reset, the page, the text styles of the frames and the screen skeleton that keeps
+   content out of the system bars (safe areas). Component rules are in components.css. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--fs-14);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-regular);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  /* The app is a set of screens that scroll inside themselves, never a document. */
+  overscroll-behavior: none;
+}
+
+#app {
+  min-height: 100dvh;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: inherit;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* One keyboard focus ring for everything (touch taps do not show it). */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Text for screen readers only (a label the design shows as an icon). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Text styles of the frames ------------------------------------------------------------- */
+
+.t-eyebrow {
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.t-title {
+  font-size: var(--fs-22);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  color: var(--ink);
+}
+.t-subtitle {
+  font-size: var(--fs-13);
+  line-height: 1.25;
+  color: var(--ink-muted);
+}
+.t-section {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  color: var(--ink);
+}
+.t-caption {
+  font-size: var(--fs-12);
+  line-height: 1.3;
+  color: var(--ink-muted);
+}
+
+/* ---- Screen skeleton ------------------------------------------------------------------------ */
+
+/* A screen fills the window and keeps its content out of the system bars. A screen that has a tab bar
+   leaves the bottom inset to the bar (.screen--tabs). */
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+}
+.screen--tabs {
+  padding-bottom: 0;
+}
+
+/* The block at the top of a start screen: eyebrow, title, subtitle (frames 01, 03.1, 07). */
+.screen-header {
+  padding: var(--space-1) var(--gutter) var(--space-4);
+}
+.screen-header .t-eyebrow {
+  margin-bottom: var(--space-2);
+}
+.screen-header .t-title {
+  margin-bottom: var(--space-1);
+}
+
+.screen-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 var(--gutter) var(--space-4);
+  overflow-y: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
