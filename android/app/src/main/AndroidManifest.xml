@@ -11,6 +11,14 @@
 
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
 
+    <!--
+      ML Kit's document scanner merges in an activity locked to portrait
+      (GmsDocumentScanningDelegateActivity), which makes Play treat android.hardware.screen.portrait
+      as required and hide the app from devices without it. Snapsody works in both orientations
+      (app-shell "Practice in portrait and landscape"), so the feature is optional.
+    -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
+
     <!-- The Reader's foreground service (design D6): one service for a whole reading job. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
