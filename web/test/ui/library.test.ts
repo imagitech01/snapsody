@@ -4,7 +4,6 @@ import type { Page } from 'playwright'
 import { withApp } from './app.ts'
 import { tab, textOf } from './journey.ts'
 import { ID } from './pieces.ts'
-import { review } from './review.ts'
 
 // The library journey (practice-app design D15, "library: search, star, delete"; task 12.2; specs
 // `piece-library` "Library list", "Search", "Favorites", "Delete a piece" and `practice-home`): the
@@ -31,7 +30,6 @@ test('library: it lists the pieces, the latest practised or added first, each wi
     // The star shows who is a favorite.
     await star(page, 'C major warm-up', true).waitFor()
     await star(page, 'Ode to Joy', false).waitFor()
-    await review(page, '03.1 · Music library')
   })
 })
 
@@ -83,7 +81,6 @@ test('library: a star puts a piece in the favorites and the rotation at once, an
 
     // Unstar from the favorites list: the piece leaves the list and stays in the library.
     await page.getByRole('button', { name: 'See all' }).click()
-    await review(page, '03.2 · Favorites')
     await star(page, 'Even eighths', true).click()
     await page.getByRole('heading', { name: '1 favorite' }).waitFor()
     assert.deepEqual(await names(page), ['C major warm-up'])

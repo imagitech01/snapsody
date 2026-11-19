@@ -52,8 +52,9 @@ export async function renderScore(score: Score, options: RenderOptions): Promise
     pageMarginBottom: 40,
   });
   // No part-name label or title: they only cost width on a phone (the app shows the name itself).
-  // Beams are added for display only (homr writes none; see beams.ts).
-  if (!tk.loadData(serializeMusicXml({ ...score, partName: "", title: undefined }, { beams: beamScore(score) }))) throw new Error("Verovio could not read the score");
+  // Beams are added for display only (homr writes none; see beams.ts), and so are the ids that let a
+  // tap on a clef, slur, tie or hairpin be traced back to the model (elements.ts).
+  if (!tk.loadData(serializeMusicXml({ ...score, partName: "", title: undefined }, { beams: beamScore(score), drawingIds: true }))) throw new Error("Verovio could not read the score");
   const pages: string[] = [];
   for (let page = 1; page <= tk.getPageCount(); page++) pages.push(tk.renderToSVG(page));
   return pages;

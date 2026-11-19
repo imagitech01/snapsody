@@ -202,7 +202,7 @@ library in headless Chromium, one file at a time.
   first start of a tab). The router starts again at the Practice tab.
 - **Tests today:** `harness.test.ts` (the app's own entry starts and an empty phone gets the invitation, a `.wasm` file is
   served as `application/wasm`, other hosts are refused, the test audio clock follows `page.clock`, and the component gallery,
-  see "Design review"), `samples.test.ts` (every bundled sample decodes), and the journeys, one file per main flow, each
+  `web/dev/gallery.tsx`), `samples.test.ts` (every bundled sample decodes), and the journeys, one file per main flow, each
   growing as its screens are built:
   - `practice.test.ts`: the home (task 12.1): continue card, rotation, shortcuts, first launch, refresh on return, Dutch;
     and practising (task 13): continue, Play and Pause with the real sound, the screen kept awake, the tempo and metronome,
@@ -254,29 +254,16 @@ running: `make test-mac` takes 87–95 s warm, against the budget of 3 min (the 
 - `node --test test/ui/<journey>.test.ts`: one journey against the last build, without building.
 - `make test-mac`: everything, before a commit.
 
-## Design review
+## Checking a screen by eye
 
-Figma is the design to aim for, not a specification; the review is by eye and never fails a build.
+The Figma design is finished and is not updated; new screens are not compared with it. A UI task is checked by
+eye in the app itself and is named as manual in its tasks:
 
-- `docs/design/figma/frames.json` lists the Figma frames the app is compared with: name, node id
-  and size (the file key is kept out of the repo). `docs/design/figma/<frame>.png` is the frame as
-  exported when a change built against it.
-- A journey step names the frame its screen implements: `await review(page, '03.1 · Music library')`
-  (`web/test/ui/review.ts`). Under `make ui-review` (which sets `UI_REVIEW=1`), the screen is
-  captured at the frame's size into `build/ui-review/`, scrolled to the top and with the safe areas the frames leave for
-  the phone's bars (by default a 48px status bar and 26px under the tab bar; the browser has none), so the overlay lines up; in the
-  test layers the call does nothing. A name with a suffix that is not a frame (`01 · Practice home · first launch`) shows
-  a state the frames do not draw, with "no reference" beside it.
-- The real screens of frames 01, 02.1 to 02.4, 03.1, 03.2, 05, 06.1 to 06.3 and 07 are captured by the journeys of `practice`, `library`,
-  `addMusic`, `edit` and `settings`; the sheets of 02.3 and 02.4 are captured open over the real practice screen. A frame that leaves
-  other room for the phone's bars than the default says so in `frames.json` (`safeTop`, `safeBottom`: the landscape frame 02.2
-  has no status bar). Frames 04.1 to 04.3 are listed in `frames.json` as replaced by the phone's page scanner (they have no PNG).
-- `make ui-review` runs the UI tests for their screenshots (it does not need `make test-mac` first), then writes and opens
-  `build/ui-review/index.html`: each screen beside its frame, an overlay toggle (Figma at 50% over
-  the app), and the notes for that frame from `docs/design/deviations.md`. A frame without an
-  exported PNG shows "no reference".
-- A change that implements a screen exports its frame, adds it to `frames.json`, calls `review()`
-  in the journey, and records each deliberate difference in `deviations.md` with its reason.
+- Run the app in browser-dev (`cd web && npm run dev`, see "Running the app in browser-dev") in desktop Chrome, with the
+  device toolbar at 360 × 780 (the S24's WebView size; 780 × 360 for landscape).
+- Look at the screen in English and in Dutch (Settings, Language).
+- `docs/design/deviations.md` records how the screens differed from the last Figma design on 2026-11-19. It is not
+  added to.
 
 ## The Capacitor app
 

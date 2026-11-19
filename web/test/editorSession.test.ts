@@ -11,7 +11,7 @@ import { loadSettings } from '../src/app/settings.ts'
 import { preparePages } from '../src/core/pages/pages.ts'
 import type { AudioBackend } from '../src/core/playback/player.ts'
 import type { NoteOnSpec, TimerApi } from '../src/core/playback/scheduler.ts'
-import { deleteNote, insertNote, setDuration, stepPitch } from '../src/core/score/edit.ts'
+import { addSlur, deleteElement, deleteNote, insertNote, setBarEnd, setBarStart, setDuration, setRepeatTimes, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
 import { notesOf } from '../src/core/score/model.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
@@ -138,6 +138,73 @@ test('edits: a pitch step with undo and redo; the score signal follows, and undo
   }), /not allowed/)
   assert.equal(editor.undo(), true)
   assert.equal(editor.canUndo.value, false)
+})
+
+test('edits: the selected bar\'s bar lines follow the selection, every edit, undo and redo (change edit-bar-lines)', async () => {
+  const { editor } = await setup()
+  assert.equal(editor.selectedBarLines.value, undefined, 'no bar selected')
+  editor.selectBar(2)
+  assert.deepEqual(editor.selectedBarLines.value, { start: 'normal', end: 'normal', times: 2 }, 'a bar without a note')
+  editor.apply((s) => setBarStart(s, 1, 'repeat'))
+  editor.apply((s) => setBarEnd(s, 1, 'repeat'))
+  editor.apply((s) => setRepeatTimes(s, 1, 3))
+  assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 3 })
+  editor.undo()
+  assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 2 })
+  editor.undo()
+  assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'normal', times: 2 })
+  editor.redo()
+  assert.equal(editor.selectedBarLines.value!.end, 'repeat')
+  const [g5] = idsOf(editor, 2)
+  editor.selectBar(1)
+  assert.equal(editor.selectedBarLines.value!.start, 'normal', 'another bar')
+  editor.select(g5!)
+  assert.equal(editor.selectedBarLines.value!.start, 'repeat', 'a note in the bar selects it too')
+  editor.clearSelection()
+  assert.equal(editor.selectedBarLines.value, undefined)
+})
+
+test('selection: an element other than a note is selected with its bar, follows edits, goes when deleted, and comes back on undo (change select-and-delete-elements)', async () => {
+  const { editor } = await setup()
+  const [first, second] = idsOf(editor, 2)
+  editor.apply((s) => addSlur(s, first!, second!))
+  const slur = { kind: 'slur', noteId: first!, number: 1 } as const
+  assert.equal(editor.selectElement({ kind: 'dynamic', id: 'nope' }), false, 'not in the score: nothing changes')
+  assert.equal(editor.selection.value, null)
+  assert.ok(editor.selectElement(slur))
+  assert.deepEqual(editor.selection.value, { bar: 2, noteId: null }, 'its bar is selected, no note')
+  assert.deepEqual(editor.selectedElement.value, { ref: slur, info: { kind: 'slur', bar: 1, deletable: true } })
+  assert.equal(editor.selectedNote.value, undefined)
+
+  // An edit elsewhere keeps it; deleting it leaves its bar selected; undo selects it again.
+  editor.apply((s) => toggleStaccato(s, idsOf(editor, 1)[0]!))
+  assert.deepEqual(editor.selectedElement.value?.ref, slur)
+  editor.apply((s) => deleteElement(s, slur))
+  assert.equal(editor.selectedElement.value, undefined, 'gone with the slur')
+  assert.deepEqual(editor.selection.value, { bar: 2, noteId: null })
+  editor.undo()
+  assert.deepEqual(editor.selectedElement.value?.ref, slur, 'undo brings the slur and its selection back')
+  editor.redo()
+  assert.equal(editor.selectedElement.value, undefined)
+
+  // While it is gone, the next edit forgets it: adding a slur there again does not select it.
+  editor.apply((s) => addSlur(s, first!, second!))
+  assert.equal(editor.selectedElement.value, undefined)
+
+  // Selecting a note or a bar replaces it; a bar line selects its bar.
+  assert.ok(editor.selectElement(slur))
+  editor.select(second!)
+  assert.equal(editor.selectedElement.value, undefined)
+  assert.ok(editor.selectElement(slur))
+  editor.selectBar(1)
+  assert.equal(editor.selectedElement.value, undefined)
+  assert.ok(editor.selectElement({ kind: 'barline', bar: 3 }))
+  assert.deepEqual(editor.selection.value, { bar: 4, noteId: null })
+  assert.equal(editor.selectedElement.value, undefined, 'a bar line is its bar, not an element')
+  assert.ok(editor.selectElement({ kind: 'clef', bar: 0 }))
+  assert.equal(editor.selectedElement.value?.info.deletable, false, 'the first clef')
+  editor.clearSelection()
+  assert.equal(editor.selectedElement.value, undefined)
 })
 
 test('edits: a note inserted or deleted is selected the way the edit says; undoing an insert leaves its bar selected', async () => {

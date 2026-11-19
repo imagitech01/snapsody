@@ -141,8 +141,7 @@
   /* ---- Safe areas ------------------------------------------------------------------------ */
 
   /* The notch, the status bar and the navigation gesture bar, as the WebView reports them
-     (viewport-fit=cover in index.html). 0 where there is none. Frames show a 48px status bar and a
-     26px strip below the tab bar: the review page's mock sets these two to those values. */
+     (viewport-fit=cover in index.html). 0 where there is none. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);

@@ -1,5 +1,6 @@
-import type { Measure, MeasureItem, Note, NoteType, Pitch, Score, Step, TempoItem, TimeSignature, WedgeItem } from './model.ts'
-import { isNote, isWedge } from './model.ts'
+import type { ElementRef } from './elements.ts'
+import type { Clef, Measure, MeasureItem, Note, NoteType, Pitch, Score, Step, TempoItem, TimeSignature, WedgeItem } from './model.ts'
+import { freshDirectionId, isDirection, isNote, isWedge } from './model.ts'
 import { noteDuration } from './musicxml.ts'
 
 /*
@@ -600,7 +601,8 @@ export function setTempoMarking(score: Score, choice: TempoChoice): void {
   if (hasMark && !(choice.perMinute! > 0 && Number.isFinite(choice.perMinute!))) throw new EditError('The tempo must be a positive number')
   let item: TempoItem | undefined
   if (words || hasMark) {
-    item = { kind: 'tempo' }
+    // The marking keeps its id when it is replaced, so a selection of it stays.
+    item = { kind: 'tempo', id: firstTempoMarking(score)?.id ?? freshDirectionId(score) }
     if (words) item.words = words
     if (hasMark) {
       item.beatUnit = choice.beatUnit ?? 'quarter'
@@ -627,4 +629,263 @@ export function setTempoMarking(score: Score, choice: TempoChoice): void {
 export function firstTempoMarking(score: Score): TempoItem | undefined {
   for (const m of score.measures) for (const i of m.items) if (i.kind === 'tempo') return i
   return undefined
+}
+
+// ---------------------------------------------------------------- bar lines (change edit-bar-lines, design D1)
+
+export type BarStart = 'normal' | 'repeat'
+export type BarEnd = 'normal' | 'double' | 'repeat'
+
+export interface BarLines {
+  start: BarStart
+  end: BarEnd
+  /** How many times the section is played in total; 2 when the bar line does not say. */
+  times: number
+}
+
+/** The fewest and most passes the editor offers for an end-repeat. */
+export const MIN_REPEAT_TIMES = 2
+export const MAX_REPEAT_TIMES = 8
+
+/** Styles that read as a double bar line (a recognised final bar line `light-heavy` counts too, as in playback). */
+const DOUBLE_STYLES = new Set(['light-light', 'light-heavy', 'heavy-light', 'heavy-heavy'])
+const isPlainDouble = (b: Measure['leftBarline']): boolean => !!b && !b.repeat && !!b.style && DOUBLE_STYLES.has(b.style)
+
+function barAt(score: Score, index: number): Measure {
+  const m = Number.isInteger(index) ? score.measures[index] : undefined
+  if (!m) throw new EditError('That bar does not exist')
+  return m
+}
+
+/** Drops a bar line that says nothing any more (no style, repeat, count or ending). */
+function tidyBarlines(m: Measure): void {
+  for (const side of ['leftBarline', 'rightBarline'] as const) {
+    const b = m[side]
+    if (b && !b.style && !b.repeat && b.times === undefined && !b.ending) delete m[side]
+  }
+}
+
+/**
+ * Writes the boundary before bar `index` in one place: a double bar line written as the bar's left bar
+ * line (no repeat) moves to the right bar line of the bar before it, unless that one already has a
+ * style or a repeat of its own, in which case it is dropped. An ending on it stays where it is.
+ */
+function normalizeBoundary(score: Score, index: number): void {
+  if (index <= 0 || index >= score.measures.length) return
+  const m = score.measures[index]!
+  if (!isPlainDouble(m.leftBarline)) return
+  const prev = score.measures[index - 1]!
+  if (!prev.rightBarline?.style && !prev.rightBarline?.repeat) prev.rightBarline = { ...prev.rightBarline, style: 'light-light' }
+  delete m.leftBarline!.style
+  tidyBarlines(m)
+}
+
+/** How the bar `index` starts and ends, whichever side of a boundary recognition wrote a double bar line on. */
+export function barLinesOf(score: Score, index: number): BarLines {
+  const m = barAt(score, index)
+  const next = score.measures[index + 1]
+  const right = m.rightBarline
+  const end: BarEnd = right?.repeat === 'backward' ? 'repeat' : isPlainDouble(right) || isPlainDouble(next?.leftBarline) ? 'double' : 'normal'
+  return {
+    start: m.leftBarline?.repeat === 'forward' ? 'repeat' : 'normal',
+    end,
+    times: end === 'repeat' ? (right!.times ?? MIN_REPEAT_TIMES) : MIN_REPEAT_TIMES,
+  }
+}
+
+/** Sets how the bar `index` starts: a plain bar line or a start-repeat `||:`. An ending on the bar line stays. */
+export function setBarStart(score: Score, index: number, start: BarStart): void {
+  const m = barAt(score, index)
+  normalizeBoundary(score, index)
+  const ending = m.leftBarline?.ending
+  if (start === 'repeat') m.leftBarline = { style: 'heavy-light', repeat: 'forward', ...(ending ? { ending } : {}) }
+  else if (ending) m.leftBarline = { ending }
+  else delete m.leftBarline
+}
+
+/**
+ * Sets how the bar `index` ends: a plain bar line, a double bar line `||` or an end-repeat `:||`. The
+ * double bar line is always written as this bar's right bar line, so one on the next bar's left goes.
+ * An end-repeat that stays an end-repeat keeps its count; an ending on the bar line stays.
+ */
+export function setBarEnd(score: Score, index: number, end: BarEnd): void {
+  const m = barAt(score, index)
+  const next = score.measures[index + 1]
+  if (next && isPlainDouble(next.leftBarline)) {
+    delete next.leftBarline!.style
+    tidyBarlines(next)
+  }
+  const old = m.rightBarline
+  const ending = old?.ending ? { ending: old.ending } : {}
+  if (end === 'repeat') {
+    const times = old?.repeat === 'backward' && old.times !== undefined && old.times !== MIN_REPEAT_TIMES ? { times: old.times } : {}
+    m.rightBarline = { style: 'light-heavy', repeat: 'backward', ...times, ...ending }
+  } else if (end === 'double') m.rightBarline = { style: 'light-light', ...ending }
+  else if (old?.ending) m.rightBarline = { ...ending }
+  else delete m.rightBarline
+}
+
+/** Sets how many times the section that ends in the end-repeat of bar `index` is played in total (2–8). */
+export function setRepeatTimes(score: Score, index: number, times: number): void {
+  const m = barAt(score, index)
+  if (!Number.isInteger(times) || times < MIN_REPEAT_TIMES || times > MAX_REPEAT_TIMES) throw new EditError(`A repeat is played ${MIN_REPEAT_TIMES} to ${MAX_REPEAT_TIMES} times`)
+  const right = m.rightBarline
+  if (right?.repeat !== 'backward') throw new EditError('Only a bar that ends in an end-repeat has a number of passes')
+  if (times === MIN_REPEAT_TIMES) delete right.times
+  else right.times = times
+}
+
+// ---------------------------------------------------------------- clefs, key and time changes (change select-and-delete-elements, D3, D4)
+
+const CLEF_SIGNS = new Set(['G', 'F', 'C'])
+
+/** A pitch as a number of diatonic steps from C0 (C4 is 28, B4 is 34). */
+const diatonic = (p: Pitch): number => p.octave * 7 + STEPS.indexOf(p.step)
+
+/**
+ * The pitch on the middle line of the staff under a clef, in diatonic steps: B4 for a treble clef, D3 for a
+ * bass clef, C4 for an alto clef. The clef's own note is on its line (G4, F3 or C4), each line two steps
+ * from the next, and an octave change moves it seven.
+ */
+function middleLine(clef: Clef): number {
+  const sign = CLEF_SIGNS.has(clef.sign) ? clef.sign : 'G'
+  const line = clef.line ?? (sign === 'G' ? 2 : sign === 'F' ? 4 : 3)
+  const own = sign === 'G' ? 4 * 7 + 4 : sign === 'F' ? 3 * 7 + 3 : 4 * 7
+  return own - (line - 3) * 2 + 7 * (clef.octaveChange ?? 0)
+}
+
+/** The clef in force at bar `index` (from 0): the last one set at or before it, else treble. */
+export function clefAt(score: Score, index: number): Clef {
+  for (let b = Math.min(index, score.measures.length - 1); b >= 0; b--) {
+    const clef = score.measures[b]!.clef
+    if (clef) return clef
+  }
+  return { sign: 'G', line: 2 }
+}
+
+/** The last bar (from 0) that the clef set at bar `index` applies to: the bar before the next clef change, or the last bar. */
+function clefRangeEnd(score: Score, index: number): number {
+  for (let b = index + 1; b < score.measures.length; b++) if (score.measures[b]!.clef) return b - 1
+  return score.measures.length - 1
+}
+
+/**
+ * Moves every pitched note of bars `from..to` by the difference between two clefs, so each stays on its
+ * line or space of the staff (design D3), then works out the alters again: a printed accidental stays with
+ * its note, any other note takes its alter from the key. One bar past the range too, for a tie into it.
+ */
+function keepStaffPositions(score: Score, from: number, to: number, before: Clef, after: Clef): void {
+  const shift = middleLine(after) - middleLine(before)
+  if (shift === 0) return
+  for (let b = from; b <= to; b++) {
+    for (const item of score.measures[b]!.items) {
+      if (!isNote(item) || !item.pitch) continue
+      const moved = diatonic(item.pitch) + shift
+      item.pitch.octave = Math.floor(moved / 7)
+      item.pitch.step = STEPS[((moved % 7) + 7) % 7]!
+    }
+  }
+  resolveAlters(score, from, Math.min(to + 1, score.measures.length - 1))
+}
+
+/**
+ * Sets the clef at bar `index` (from 0), the first one or a change, and keeps every note where it is on the
+ * staff up to the next clef change: their pitches are read again under the new clef (spec "Fix a clef").
+ */
+export function setClef(score: Score, index: number, clef: Clef): void {
+  const m = barAt(score, index)
+  if (!CLEF_SIGNS.has(clef.sign)) throw new EditError('A clef is a treble, bass or C clef')
+  const before = clefAt(score, index)
+  m.clef = { ...clef }
+  keepStaffPositions(score, index, clefRangeEnd(score, index), before, clef)
+}
+
+/**
+ * Deletes the clef change at bar `index`: the clef before it applies again, and the notes keep their place
+ * on the staff. The first clef is changed, not deleted.
+ */
+export function deleteClef(score: Score, index: number): void {
+  const m = barAt(score, index)
+  if (index === 0) throw new EditError('The first clef can be changed, not deleted')
+  if (!m.clef) throw new EditError('There is no clef change in that bar')
+  const before = m.clef
+  const end = clefRangeEnd(score, index)
+  delete m.clef
+  keepStaffPositions(score, index, end, before, clefAt(score, index - 1))
+}
+
+/** Deletes the key change at bar `index`: the key before it applies again to the notes without their own accidental. */
+export function deleteKey(score: Score, index: number): void {
+  const m = barAt(score, index)
+  if (index === 0) throw new EditError('The first key signature is changed in the Score tab, not deleted')
+  if (!m.key) throw new EditError('There is no key change in that bar')
+  delete m.key
+  resolveAlters(score, index)
+}
+
+/** Deletes the time signature change at bar `index`: the one before it applies again (the bar check shows any bar that no longer fits). */
+export function deleteTime(score: Score, index: number): void {
+  const m = barAt(score, index)
+  if (index === 0) throw new EditError('The first time signature is changed in the Score tab, not deleted')
+  if (!m.time) throw new EditError('There is no time signature change in that bar')
+  delete m.time
+}
+
+// ---------------------------------------------------------------- deleting a selected element (change select-and-delete-elements, D1)
+
+/**
+ * Deletes the element `ref` names, and only that (spec "Delete an element"). A slur or tie goes with both
+ * its ends. The first clef, key and time signature, and bar lines, are not deleted. Throws `EditError` when
+ * the element is not there.
+ */
+export function deleteElement(score: Score, ref: ElementRef): void {
+  const gone = (): never => {
+    throw new EditError('That element is no longer in the score')
+  }
+  switch (ref.kind) {
+    case 'clef':
+      return deleteClef(score, ref.bar)
+    case 'key':
+      return deleteKey(score, ref.bar)
+    case 'time':
+      return deleteTime(score, ref.bar)
+    case 'barline':
+      throw new EditError('A bar line is changed, not deleted')
+    case 'dynamic':
+    case 'tempo':
+    case 'words':
+      for (const m of score.measures) {
+        const at = m.items.findIndex((i) => isDirection(i) && i.kind === ref.kind && i.id === ref.id)
+        if (at >= 0) {
+          m.items.splice(at, 1)
+          return
+        }
+      }
+      return gone()
+    case 'slur': {
+      const { note } = locate(score, ref.noteId)
+      if (!note.slurs.some((s) => s.type === 'start' && s.number === ref.number)) return gone()
+      return removeSlur(score, ref.noteId, ref.number, 'start')
+    }
+    case 'tie': {
+      const { note } = locate(score, ref.noteId)
+      if (!note.tieStart) return gone()
+      return toggleTie(score, ref.noteId)
+    }
+    case 'wedge':
+      for (const m of score.measures) {
+        const at = m.items.findIndex((i) => isWedge(i) && i.start === ref.startId)
+        if (at >= 0) {
+          m.items.splice(at, 1)
+          return
+        }
+      }
+      return gone()
+    case 'articulation': {
+      const { note } = locate(score, ref.noteId)
+      if (!note[ref.mark]) return gone()
+      delete note[ref.mark]
+      return
+    }
+  }
 }

@@ -2,11 +2,13 @@ import { computed, signal } from '@preact/signals'
 import { useMemo, useState } from 'preact/hooks'
 import type { EditorSession } from '../../../app/editorSession.ts'
 import { EditError, addSlur, addTie, addWedge } from '../../../core/score/edit.ts'
+import type { ElementRef } from '../../../core/score/elements.ts'
 import { isNote } from '../../../core/score/model.ts'
 import type { Score } from '../../../core/score/model.ts'
 import { Button, Icon, IconButton, SegmentedControl } from '../../components/index.ts'
 import { ScoreIsland } from '../../ScoreIsland.tsx'
 import { useShell } from '../../ShellContext.ts'
+import { ElementPanel } from './ElementPanel.tsx'
 import { GoToBarSheet, PagesSheet } from './EditorSheets.tsx'
 import { MarksTab } from './MarksTab.tsx'
 import type { PickState, PickKind } from './MarksTab.tsx'
@@ -74,6 +76,7 @@ export function Editor({ session }: { session: EditorSession }) {
         const id = session.selection.value?.noteId
         return id ? [id] : []
       }),
+      selectedElement: computed(() => session.selectedElement.value?.ref),
       flagged,
       flaggedBars,
     }
@@ -118,6 +121,24 @@ export function Editor({ session }: { session: EditorSession }) {
     const { kind } = pick
     setPick(null)
     run((s) => (kind === 'slur' ? addSlur(s, from, to) : kind === 'tie' ? addTie(s, from, to) : addWedge(s, kind, from, to)), PICK_ERROR[kind])
+  }
+
+  /**
+   * A tap on the score that found an element, or (undefined) nothing: an element is selected and shown in
+   * its panel; a bar line selects its bar and shows the bar-line controls on the Marks tab; an empty tap
+   * puts away the element, keeping its bar. While the notes of a slur, tie or hairpin are being chosen,
+   * only notes count.
+   */
+  const tapElement = (ref: ElementRef | undefined): void => {
+    if (pick) return
+    setMessage(null)
+    if (!ref) {
+      const element = session.selectedElement.peek()
+      if (element) session.selectBar(element.info.bar + 1)
+      return
+    }
+    if (!session.selectElement(ref)) return
+    if (ref.kind === 'barline') setTab('marks')
   }
 
   const startPick = (kind: PickKind | null): void => {
@@ -278,6 +299,8 @@ export function Editor({ session }: { session: EditorSession }) {
                   island.shownBar.value = bar
                 }}
                 onTapNote={(id) => tapNote(id)}
+                onTapElement={tapElement}
+                selectedElement={island.selectedElement}
               />
             </div>
           </section>
@@ -285,6 +308,7 @@ export function Editor({ session }: { session: EditorSession }) {
           <PhotoStrip session={session} onPreview={() => void preview()} />
 
           <section class="editor-tools" aria-label={t('editor.tabs')}>
+            <ElementPanel session={session} run={run} />
             <SegmentedControl
               look="track"
               label={t('editor.tabs')}

@@ -74,6 +74,7 @@ test('catalogues: Dutch is translated, except the words that are the same in bot
     'mark.accent',
     'mark.crescendo',
     'mark.diminuendo',
+    'barline.timesValue', // "3×"
     'add.reading.progress',
     'language.en', // a language is named in its own words, in both languages
     'language.nl',

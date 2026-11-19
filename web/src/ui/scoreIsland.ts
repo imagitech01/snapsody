@@ -4,6 +4,7 @@ import { CursorDriver, CursorTracker, scrollDelta } from '../core/playback/curso
 import type { HighlightTarget } from '../core/playback/cursor.ts'
 import type { Position } from '../core/playback/scheduler.ts'
 import type { Score } from '../core/score/model.ts'
+import type { ElementRef } from '../core/score/elements.ts'
 import type { NoteInfo } from '../core/score/noteMap.ts'
 import { createScoreView } from './scoreView.ts'
 import type { ScoreView } from './scoreView.ts'
@@ -58,6 +59,13 @@ export interface ScoreIslandOptions {
   onScrollAway: (bar: number) => void
   /** The user tapped a note or rest. */
   onTapNote: (noteId: string, info: NoteInfo) => void
+  /**
+   * Opt-in (the editor): taps first look for the element under the finger (a clef, a dynamic, a slur, a bar
+   * line, ...), then for a note; a tap on neither calls this with undefined. Without it, taps are notes only.
+   */
+  onTapElement?: (ref: ElementRef | undefined) => void
+  /** The element to show as selected (the editor), by reference. */
+  selectedElement?: ReadonlySignal<ElementRef | undefined>
 }
 
 export interface ScoreIslandHandle {
@@ -197,6 +205,7 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
 
   const view: ScoreView = createScoreView(host, score, {
     onTap: (info) => options.onTapNote(info.note.id, info),
+    ...(options.onTapElement ? { onTapElement: (ref: ElementRef | undefined) => options.onTapElement?.(ref) } : {}),
     // The old drawing is still there: remember what to bring back into view once the new one is.
     onBeforeRender: () => {
       if (firstLayout) return
@@ -277,6 +286,11 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
     effect(() => {
       const ids = options.selected?.value ?? []
       view.mark('sel', [...ids])
+    }),
+  )
+  stops.push(
+    effect(() => {
+      view.markElement(options.selectedElement?.value)
     }),
   )
   stops.push(

@@ -3,7 +3,6 @@ import { test } from 'node:test'
 import type { Page } from 'playwright'
 import { withApp } from './app.ts'
 import { tab, tabBar, textOf } from './journey.ts'
-import { review } from './review.ts'
 
 // The settings journey (practice-app design D15 and D19, "settings: default instrument, language"; tasks 12.3, 13.6; specs
 // `app-shell` "English and Dutch" and "General settings", `instruments` "Default instrument" and "Recorded instrument
@@ -28,13 +27,11 @@ test('settings: the default instrument is one line that opens a sheet with all i
     assert.equal(await page.getByRole('radio').count(), 0, 'the lists are behind their lines')
     assert.equal(await page.getByText('Pitch reference').count(), 0, 'no pitch reference any more')
     assert.match(await textOf(line(page, 'Default instrument')), /Tenor saxophone/, 'until the user chooses, the tenor saxophone')
-    await review(page, '07 · Global instrument settings')
 
     await line(page, 'Default instrument').click()
     const group = page.getByRole('dialog').getByRole('radiogroup', { name: 'Default instrument' })
     await group.waitFor()
     await page.waitForTimeout(450)
-    await review(page, '07 · Default instrument sheet')
     assert.deepEqual(
       (await group.getByRole('radio').allTextContents()).map((text) => text.replace(/Woodwind|Keyboard|Strings|Brass/, '').trim()),
       ['Tenor saxophone', 'Alto saxophone', 'B♭ clarinet', 'Piano', 'Guitar', 'Violin', 'Trumpet'],
@@ -80,7 +77,6 @@ test('settings: switching to Dutch changes the texts at once, and it persists ac
     await line(page, 'Language').click()
     assert.equal(await choice(page, 'Language', 'Same as the phone (English)').getAttribute('aria-checked'), 'true', 'the phone is English: no choice yet')
     await page.waitForTimeout(450)
-    await review(page, '07 · Language sheet')
     // Back closes the sheet and changes nothing.
     assert.equal(await app.back(), true)
     await page.getByRole('dialog').waitFor({ state: 'detached' })
@@ -97,7 +93,6 @@ test('settings: switching to Dutch changes the texts at once, and it persists ac
     assert.match(await textOf(line(page, 'Taal')), /Nederlands/)
     assert.equal(((await saved(app)) as { language: string }).language, 'nl')
     await line(page, 'Standaardinstrument').waitFor()
-    await review(page, '07 · Global instrument settings · Dutch')
 
     // Every screen speaks Dutch, a piece is a "muziekstuk".
     await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Oefenen' }).click()

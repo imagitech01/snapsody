@@ -36,13 +36,16 @@ export function ScoreIsland(props: ScoreIslandProps) {
       heard: () => latest.current.heard(),
       onScrollAway: (bar) => latest.current.onScrollAway(bar),
       onTapNote: (id, info) => latest.current.onTapNote(id, info),
+      // Opt-in: only the editor passes it, so the practice screen keeps resolving taps to notes alone.
+      ...(props.onTapElement ? { onTapElement: (ref) => latest.current.onTapElement?.(ref) } : {}),
+      ...(props.selectedElement ? { selectedElement: props.selectedElement } : {}),
     })
     handle.current = island
     return () => {
       island.dispose()
       handle.current = undefined
     }
-  }, [props.bar, props.following, props.shownBar, props.playing, props.selected, props.flagged, props.flaggedBars])
+  }, [props.bar, props.following, props.shownBar, props.playing, props.selected, props.flagged, props.flaggedBars, props.selectedElement])
 
   useEffect(() => {
     void handle.current?.setScore(props.score)

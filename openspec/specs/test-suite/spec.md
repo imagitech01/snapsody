@@ -80,17 +80,6 @@ The device command SHALL run the smoke test on an Android emulator that it start
 - **WHEN** the device command is asked to use the connected S24
 - **THEN** the same smoke test runs on the phone
 
-### Requirement: Screens can be compared with the design
-The project SHALL provide one command that shows each screen reached in the journey tests next to its Figma reference frame, together with the deviations recorded for that frame. The comparison SHALL be for review by eye only. It SHALL never fail a test layer.
-
-#### Scenario: Reviewing a redesigned screen
-- **WHEN** a change has implemented the practice screen and the review command runs
-- **THEN** the app's practice screen is shown beside the "02.1 · Play along — Portrait" frame, with an overlay toggle and the recorded deviations
-
-#### Scenario: A screen differs from Figma
-- **WHEN** the app's screen differs from its frame
-- **THEN** no test fails, and the difference is either fixed or recorded with its reason
-
 ### Requirement: Bundled sound files are checked off the phone
 The mac layer SHALL decode every bundled instrument sample file in the desktop browser, and SHALL fail when a file is missing from its map or does not decode.
 

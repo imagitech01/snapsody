@@ -8,7 +8,6 @@ import { withApp } from './app.ts'
 import type { App } from './app.ts'
 import { tab, textOf } from './journey.ts'
 import { ID } from './pieces.ts'
-import { review } from './review.ts'
 import { barsScore } from './scores.ts'
 
 // The add-music journey (practice-app design D15, "add music: hint, fake scan of 2 pages, reading, one piece";
@@ -92,7 +91,6 @@ test('add music: the hint, a scan of two pages, the pages being read, and one pi
     assert.match(hint, /Crop each page to the music you want to practise\./)
     assert.match(hint, /If the music continues on the next page, add that page too\./)
     assert.equal(await page.getByRole('navigation').count(), 0, 'no tab bar while adding music')
-    await review(page, '04 · Before you scan (hint)')
 
     // The user switches the hint off for the next time and opens the scanner; two pages come back.
     await scanReturns(page, 2)
@@ -118,7 +116,6 @@ test('add music: the hint, a scan of two pages, the pages being read, and one pi
     const photo = page.getByRole('img', { name: 'Page 2' })
     await photo.waitFor()
     assert.equal(await photo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0), true, 'the page photo loads')
-    await review(page, '05 · Process scan')
 
     // The rest is read: one piece of both pages is saved, and practice opens for it.
     await readerFinishes(page)
@@ -161,7 +158,6 @@ test('add music: no music on page 2 says which page, creates nothing, and scanni
     assert.match(await textOf(message), /There is no music on page 2\. Scan it again, cropped to the music\./)
     assert.deepEqual(await pieceIds(app), [], 'no piece')
     assert.deepEqual(await scanFiles(app), [], 'no page is kept')
-    await review(page, '05 · Process scan · no music on page 2')
 
     // Scan again: the scanner opens for all the pages once more.
     await scanReturns(page, 2)
@@ -276,7 +272,6 @@ test('add music: the page scanner not being available is explained, and nothing 
     assert.match(await textOf(message), /not available on this phone right now\. Updating Google Play services may help\./)
     assert.deepEqual(await message.getByRole('button').evaluateAll((buttons) => buttons.map((b) => b.textContent)), ['OK'], 'no other way to add music')
     assert.equal(await page.getByRole('button', { name: 'Scan again' }).count(), 0)
-    await review(page, '05 · Process scan · scanner not available')
 
     await message.getByRole('button', { name: 'OK' }).click()
     await page.getByRole('heading', { name: 'Let’s practise', level: 1 }).waitFor()

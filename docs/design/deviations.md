@@ -1,9 +1,13 @@
 # Deviations from the Figma design
 
-Figma is the design to aim for, not a specification. Each frame the app is compared with
-(`make ui-review`, see `docs/testing.md`) has a section here: what differs from the frame and
-why. The review page shows these notes next to the screens, so a known difference is not
-mistaken for a new one. Fix a difference or record it here with its reason.
+A record, no longer added to. The Figma design is finished (2026-11-19) and is not updated; later changes
+are checked by eye in the app (`docs/testing.md`, "Checking a screen by eye"), not against the frames. The notes
+describe the screens as they were on 2026-11-19; a later change may have changed a screen without a note here.
+
+While the app was built against Figma, each frame it was compared with had a section here: what differed from the
+frame and why. The comparison was `make ui-review` (removed by the change `retire-figma-review`), which showed each
+journey's capture ("the review captures …" below) beside its frame with these notes. The frames themselves are in the
+Figma file; the exported PNGs are in git history under `docs/design/figma/`.
 
 ## All frames: denser than the frames (D18)
 
@@ -235,6 +239,32 @@ mistaken for a new one. Fix a difference or record it here with its reason.
 - "Cresc." and "Dim." are written in full ("Crescendo", "Diminuendo"): the chips have room, and the spec calls them by those names.
 - Staccato, Tenuto and Accent are off on a rest (they cannot be on one) and all four single-note marks are off while no note is selected.
 - The frame draws the staccato dot under the note head; the real score draws it where the engraver puts it.
+- A "Bar N" group is added under the marks (change `edit-bar-lines`, design D2); the frame has none. It sets how the selected bar
+  starts (plain or start-repeat ‖:) and ends (plain, double bar line ‖ or end-repeat :‖), and for an end-repeat how many times
+  the section is played (2× to 8×). It uses the Score tab's selects and compact stepper, a label column and an 11rem control
+  column, under a thin divider. It acts on the selected bar, with or without a note, and is disabled with no bar selected
+  ("Bar lines" is its heading then). The review captures it as "06.2 · Edit score — Marks · bar lines" (and "· Dutch"), scrolled so
+  the group shows.
+
+## 06.2 · Edit score — Element panel
+
+- The frames have no panel for a selected element; this is a planned deviation (design D5). Tapping a clef, key or time
+  signature, dynamic, tempo mark, text, hairpin, slur, tie or articulation selects it, draws it in the accent colour, and shows a
+  compact panel **above the tabs** (the tabs and the selection line stay as in the frames): the element's name and bar
+  ("Clef · bass · bar 3", "Dynamic · mf · bar 2"), a red **Delete** chip (the same chip as "Delete note"), and for a clef a
+  Treble/Bass select in the tabs' own select style. The first clef, key and time signature have no Delete, and say so in a hint line.
+- Tapping a note or an empty part of the score puts the panel away. Tapping a bar line selects its bar and shows the Marks tab, whose
+  "Bar N" group sets how the bar starts and ends.
+- Change `select-and-delete-elements`, design D5. The panel applies to the three tabs (frames 06.1 to 06.3); the review captures it
+  with an *mf* selected, scrolled so the panel shows.
+
+## 06.2 · Edit score — Element panel · clef
+
+- No frame: the panel for a clef, with its Treble/Bass select and Delete. See "06.2 · Edit score — Element panel".
+
+## 06.2 · Edit score — Element panel · Dutch
+
+- No frame: the same panel with the language set to Dutch, to see the longer words fit.
 
 ## 06.3 · Edit score — Score settings
 

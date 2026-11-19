@@ -11,6 +11,7 @@ import { ACCENT_DB, DYNAMIC_GAIN, MAX_ATTACK_GAIN, buildTimeline, expandMeasureO
 import type { PlaybackEvent } from '../src/core/playback/timeline.ts'
 import { COMMITTED_FIXTURE, read } from './helpers.ts'
 import { barOf, dyn, n, scoreOf, scoreXml, tenorTimeline, wedge } from './playbackHelpers.ts'
+import { setBarEnd, setBarStart, setRepeatTimes } from '../src/core/score/edit.ts'
 
 const order = (bars: Parameters<typeof scoreOf>[0]): number[] =>
   expandMeasureOrder(scoreOf(bars).measures).map((p) => p.barIndex + 1)
@@ -126,6 +127,55 @@ test('timeline: a double bar line inside a section with a forward sign does not 
     barOf('F'),
   ]
   assert.deepEqual(order(bars), [1, 2, 3, 1, 2, 3, 4])
+})
+
+// --- edit-bar-lines task 1.3: playback follows the bar lines the user sets in the editor ---
+
+const playedOrder = (s: ReturnType<typeof scoreOf>): number[] => expandMeasureOrder(s.measures).map((p) => p.barIndex + 1)
+
+test('timeline: a start-repeat the user adds wins over the double-bar-line fallback (exercise 82)', () => {
+  const s = scoreOf([
+    barOf('C', { right: '<repeat direction="backward"/>' }),
+    barOf('G', { right: '<bar-style>light-light</bar-style>' }),
+    barOf('D', { right: '<repeat direction="backward"/>' }),
+    barOf('G', { right: '<bar-style>light-light</bar-style>' }),
+  ])
+  setBarStart(s, 2, 'repeat')
+  assert.deepEqual(playedOrder(s), [1, 1, 2, 3, 3, 4])
+  // Without the double bar line, the repeat goes back to the start until the user adds the start-repeat.
+  const plain = scoreOf([barOf('C', { right: '<repeat direction="backward"/>' }), barOf('G'), barOf('D', { right: '<repeat direction="backward"/>' }), barOf('G')])
+  assert.deepEqual(playedOrder(plain), [1, 1, 2, 3, 1, 2, 3, 4])
+  setBarStart(plain, 2, 'repeat')
+  assert.deepEqual(playedOrder(plain), [1, 1, 2, 3, 3, 4])
+})
+
+test('timeline: an end-repeat the user adds, a count of 3, and an end set back to normal', () => {
+  const s = scoreOf([barOf('C'), barOf('D'), barOf('E')])
+  setBarEnd(s, 1, 'repeat')
+  assert.deepEqual(playedOrder(s), [1, 2, 1, 2, 3])
+  setRepeatTimes(s, 1, 3)
+  assert.deepEqual(playedOrder(s), [1, 2, 1, 2, 1, 2, 3])
+  const misread = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F', { right: '<repeat direction="backward"/>' }), barOf('G')])
+  setBarEnd(misread, 3, 'normal')
+  assert.deepEqual(playedOrder(misread), [1, 2, 3, 4, 5])
+})
+
+test('timeline: first and second endings still play right after the count of the first ending changes; a "1." ending still plays twice at 3x', () => {
+  const s = scoreOf([
+    barOf('C', { left: '<repeat direction="forward"/>' }),
+    barOf('D'),
+    barOf('E', { left: '<ending number="1" type="start"/>', right: '<ending number="1" type="stop"/><repeat direction="backward"/>' }),
+    barOf('F', { left: '<ending number="2" type="start"/>', right: '<ending number="2" type="discontinue"/>' }),
+    barOf('G'),
+  ])
+  setRepeatTimes(s, 2, 3)
+  // Known gap (design.md Risks): the "1." ending is skipped on pass 2, so its end-repeat is never reached again,
+  // and the section plays twice although the control says 3x. Endings and counts are pinned as they play now.
+  assert.deepEqual(playedOrder(s), [1, 2, 3, 1, 2, 4, 5])
+  assert.equal(s.measures[2]!.leftBarline?.ending?.number, '1', 'the first ending is still there')
+  setRepeatTimes(s, 2, 2)
+  assert.deepEqual(playedOrder(s), [1, 2, 3, 1, 2, 4, 5])
+  assert.deepEqual(tenorTimeline(s).events.map((e) => e.pass), [1, 1, 1, 2, 2, 2, 1], 'the second ending plays on the last pass')
 })
 
 test('timeline: no repeats means one pass in score order; bar positions are exact beats', () => {

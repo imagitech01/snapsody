@@ -4,7 +4,8 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_PRACTICE, PIECE_FORMAT, createLibrary } from '../src/app/library.ts'
 import { DEFAULT_SETTINGS, loadSettings } from '../src/app/settings.ts'
-import { parseMusicXml } from '../src/core/score/musicxml.ts'
+import { isDirection } from '../src/core/score/model.ts'
+import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
 import type { FakeFiles } from '../src/platform/fake/index.ts'
 
@@ -146,4 +147,24 @@ test('stored formats: v2 holds the piece the app wrote, with every field read ba
   const settings = await loadSettings(files)
   // Its settings.json has no countIn yet (off), and still has a pitchReference from before design D19: ignored.
   assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: false, language: 'nl', scanHintSeen: true })
+})
+
+test('stored formats: a piece saved before dynamics, tempo marks and words had ids loads, and gets unique ones (change select-and-delete-elements, design D1)', async () => {
+  const files = openStore('v2-before-direction-ids')
+  const library = createLibrary(files)
+  const { musicxml } = await library.load('00000000-0000-4000-8000-000000000003')
+  assert.ok(!/<direction id=/.test(musicxml), 'the stored file is from before the ids')
+  const score = parseMusicXml(musicxml)
+  const items = score.measures.flatMap((m) => m.items.filter(isDirection))
+  assert.deepEqual(
+    items.map((i) => i.kind),
+    ['tempo', 'dynamic', 'dynamic', 'dynamic', 'words', 'dynamic'],
+    'a tempo mark and the mf in bar 1, two dynamics in bar 3, words in bar 5, the dynamic of page 2',
+  )
+  const ids = items.map((i) => i.id)
+  assert.equal(new Set(ids).size, ids.length, `unique: ${ids.join(', ')}`)
+  // The next save writes them, and they read back the same.
+  const saved = serializeMusicXml(score)
+  assert.equal([...saved.matchAll(/<direction id="/g)].length, items.length)
+  assert.deepEqual(parseMusicXml(saved).measures.flatMap((m) => m.items.filter(isDirection).map((i) => i.id)), ids)
 })

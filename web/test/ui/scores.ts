@@ -23,3 +23,18 @@ export function barsScore(bars: number, tempo = 60): string {
   const measures = Array.from({ length: bars }, (_, i) => `<measure number="${i + 1}">${i === 0 ? first : ''}${notes}</measure>`).join('')
   return `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Tenor Saxophone</part-name></score-part></part-list><part id="P1">${measures}</part></score-partwise>`
 }
+
+/**
+ * Four bars of 4/4 quarter notes for the element journeys: a slur over the first two notes of bar 1, an *mf*
+ * under the first note of bar 2, a staccato on its third note, and a bass clef at bar 3 that was misread (bars 3 and 4 hold D3 F3 A3 C4 and
+ * stay under it until the end), so deleting that clef must read them as B4 D5 F5 A5.
+ */
+export function elementsScore(): string {
+  const q = (step: string, octave: number, notations = '') =>
+    `<note><pitch><step>${step}</step><octave>${octave}</octave></pitch><duration>1</duration><voice>1</voice><type>quarter</type>${notations ? `<notations>${notations}</notations>` : ''}</note>`
+  const bar1 = `<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>${q('C', 5, '<slur type="start" number="1"/>')}${q('D', 5, '<slur type="stop" number="1"/>')}${q('E', 5)}${q('F', 5)}</measure>`
+  const bar2 = `<measure number="2"><direction placement="below"><direction-type><dynamics><mf/></dynamics></direction-type></direction>${q('G', 4)}${q('A', 4)}${q('B', 4, '<articulations><staccato/></articulations>')}${q('C', 5)}</measure>`
+  const bass = (n: number, clef: boolean) =>
+    `<measure number="${n}">${clef ? '<attributes><clef><sign>F</sign><line>4</line></clef></attributes>' : ''}${q('D', 3)}${q('F', 3)}${q('A', 3)}${q('C', 4)}</measure>`
+  return `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Tenor Saxophone</part-name></score-part></part-list><part id="P1">${bar1}${bar2}${bass(3, true)}${bass(4, false)}</part></score-partwise>`
+}

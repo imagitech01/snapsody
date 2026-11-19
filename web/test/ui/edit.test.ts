@@ -10,8 +10,7 @@ import type { App } from './app.ts'
 import { noteIdsByBar, tab, tapNote, textOf } from './journey.ts'
 import { BUILD_DIR } from './paths.ts'
 import { ID } from './pieces.ts'
-import { review } from './review.ts'
-import { barsScore } from './scores.ts'
+import { barsScore, elementsScore } from './scores.ts'
 
 // The edit journey (practice-app design D15, "edit: note, mark, preview, save & practice"; tasks 15.1 to
 // 15.4; specs `score-editing`, `score-capture` "Add pages to a piece", `piece-library` "Rename"). The seeded
@@ -193,7 +192,6 @@ test('edit: with staff positions the strip shows the staff of the bar with its m
     assert.equal(await photoLabel(page), 'Photo 1 · Bar 3')
     const crop = page.locator('.editor-photo-crop')
     await crop.waitFor()
-    await review(page, '06.1 · Edit score — Notes')
     await page.waitForFunction(() => {
       const img = document.querySelector<HTMLImageElement>('.editor-photo-crop img')
       return !!img && img.complete && img.naturalWidth > 0
@@ -362,7 +360,6 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     await tapNote(page, ODE[2]![3]!)
     await mark('Staccato').click()
     assert.equal(await on('Staccato'), true)
-    await review(page, '06.2 · Edit score — Marks')
     await mark('Staccato').click()
     assert.equal(await on('Staccato'), false)
     for (const name of ['Tenuto', 'Accent', 'Fermata']) {
@@ -422,6 +419,70 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
   })
 })
 
+test('edit: the Marks tab sets how a bar starts and ends, and the passes of an end-repeat; saving stores the repeat signs (change edit-bar-lines)', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await openEditor(page, ID.ode)
+    await tabs(page, 'Marks').click()
+    const group = page.getByRole('region', { name: 'Bar lines' })
+    const start = group.getByRole('combobox', { name: 'Starts with' })
+    const end = group.getByRole('combobox', { name: 'Ends with' })
+    assert.equal(await start.isDisabled(), true, 'no bar selected: the group is disabled')
+    assert.equal(await end.isDisabled(), true)
+
+    // A bar without a note ("Go to bar") has the group too.
+    await page.getByRole('button', { name: 'Go to bar…' }).click()
+    const sheet = page.getByRole('dialog', { name: 'Go to bar' })
+    await sheet.getByRole('textbox', { name: 'Bar number' }).fill('7')
+    await sheet.getByRole('button', { name: 'Show' }).click()
+    await sheet.waitFor({ state: 'detached' })
+    await page.getByRole('heading', { name: 'Bar 7' }).waitFor()
+    assert.equal(await start.isDisabled(), false)
+
+    await tapNote(page, ODE[2]![1]!)
+    await page.getByRole('heading', { name: 'Bar 3' }).waitFor()
+    assert.equal(await start.inputValue(), 'normal')
+    assert.equal(await end.inputValue(), 'normal')
+    const passes = group.getByRole('group', { name: 'Played' })
+    assert.equal(await passes.count(), 0, 'no passes without an end-repeat')
+
+    await start.selectOption('repeat')
+    await end.selectOption('repeat')
+    assert.equal(await textOf(passes.getByRole('status')), '2×')
+    await passes.getByRole('button', { name: 'Play the section more times' }).click()
+    assert.equal(await textOf(passes.getByRole('status')), '3×')
+    await page.getByRole('button', { name: 'Undo' }).click()
+    assert.equal(await textOf(passes.getByRole('status')), '2×', 'one undo takes the step back')
+    assert.equal(await start.inputValue(), 'repeat')
+    assert.equal(await passes.getByRole('button', { name: 'Play the section fewer times' }).isDisabled(), true, 'two passes is the fewest')
+
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const xml = (await app.file(`pieces/${ID.ode}/${JSON.parse((await app.file(`pieces/${ID.ode}/piece.json`))!).score}`)) ?? ''
+    const bar3 = /<measure number="3"[\s\S]*?<\/measure>/.exec(xml)?.[0] ?? ''
+    assert.match(bar3, /<barline location="left">\s*<bar-style>heavy-light<\/bar-style>\s*<repeat direction="forward"\/>/)
+    assert.match(bar3, /<barline location="right">\s*<bar-style>light-heavy<\/bar-style>\s*<repeat direction="backward"\/>/)
+    const saved = await stored(app, ID.ode)
+    assert.deepEqual([saved.measures[2]!.leftBarline?.repeat, saved.measures[2]!.rightBarline?.repeat, saved.measures[2]!.rightBarline?.times], ['forward', 'backward', undefined])
+  })
+})
+
+test('edit: the bar-line group speaks Dutch', async () => {
+  await withApp({ seed: 'library', language: 'nl' }, async (app) => {
+    const { page } = app
+    await page.evaluate((id) => window.__test!.shell.router.push({ name: 'editor', pieceId: id }), ID.ode)
+    await page.locator('.score-view[data-rendered="true"]').waitFor()
+    await page.getByRole('radio', { name: 'Tekens' }).click()
+    await tapNote(page, ODE[2]![1]!)
+    const group = page.getByRole('region', { name: 'Maatstrepen' })
+    await group.getByRole('heading', { name: 'Maat 3' }).waitFor()
+    await group.getByRole('combobox', { name: 'Begint met' }).selectOption('repeat')
+    await group.getByRole('combobox', { name: 'Eindigt met' }).selectOption('repeat')
+    assert.equal(await textOf(group.getByRole('group', { name: 'Gespeeld' }).getByRole('status')), '2×')
+    assert.match(await textOf(group), /Begin herhaling ‖:/)
+  })
+})
+
 test('edit: the Score tab changes the key and the time signature, which draws the score again and checks the bars, and the written tempo', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
@@ -441,7 +502,6 @@ test('edit: the Score tab changes the key and the time signature, which draws th
     await page.waitForFunction(() => document.querySelectorAll('.score-view g.keyAccid').length > 0)
     assert.ok((await page.locator('.score-view g.keyAccid').count()) >= 1, 'a sharp in the key signature')
     assert.equal(await page.locator('.score-view g.note').count(), 48)
-    await review(page, '06.3 · Edit score — Score settings')
     await key.selectOption('-2')
     assert.equal(await key.inputValue(), '-2')
     await page.getByRole('button', { name: 'Undo' }).click()
@@ -661,5 +721,196 @@ test('edit: "+ Add pages" opens adding music for this piece, after asking to sav
     await tapNote(page, ODE[0]![0]!)
     assert.equal(await pitch(page), 'B4')
     assert.equal(await app.back(), true, 'a clean editor leaves without asking')
+  })
+})
+
+// ---- Select and delete elements (change select-and-delete-elements, tasks 3.2 and 3.3) --------------------
+
+/** A piece of `elementsScore()`: a slur in bar 1, an mf in bar 2, a misread bass clef at bar 3. */
+async function makeElementsPiece(page: Page): Promise<string> {
+  return page.evaluate(
+    async ({ xml }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({
+        name: 'Misread clef',
+        musicxml: xml,
+        bars: 4,
+        repairs: [],
+        pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 4 }],
+      })
+      return info.id
+    },
+    { xml: elementsScore() },
+  )
+}
+
+/** The centre of a drawn element, scrolled into view. */
+async function centre(page: Page, selector: string, nth = 0): Promise<{ x: number; y: number }> {
+  const element = page.locator(selector).nth(nth)
+  await element.scrollIntoViewIfNeeded()
+  const box = await element.boundingBox()
+  assert.ok(box, `${selector} is not drawn`)
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+}
+
+/** A point on the stroke of a slur (its bounding box covers the notes under it, so its centre is not on it). */
+async function onSlur(page: Page): Promise<{ x: number; y: number }> {
+  await page.locator('.score-view g.slur').first().scrollIntoViewIfNeeded()
+  return page.evaluate(() => {
+    const path = document.querySelector<SVGGeometryElement>('.score-view g.slur path')!
+    const point = path.getPointAtLength(path.getTotalLength() / 2)
+    const m = path.getScreenCTM()!
+    return { x: point.x * m.a + point.y * m.c + m.e, y: point.x * m.b + point.y * m.d + m.f }
+  })
+}
+
+const panel = (page: Page, name = 'Selected element') => page.getByRole('region', { name })
+
+test('edit: a tap picks the element under the finger, else the nearest note; the selected element is highlighted', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeElementsPiece(page)
+    await openEditor(page, id)
+    const ids = noteIdsByBar(elementsScore())
+
+    // The mf sits under the first note of bar 2: the mf is selected, not the note.
+    const mf = await centre(page, '.score-view g.dynam')
+    await page.touchscreen.tap(mf.x, mf.y)
+    await panel(page).waitFor()
+    assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Dynamic · mf · bar 2')
+    assert.equal(await page.locator('.score-view g.dynam.mk-el').count(), 1, 'the mf is highlighted')
+    assert.equal(await page.locator('.score-view g.note.mk-sel').count(), 0, 'no note is selected')
+
+    // Beside the staff, near a note: the note (and the element goes).
+    const note = page.locator(`.score-view svg g.note[id="${ids[0]![3]!}"]`)
+    await note.scrollIntoViewIfNeeded()
+    const box = (await note.boundingBox())!
+    await page.touchscreen.tap(box.x + box.width / 2, box.y - 14)
+    await page.waitForFunction(() => document.querySelectorAll('.score-view g.note.mk-sel').length === 1)
+    assert.equal(await panel(page).count(), 0, 'a note brings the normal tabs back')
+    assert.equal(await page.locator('.score-view .mk-el').count(), 0)
+
+    // A slur's drawing covers the notes under it, but a tap on a note still selects the note.
+    await tapNote(page, ids[0]![0]!)
+    assert.equal(await panel(page).count(), 0)
+    assert.equal(await page.locator(`.score-view g.note.mk-sel[id="${ids[0]![0]!}"]`).count(), 1)
+    // And on its stroke, the slur.
+    const slur = await onSlur(page)
+    await page.touchscreen.tap(slur.x, slur.y)
+    await panel(page).waitFor()
+    assert.match(await textOf(panel(page).locator('.editor-element-title')), /^Slur · bar 1$/)
+
+    // A staccato dot is smaller than a finger: a tap a few pixels beside it still selects it, not its note.
+    const dot = page.locator('.score-view g.artic').first()
+    await dot.scrollIntoViewIfNeeded()
+    const dotBox = (await dot.boundingBox())!
+    await page.touchscreen.tap(dotBox.x + dotBox.width + 3, dotBox.y + dotBox.height / 2)
+    await page.waitForFunction(() => document.querySelector('.editor-element-title')?.textContent === 'Staccato · bar 2')
+    assert.equal(await page.locator('.score-view g.artic.mk-el').count(), 1, 'the dot is highlighted')
+
+    // An empty part of the score puts the element away, and keeps its bar.
+    await page.touchscreen.tap(...(await emptySpot(page)))
+    await panel(page).waitFor({ state: 'detached' })
+    assert.equal(await page.locator('.score-view .mk-el').count(), 0)
+  })
+})
+
+/** A point in the visible score that is on no note, element or staff line: its right margin, at the top. */
+async function emptySpot(page: Page): Promise<[number, number]> {
+  const box = (await page.locator('.score-island').boundingBox())!
+  return [box.x + box.width - 4, box.y + 6]
+}
+
+test('edit: deleting a misread clef moves the notes up 12 steps, as one undo step, and is stored', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeElementsPiece(page)
+    await openEditor(page, id)
+    // The clef change of bar 3 is drawn at the end of bar 2, with the drawing id `clef-2` (a bar from 0).
+    const at = await centre(page, '.score-view g.clef[id="clef-2"]')
+    await page.touchscreen.tap(at.x, at.y)
+    await panel(page).waitFor()
+    assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Clef · bass · bar 3')
+
+    await panel(page).getByRole('button', { name: 'Delete' }).click()
+    await panel(page).waitFor({ state: 'detached' })
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const saved = await stored(app, id)
+    assert.equal(saved.measures[2]!.clef, undefined, 'no clef at bar 3')
+    const bar3 = saved.measures[2]!.items.filter(isNote).map((n) => `${n.pitch!.step}${n.pitch!.octave}`)
+    assert.deepEqual(bar3, ['B4', 'D5', 'F5', 'A5'], 'D3 is B4: twelve diatonic steps up')
+    assert.deepEqual(saved.measures[3]!.items.filter(isNote).map((n) => `${n.pitch!.step}${n.pitch!.octave}`), ['B4', 'D5', 'F5', 'A5'], 'up to the end of the piece')
+  })
+})
+
+test('edit: the clef select changes a clef and keeps its notes on the staff; the first clef has no Delete', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeElementsPiece(page)
+    await openEditor(page, id)
+    const first = await centre(page, '.score-view g.clef', 0)
+    await page.touchscreen.tap(first.x, first.y)
+    await panel(page).waitFor()
+    assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Clef · treble · bar 1')
+    assert.equal(await panel(page).getByRole('button', { name: 'Delete' }).count(), 0, 'the first clef is changed, not deleted')
+    const select = panel(page).getByRole('combobox', { name: 'Clef' })
+    await select.selectOption('bass')
+    assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Clef · bass · bar 1')
+    await page.getByRole('button', { name: 'Undo' }).click()
+    assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Clef · treble · bar 1', 'one undo takes it back')
+  })
+})
+
+test('edit: deleting a slur through the panel is one undo step, and undo brings it back', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeElementsPiece(page)
+    await openEditor(page, id)
+    await drawn(page, '.score-view g.slur', 1)
+    const slur = await onSlur(page)
+    await page.touchscreen.tap(slur.x, slur.y)
+    await panel(page).waitFor()
+    await panel(page).getByRole('button', { name: 'Delete' }).click()
+    await drawn(page, '.score-view g.slur', 0)
+    await panel(page).waitFor({ state: 'detached' })
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await drawn(page, '.score-view g.slur', 1)
+    await panel(page).waitFor()
+    assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Slur · bar 1', 'the slur is selected again')
+    await page.waitForFunction(() => document.querySelectorAll('.score-view g.slur.mk-el').length === 1)
+  })
+})
+
+test('edit: a tap on a bar line selects its bar and shows the bar-line controls with its start and end', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeElementsPiece(page)
+    await openEditor(page, id)
+    // The bar line that closes bar 2.
+    const line = await centre(page, '.score-view g.barLine', 1)
+    await page.touchscreen.tap(line.x, line.y)
+    await page.getByRole('heading', { name: 'Bar 2' }).waitFor()
+    assert.equal(await tabs(page, 'Marks').isChecked(), true, 'the Marks tab is shown')
+    assert.equal(await panel(page).count(), 0, 'a bar line has no element panel')
+    const group = page.getByRole('region', { name: 'Bar lines' })
+    assert.equal(await group.getByRole('combobox', { name: 'Starts with' }).isDisabled(), false)
+    assert.equal(await group.getByRole('combobox', { name: 'Ends with' }).isDisabled(), false)
+  })
+})
+
+test('edit: the element panel speaks Dutch', async () => {
+  await withApp({ seed: '', language: 'nl' }, async (app) => {
+    const { page } = app
+    const id = await makeElementsPiece(page)
+    await page.evaluate((pieceId) => window.__test!.shell.router.push({ name: 'editor', pieceId }), id)
+    await page.locator('.score-view[data-rendered="true"]').waitFor()
+    const at = await centre(page, '.score-view g.clef[id="clef-2"]')
+    await page.touchscreen.tap(at.x, at.y)
+    const dutch = panel(page, 'Gekozen onderdeel')
+    await dutch.waitFor()
+    assert.equal(await textOf(dutch.locator('.editor-element-title')), 'Sleutel · bas · maat 3')
+    assert.equal(await dutch.getByRole('button', { name: 'Verwijderen' }).count(), 1)
   })
 })

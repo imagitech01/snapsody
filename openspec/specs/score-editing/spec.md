@@ -117,3 +117,79 @@ The editor SHALL show the part of the source photo that holds the selected bar, 
 #### Scenario: Leave without saving
 - **WHEN** the user has unsaved edits and taps Cancel
 - **THEN** the app asks whether to discard the edits, and keeps the editor open if the user says no
+
+### Requirement: Edit bar lines
+For the selected bar, the user SHALL be able to set how it starts (normal or start-repeat `||:`) and how it ends (normal, double bar line `||` or end-repeat `:||`). For an end-repeat, the user SHALL be able to set how many times the section is played in total, from 2 to 8, with 2 as the default. The editor SHALL show the selected bar's current start and end, and playback SHALL follow the edited signs. First and second endings are not edited, and an ending already on the bar SHALL stay.
+
+#### Scenario: Make a repeat explicit
+- **WHEN** an exercise has bar 1 ending in an end-repeat, bar 2 ending in a double bar line, and bar 3 ending in an end-repeat, and the user selects bar 3 and sets its start to start-repeat
+- **THEN** bar 3 is drawn with `||:`, and playback order is bars 1, 1, 2, 3, 3, then the bars after it
+
+#### Scenario: Add a missing end-repeat
+- **WHEN** recognition missed the end-repeat of bar 2 in a three-bar exercise, and the user sets the end of bar 2 to end-repeat
+- **THEN** bar 2 is drawn with `:||`, and playback order is bars 1, 2, 1, 2, 3
+
+#### Scenario: Play a section three times
+- **WHEN** bar 2 ends in an end-repeat, and the user sets it to 3×
+- **THEN** playback order is bars 1, 2, 1, 2, 1, 2, then the bars after it
+
+#### Scenario: Remove a misread repeat
+- **WHEN** recognition read a plain bar line at the end of bar 4 as an end-repeat, and the user sets that end to normal
+- **THEN** the bar is drawn with a plain bar line, and playback goes on to bar 5 without repeating
+
+#### Scenario: Show what the selected bar has
+- **WHEN** the user selects a note in a bar that starts with `||:` and ends with a double bar line
+- **THEN** the controls show start-repeat as the bar's start and double bar line as its end
+
+#### Scenario: Endings stay
+- **WHEN** the user changes the repeat count of an end-repeat at the end of a first ending
+- **THEN** the first ending is still there, and the second ending is still played on the last pass
+
+#### Scenario: Undo a bar-line edit
+- **WHEN** the user sets the end of a bar to end-repeat and taps undo
+- **THEN** the bar ends as it did before, and playback no longer repeats there
+
+### Requirement: Select any element
+In the editor, the user SHALL be able to select any drawn element by tapping it: a note or rest, a clef, a key or time signature, a dynamic, a tempo mark, other text, a hairpin, a slur, a tie, an articulation or a bar line. The selected element SHALL be highlighted, and the editor SHALL name it with its bar. When an element and a note overlap, the element drawn directly under the finger SHALL be selected.
+
+#### Scenario: Select a misread clef
+- **WHEN** the user taps the bass clef drawn before bar 11
+- **THEN** the clef is highlighted and the editor shows "Clef · bass · bar 11"
+
+#### Scenario: Select a dynamic under a note
+- **WHEN** the user taps the *mf* under the first note of bar 3
+- **THEN** the *mf* is selected, not the note
+
+#### Scenario: Tap a bar line
+- **WHEN** the user taps the bar line at the end of bar 4
+- **THEN** bar 4 is selected and the bar-line controls show its start and end
+
+### Requirement: Delete an element
+The user SHALL be able to delete the selected element, as one undo step. Deleting a dynamic, tempo mark, text, hairpin, slur, tie or articulation SHALL remove only that element. Deleting a key or time signature change SHALL make the one before it apply again. The first clef, key and time signature of the piece SHALL NOT be deletable; they are changed instead.
+
+#### Scenario: Delete a wrong dynamic
+- **WHEN** the user selects a misread *f* in bar 5 and taps Delete
+- **THEN** the *f* is gone, and playback from bar 5 keeps the dynamic before it
+
+#### Scenario: Delete a key change
+- **WHEN** a key change to one flat was misread at bar 9 of a piece in D major, and the user deletes it
+- **THEN** from bar 9 on, every F and C without its own accidental is treated as F♯ and C♯ again
+
+#### Scenario: The first clef cannot be deleted
+- **WHEN** the user selects the clef at the start of the piece
+- **THEN** there is no Delete action, only the choice of clef
+
+#### Scenario: Undo a deletion
+- **WHEN** the user deletes a slur and taps undo
+- **THEN** the slur is back on the same notes
+
+### Requirement: Fix a clef
+The user SHALL be able to delete a clef change, or change any clef between treble and bass. The notes SHALL keep their place on the staff, and their pitches SHALL be read again under the clef that now applies. Explicit accidentals SHALL stay on their notes. The clef applies until the next clef change.
+
+#### Scenario: Remove a clef read from a hole in the page
+- **WHEN** bars 11–14 were read under a bass clef that is not in the book, and the user deletes that clef
+- **THEN** bars 11–14 are drawn in treble clef with every note on the same line or space as before, and the note on the middle line of the staff now plays as B4, not D3
+
+#### Scenario: Change the first clef
+- **WHEN** a treble-clef piece was read with a bass clef at the start, and the user changes that clef to treble
+- **THEN** the whole piece is drawn in treble clef with its notes in the same places, until the next clef change

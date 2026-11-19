@@ -77,14 +77,22 @@ export interface Note {
   breath?: boolean
 }
 
+/**
+ * Dynamics, tempo marks and words have a stable id, unique among them within the score (change
+ * select-and-delete-elements, design D1), so that a selection of one survives edits. It is written as
+ * the `id` attribute of its `<direction>`, and a score read without one gets a fresh one.
+ */
 export interface DynamicItem {
   kind: 'dynamic'
+  id: string
   mark: string
 }
 
 /** A tempo marking: words, a metronome mark, or both. */
 export interface TempoItem {
   kind: 'tempo'
+  /** See `DynamicItem.id`. */
+  id: string
   words?: string
   beatUnit?: NoteType
   beatUnitDots?: number
@@ -96,6 +104,8 @@ export interface TempoItem {
 /** Other direction words (e.g. "dolce", "rit."); kept, not interpreted. */
 export interface WordsItem {
   kind: 'words'
+  /** See `DynamicItem.id`. */
+  id: string
   text: string
 }
 
@@ -117,6 +127,9 @@ export interface WedgeItem {
 }
 
 export type MeasureItem = Note | DynamicItem | TempoItem | WordsItem | WedgeItem
+
+/** A measure item drawn from a `<direction>` that carries an id: a dynamic, a tempo mark or words. */
+export type DirectionItem = DynamicItem | TempoItem | WordsItem
 
 export interface Clef {
   sign: string
@@ -174,6 +187,22 @@ export function isNote(item: MeasureItem): item is Note {
 
 export function isWedge(item: MeasureItem): item is WedgeItem {
   return item.kind === 'wedge'
+}
+
+export function isDirection(item: MeasureItem): item is DirectionItem {
+  return item.kind === 'dynamic' || item.kind === 'tempo' || item.kind === 'words'
+}
+
+/**
+ * A direction id that no note or direction of the score uses: `d1`, `d2`, ... For items made by an edit
+ * or a merge; the parser keeps the ids it reads.
+ */
+export function freshDirectionId(score: Score, taken: ReadonlySet<string> = new Set()): string {
+  const used = new Set(taken)
+  for (const m of score.measures) for (const item of m.items) if (isNote(item) || isDirection(item)) used.add(item.id)
+  let n = 1
+  while (used.has(`d${n}`)) n++
+  return `d${n}`
 }
 
 export function notesOf(measure: Measure): Note[] {

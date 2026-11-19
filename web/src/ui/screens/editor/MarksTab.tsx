@@ -1,7 +1,9 @@
-import { removeWedge, toggleAccent, toggleFermata, toggleSlur, toggleStaccato, toggleTenuto, toggleTie, wedgeAt } from '../../../core/score/edit.ts'
+import { MAX_REPEAT_TIMES, MIN_REPEAT_TIMES, barLinesOf, removeWedge, setBarEnd, setBarStart, setRepeatTimes, toggleAccent, toggleFermata, toggleSlur, toggleStaccato, toggleTenuto, toggleTie, wedgeAt } from '../../../core/score/edit.ts'
+import type { BarEnd, BarStart } from '../../../core/score/edit.ts'
 import type { Score } from '../../../core/score/model.ts'
+import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
-import { Chip } from './controls.tsx'
+import { Chip, SelectField } from './controls.tsx'
 import type { ToolProps } from './NoteTab.tsx'
 
 /**
@@ -12,6 +14,11 @@ import type { ToolProps } from './NoteTab.tsx'
  * last note (design D14, the frame's own hint): the chip starts the choice, the editor waits for the two
  * taps on the score (`Editor.tsx`), and tapping the chip of a mark that the selected note already has
  * removes it.
+ *
+ * Under the marks, the "Bar N" group sets how the selected bar starts and ends (change edit-bar-lines, design
+ * D2): a start-repeat, a double bar line or an end-repeat, and for an end-repeat how many times the section is
+ * played, with a held button as one undo step. It acts on the selected bar, with or without a note, and is
+ * disabled when no bar is selected. Frame 06.2 has no such group (a recorded deviation).
  */
 
 /** The marks that join two notes. */
@@ -77,6 +84,65 @@ export function MarksTab({ session, run, pick, onPick }: MarksTabProps) {
         {pick ? (pick.first === null ? t('mark.pickFirst') : t('mark.pickLast')) : t('mark.hint.pair')}
       </p>
       <p class="editor-hint">{t('mark.hint.remove')}</p>
+      <BarLineGroup session={session} run={run} />
     </div>
+  )
+}
+
+const STARTS: readonly BarStart[] = ['normal', 'repeat']
+const ENDS: readonly BarEnd[] = ['normal', 'double', 'repeat']
+
+function BarLineGroup({ session, run }: ToolProps) {
+  const { t } = useShell().i18n
+  const bar = session.selection.value?.bar
+  const lines = session.selectedBarLines.value
+  const off = bar === undefined || lines === undefined
+  const index = (bar ?? 1) - 1
+
+  /** One step more or fewer passes; the steps of a held button (`repeated`) are one undo step with the first. */
+  const step = (direction: 1 | -1, repeated: boolean): void => {
+    const now = barLinesOf(session.score.value, index).times
+    const times = now + direction
+    if (times < MIN_REPEAT_TIMES || times > MAX_REPEAT_TIMES) return
+    run((s) => setRepeatTimes(s, index, times), undefined, { amend: repeated })
+  }
+
+  return (
+    <section class="editor-grid editor-grid--score editor-barlines" aria-label={t('barline.group')}>
+      <h3 class="editor-barlines-title">{off ? t('barline.group') : t('bar.label', { bar })}</h3>
+      <span class="editor-field-label">{t('barline.start')}</span>
+      <SelectField
+        label={t('barline.start')}
+        value={lines?.start ?? 'normal'}
+        disabled={off}
+        options={STARTS.map((value) => ({ value, label: t(`barline.start.${value}`) }))}
+        onChange={(value) => run((s) => setBarStart(s, index, value))}
+      />
+      <span class="editor-field-label">{t('barline.end')}</span>
+      <SelectField
+        label={t('barline.end')}
+        value={lines?.end ?? 'normal'}
+        disabled={off}
+        options={ENDS.map((value) => ({ value, label: t(`barline.end.${value}`) }))}
+        onChange={(value) => run((s) => setBarEnd(s, index, value))}
+      />
+      {lines?.end === 'repeat' && (
+        <>
+          <span class="editor-field-label">{t('barline.times')}</span>
+          <Stepper
+            size="compact"
+            label={t('barline.times')}
+            value={t('barline.timesValue', { count: lines.times })}
+            decrementLabel={t('barline.fewer')}
+            incrementLabel={t('barline.more')}
+            decrementDisabled={lines.times <= MIN_REPEAT_TIMES}
+            incrementDisabled={lines.times >= MAX_REPEAT_TIMES}
+            onDecrement={(repeated) => step(-1, repeated)}
+            onIncrement={(repeated) => step(1, repeated)}
+            repeat
+          />
+        </>
+      )}
+    </section>
   )
 }

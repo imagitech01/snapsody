@@ -4,7 +4,6 @@ import type { Page } from 'playwright'
 import { withApp } from './app.ts'
 import { highlighted, noteIdsByBar, tab, tabBar, tapNote, textOf } from './journey.ts'
 import { ID } from './pieces.ts'
-import { review } from './review.ts'
 import { barsScore } from './scores.ts'
 
 // The practice journey (practice-app design D15, "practise: home, continue, play, loop with rest, metronome,
@@ -33,7 +32,6 @@ test('practice home: it continues the last piece, lists the rotation and links t
 
     // The tab bar is there, and Practice is the current tab.
     assert.equal(await tab(page, 'Practice').getAttribute('aria-current'), 'page')
-    await review(page, '01 · Practice home')
 
     // Continue opens that piece, and practising hides the tabs until the user goes back.
     await card.getByRole('button', { name: 'Continue practising' }).click()
@@ -102,7 +100,6 @@ test('practice home: a first launch invites the user to add the first music, wit
     assert.match(await textOf(invitation), /Photograph the pages, and Snapsody plays them\./)
     assert.equal(await page.getByRole('heading', { name: 'In your rotation' }).count(), 0, 'no empty rotation')
     assert.equal(await page.getByRole('region', { name: 'Continue practising' }).count(), 0)
-    await review(page, '01 · Practice home · first launch')
     await invitation.getByRole('button', { name: 'Add music' }).click()
     assert.deepEqual(await app.screen(), { name: 'add-music' })
   })
@@ -215,7 +212,6 @@ test('practise: continue opens the piece where it was left, Play moves the bar o
     await until(page, async () => (await highlighted(page)) !== null, 'a note is highlighted')
     assert.equal(await highlightedBar(page), 2)
     assert.equal(await page.evaluate(() => window.__test!.platform.device.keepAwake), true, 'the screen stays on while playing')
-    await review(page, '02.1 · Play along — Portrait')
     await freeze(page)
     await page.clock.runFor(5000) // 60 BPM in 4/4: a bar lasts 4 s
     assert.match(await where(page), /Bar 3 of 12/)
@@ -359,7 +355,6 @@ test('practise: the landscape layout is one bar of header and controls over a sc
     assert.ok(score.top >= restart.bottom, 'the score is under the bar')
     assert.ok(score.top <= 60, `the bar is about 48 high (the score starts at ${score.top}px)`)
     assert.ok(score.height >= 360 - 60 - 16, `the score has all the height that is left (${score.height}px)`)
-    await review(page, '02.2 · Play along — Landscape')
 
     // Play in landscape, then turn the phone to portrait while it plays: still playing, and the sounding bar stays in view.
     await page.getByRole('button', { name: 'Play', exact: true }).click()
@@ -448,7 +443,6 @@ test('practise: loop bars 2 to 3 with a bar of rest; the loop is kept, shown on 
     assert.equal(await loop.getByLabel('To bar').inputValue(), '3')
     assert.equal(await loop.getByRole('radio', { name: 'Off' }).getAttribute('aria-checked'), 'true')
     assert.equal(await loop.getByRole('button', { name: 'Switch loop off' }).count(), 0, 'no loop to switch off yet')
-    await review(page, '02.3 · Practice — Loop setup')
 
     // The two ends stay in order: a last bar before the first takes the first with it.
     await loop.getByLabel('To bar').selectOption('1')
@@ -558,7 +552,6 @@ test('practise: the tools sheet has Edit and Favorite only; it stars the piece, 
     // Design D17: no Go to bar, no instrument, no Follow playback, no count-in.
     const rows = await tools.locator('.sheet-rows > *').evaluateAll((elements) => elements.map((e) => e.querySelector('.list-row-title')?.textContent ?? ''))
     assert.deepEqual(rows, ['Edit score', 'Favorite'])
-    await review(page, '02.4 · Practice — More tools')
 
     // The star: "Ode to Joy" is not a favorite; the switch makes it one, in the file and everywhere that shows it.
     const favorite = tools.getByRole('switch', { name: 'Favorite' })

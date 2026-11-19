@@ -2,8 +2,8 @@
 // page, with fake state. It is only in the UI tests' build (test/ui/vite.config.ts) and under
 // `npm run dev` at http://localhost:5173/dev/gallery.html: web/test/ui/harness.test.ts mounts each component
 // here by role and accessible name, presses it and reads the log (the element with the name "Events") and the
-// island's status. `?view=` picks a part: all (the default) or score (the island). The screens of the frames
-// are the app's own (web/test/ui/*.test.ts); `make ui-review` shows those beside the frames, not this page.
+// island's status. `?view=` picks a part: all (the default) or score (the island). The screens are the
+// app's own (web/test/ui/*.test.ts), not this page.
 //
 // The texts are English and written here: the real screens take theirs from app/i18n, the components
 // from props.

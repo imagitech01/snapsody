@@ -8,7 +8,11 @@ import type { AudioBackend } from '../core/playback/player.ts'
 import type { TimerApi } from '../core/playback/scheduler.ts'
 import { startingTempo, tempoSetup } from '../core/playback/tempo.ts'
 import type { Quarters } from '../core/playback/tempo.ts'
+import { barLinesOf } from '../core/score/edit.ts'
+import type { BarLines } from '../core/score/edit.ts'
 import { EditSession } from '../core/score/editSession.ts'
+import { describeElement } from '../core/score/elements.ts'
+import type { ElementInfo, ElementRef } from '../core/score/elements.ts'
 import { isNote, isWedge } from '../core/score/model.ts'
 import type { Note, Score } from '../core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../core/score/musicxml.ts'
@@ -31,6 +35,11 @@ import type { Settings } from './settings.ts'
  *   (1, 2, ... over the whole piece, as the pages' ranges are), never by the printed number. After
  *   every edit, undo and redo the selection is checked again: a note that is gone leaves its bar
  *   selected. An edit that returns a note id (`insertNote`, `deleteNote`) selects that note.
+ * - Or the selection is an element other than a note (change select-and-delete-elements, D1): a clef,
+ *   a dynamic, a slur, ... named by an `ElementRef`, with its bar selected. `selectedElement` is what it
+ *   is now, and undefined once it is gone (deleted); the reference itself is kept, so undoing the
+ *   deletion selects it again. The next edit made while it is gone forgets it, and selecting a note or
+ *   a bar replaces it. A bar line is not kept as an element: tapping one selects its bar.
  * - Warnings are computed from the working score and the instrument in use, the default instrument
  *   of the settings, whenever either changes (design D4); they are never stored. `nextWarning` and
  *   `previousWarning` step through them in score order and select what each is about.
@@ -53,6 +62,12 @@ import type { Settings } from './settings.ts'
 export interface Selection {
   bar: number
   noteId: string | null
+}
+
+/** The selected element (not a note): what was selected, and what it is now. */
+export interface SelectedElement {
+  ref: ElementRef
+  info: ElementInfo
 }
 
 /**
@@ -144,6 +159,10 @@ export class EditorSession {
   readonly selection: ReadonlySignal<Selection | null>
   /** The selected note, if a note is selected. */
   readonly selectedNote: ReadonlySignal<Note | undefined>
+  /** The selected element other than a note, while it is in the score (change select-and-delete-elements). */
+  readonly selectedElement: ReadonlySignal<SelectedElement | undefined>
+  /** How the selected bar starts and ends (change edit-bar-lines), or undefined when no bar is selected. */
+  readonly selectedBarLines: ReadonlySignal<BarLines | undefined>
   /** The title as the user is typing it. */
   readonly title: ReadonlySignal<string>
   /** Unsaved edits, or a title that differs from the name. */
@@ -169,6 +188,7 @@ export class EditorSession {
   private readonly saved: Signal<Score>
   private readonly saveInfo: Signal<PieceInfo>
   private readonly chosen: Signal<Selection | null>
+  private readonly chosenElement: Signal<ElementRef | null>
   private readonly typed: Signal<string>
   private readonly focused: Signal<ScoreWarning | undefined>
   private readonly busy: Signal<boolean>
@@ -187,6 +207,7 @@ export class EditorSession {
     this.saved = signal(this.session.score)
     this.saveInfo = signal(info)
     this.chosen = signal(null)
+    this.chosenElement = signal(null)
     this.typed = signal(info.name)
     this.focused = signal(undefined)
     this.busy = signal(false)
@@ -213,6 +234,16 @@ export class EditorSession {
       const id = this.chosen.value?.noteId
       return id ? findNote(this.score.value, id)?.note : undefined
     })
+    this.selectedElement = computed(() => {
+      const ref = this.chosenElement.value
+      const info = ref ? describeElement(this.score.value, ref) : undefined
+      return ref && info ? { ref, info } : undefined
+    })
+    this.selectedBarLines = computed(() => {
+      const bar = this.chosen.value?.bar
+      const score = this.score.value
+      return bar !== undefined && bar <= score.measures.length ? barLinesOf(score, bar - 1) : undefined
+    })
     this.dirty = computed(() => this.score.value !== this.saved.value || this.typed.value.trim() !== this.saveInfo.value.name)
     this.instrument = computed(() => instrumentOrDefault(deps.settings.defaultInstrument.value))
     this.warnings = computed(() => computeWarnings(this.score.value, this.instrument.value))
@@ -233,6 +264,7 @@ export class EditorSession {
   select(noteId: string): boolean {
     const place = findNote(this.session.score, noteId)
     if (!place) return false
+    this.chosenElement.value = null
     this.chosen.value = { bar: place.barIndex + 1, noteId }
     return true
   }
@@ -240,11 +272,26 @@ export class EditorSession {
   /** Selects a bar (1-based position) without a note: "Go to bar". False for a bar that is not there. */
   selectBar(bar: number): boolean {
     if (!Number.isInteger(bar) || bar < 1 || bar > this.session.score.measures.length) return false
+    this.chosenElement.value = null
     this.chosen.value = { bar, noteId: null }
     return true
   }
 
+  /**
+   * Selects an element other than a note (tapped on the score), and its bar. A bar line selects its bar
+   * (`selectBar`). False, changing nothing, for an element that is not in the score.
+   */
+  selectElement(ref: ElementRef): boolean {
+    const info = describeElement(this.session.score, ref)
+    if (!info) return false
+    if (ref.kind === 'barline') return this.selectBar(info.bar + 1)
+    this.chosenElement.value = ref
+    this.chosen.value = { bar: info.bar + 1, noteId: null }
+    return true
+  }
+
   clearSelection(): void {
+    this.chosenElement.value = null
     this.chosen.value = null
   }
 
@@ -259,7 +306,11 @@ export class EditorSession {
    *   session.apply((s) => stepPitch(s, id, -1))
    */
   apply<T>(edit: (score: Score) => T, options: { amend?: boolean } = {}): T {
+    // An element that was already gone is forgotten by the next edit; one this edit deletes is kept for undo.
+    const element = this.chosenElement.peek()
+    const wasGone = element !== null && !describeElement(this.session.score, element)
     const result = this.session.apply(edit, options)
+    if (wasGone) this.chosenElement.value = null
     this.changed()
     if (typeof result === 'string' && findNote(this.session.score, result)) this.select(result)
     return result
@@ -457,6 +508,12 @@ export class EditorSession {
     const selected = this.chosen.value
     if (!selected) return
     const score = this.session.score
+    const element = this.chosenElement.value
+    const info = element ? describeElement(score, element) : undefined
+    if (info) {
+      this.chosen.value = { bar: info.bar + 1, noteId: null }
+      return
+    }
     const place = selected.noteId ? findNote(score, selected.noteId) : undefined
     if (place) this.chosen.value = { bar: place.barIndex + 1, noteId: selected.noteId }
     else if (selected.bar <= score.measures.length) this.chosen.value = { bar: selected.bar, noteId: null }

@@ -36,11 +36,10 @@ rules:
     - "Every verify step names its layer (quick or mac, see docs/testing.md) and the test that proves it."
     - "New logic is verified by a node unit test on a pure module (web/test/<module>.test.ts), or a Kotlin JVM test for host logic."
     - "A new or redesigned screen updates or adds its journey test in web/test/ui/; one journey per main flow."
-    - "A UI task names the Figma frame it implements and is checked by eye in make ui-review; each deviation is recorded in docs/design/deviations.md with its reason."
+    - "A UI task is checked by eye in the app in browser-dev (npm run dev) at 360 × 780, in English and Dutch (docs/testing.md, \"Checking a screen by eye\"). The Figma design is finished: tasks do not name Figma frames or add to docs/design/deviations.md."
     - "By-ear and by-eye checks are named as manual."
     - "The device smoke test (make test-device) runs once, before archive, on the emulator. A manual check on the S24 is named only for the camera, the scanner, GPU speed, or by-ear and by-eye checks on the real phone."
   design:
-    - "A design for UI work lists the Figma frames it implements and any deviation it plans, with the reason."
     - "A new plugin call or event (Scanner or Reader) comes with its contract example in fixtures/bridge/."
     - "A change to the stored piece format adds a compatibility folder under web/test/fixtures/stores/."
     - "A change to models, inference or recognition states its own verification; the test layers do not re-test them."

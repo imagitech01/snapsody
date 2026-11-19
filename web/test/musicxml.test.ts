@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Measure, Note } from '../src/core/score/model.ts'
-import { isNote, isWedge, notesOf } from '../src/core/score/model.ts'
+import { isDirection, isNote, isWedge, notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { eq, frac } from '../src/core/score/rational.ts'
 import { barLength } from '../src/core/score/repairs.ts'
@@ -42,10 +42,10 @@ test('musicxml: the committed fixture parses with every supported element', () =
 
   // tempo (words + metronome + sound), dynamics, other words
   const tempo = m1.items.find((i) => i.kind === 'tempo')
-  assert.deepEqual(tempo, { kind: 'tempo', words: 'Moderato', beatUnit: 'quarter', perMinute: 96, soundTempo: 96 })
-  assert.deepEqual(m1.items.filter((i) => i.kind === 'dynamic'), [{ kind: 'dynamic', mark: 'mf' }])
-  assert.deepEqual(m3.items.filter((i) => i.kind === 'dynamic'), [{ kind: 'dynamic', mark: 'p' }])
-  assert.deepEqual(m3.items.filter((i) => i.kind === 'words'), [{ kind: 'words', text: 'dolce' }])
+  assert.deepEqual(tempo, { kind: 'tempo', id: 'd1', words: 'Moderato', beatUnit: 'quarter', perMinute: 96, soundTempo: 96 })
+  assert.deepEqual(m1.items.filter((i) => i.kind === 'dynamic'), [{ kind: 'dynamic', id: 'd2', mark: 'mf' }])
+  assert.deepEqual(m3.items.filter((i) => i.kind === 'dynamic'), [{ kind: 'dynamic', id: 'd3', mark: 'p' }])
+  assert.deepEqual(m3.items.filter((i) => i.kind === 'words'), [{ kind: 'words', id: 'd4', text: 'dolce' }])
 
   // pitch, accidentals, staccato, ids
   const bb = nth(m1, 0)
@@ -224,7 +224,7 @@ test('musicxml: a dynamic next to the start of a hairpin, and a hairpin over one
   // The dynamic is written between the start direction and the note; the model puts the hairpin right before the note.
   const s = roundTrips(bars(wedge('crescendo') + dynamic('mp') + q('a') + q('b') + wedge('stop') + wedge('diminuendo') + q('c') + wedge('stop') + q('d')))
   assert.deepEqual(wedgesOf(s), [['crescendo', 'a', 'b'], ['diminuendo', 'c', 'c']])
-  assert.deepEqual(measure(s.measures, 0).items.filter((i) => i.kind === 'dynamic'), [{ kind: 'dynamic', mark: 'mp' }])
+  assert.deepEqual(measure(s.measures, 0).items.filter((i) => i.kind === 'dynamic'), [{ kind: 'dynamic', id: 'd1', mark: 'mp' }])
 })
 
 test('musicxml: a hairpin stop after a chord lands on the chord\'s first note, not its members', () => {
@@ -287,4 +287,44 @@ test('musicxml: the committed fixture has tenuto, accent, fermata, a crescendo i
     ['crescendo', 'a1', nth(measure(s.measures, 0), 3).id],
     ['diminuendo', nth(measure(s.measures, 1), 0).id, nth(measure(s.measures, 2), 0).id],
   ])
+})
+
+// --- direction ids (change select-and-delete-elements, task 1.1, design D1) ---
+
+/** The [kind, id] of every dynamic, tempo mark and words item, in score order. */
+const directionIds = (s: ReturnType<typeof parseMusicXml>): [string, string][] =>
+  s.measures.flatMap((m) => m.items.filter(isDirection).map((i): [string, string] => [i.kind, i.id]))
+
+test('musicxml: dynamics, tempo marks and words keep their ids through a save and a load', () => {
+  const xml =
+    '<direction id="t7" placement="above"><direction-type><words>Allegro</words></direction-type><sound tempo="120"/></direction>' +
+    '<direction id="x" placement="below"><direction-type><dynamics><p/></dynamics></direction-type></direction>' +
+    q('a') + '<direction id="w2" placement="above"><direction-type><words>dolce</words></direction-type></direction>' + q('b')
+  const s = parseMusicXml(bars(xml))
+  assert.deepEqual(directionIds(s), [['tempo', 't7'], ['dynamic', 'x'], ['words', 'w2']])
+  const written = serializeMusicXml(s)
+  assert.deepEqual([...written.matchAll(/<direction id="([^"]+)"/g)].map((m) => m[1]), ['t7', 'x', 'w2'])
+  assert.deepEqual(directionIds(parseMusicXml(written)), directionIds(s))
+})
+
+test('musicxml: a file without direction ids gets unique fresh ones, and its note ids are the same as before', () => {
+  const s = parseMusicXml(read(COMMITTED_FIXTURE))
+  assert.deepEqual(directionIds(s), [['tempo', 'd1'], ['dynamic', 'd2'], ['dynamic', 'd3'], ['words', 'd4']])
+  // Note ids: the one the file gives, then n1, n2, ... as they were before directions had ids.
+  assert.deepEqual(s.measures.flatMap((m) => notesOf(m).map((n) => n.id)).slice(0, 4), ['a1', 'n1', 'n2', 'n3'])
+  assert.equal(notesOf(s.measures[5]!).at(-1)!.id, 'n15')
+})
+
+test('musicxml: one direction with several items gives each its own id, and a direction id that a note has is not taken', () => {
+  const xml =
+    '<direction id="a"><direction-type><dynamics><f/><p/></dynamics></direction-type></direction>' +
+    '<direction id="a"><direction-type><dynamics><mp/></dynamics></direction-type></direction>' +
+    '<direction id="b"><direction-type><dynamics><mf/></dynamics></direction-type></direction>' + q('b') + q('c')
+  const s = parseMusicXml(bars(xml))
+  const ids = directionIds(s).map(([, id]) => id)
+  assert.equal(ids[0], 'a', 'the first item keeps the direction id')
+  const noteIds = s.measures.flatMap((m) => notesOf(m).map((n) => n.id))
+  assert.deepEqual(noteIds, ['b', 'c'], 'note ids are untouched')
+  const all = [...ids, ...noteIds]
+  assert.equal(new Set(all).size, all.length, `every id is unique: ${all.join(', ')}`)
 })

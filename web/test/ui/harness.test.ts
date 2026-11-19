@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url'
 import type { Page } from 'playwright'
 import { CLOCK_START, GALLERY, START_URL, withApp } from './app.ts'
 import { highlighted, noteIdsByBar, tapNote } from './journey.ts'
-import { review } from './review.ts'
 
 // The UI test harness itself (openspec test-pyramid task 4.2, practice-app D15): the built app
 // starts in headless Chromium at Capacitor's local origin, Preact and signals run in it, a .wasm

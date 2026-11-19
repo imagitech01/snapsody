@@ -1,6 +1,8 @@
 import { type NoteIndex, type NoteInfo, indexScore, unmappedNotes } from "../core/score/noteMap.ts";
 import type { Score } from "../core/score/model.ts";
 import { renderScore } from "../core/score/render.ts";
+import { mapElements, sameElement } from "../core/score/elements.ts";
+import type { ElementRef, SvgTree } from "../core/score/elements.ts";
 
 /**
  * The rendered score in the page (tasks 9.1 and 9.2): one column of SVG, re-laid out when the width
@@ -51,6 +53,17 @@ export interface ScoreView {
   /** Called for every tap that resolves to a note. */
   onTap: ((info: NoteInfo) => void) | undefined;
   /**
+   * Opt-in element hit-testing (the editor; change select-and-delete-elements, design D2). When set, a tap
+   * first looks for the element drawn under the finger (a clef, a dynamic, a slur, an articulation, a bar
+   * line, ...) and calls this with its reference; a tap that finds no element but a note still calls `onTap`;
+   * a tap that finds neither calls this with undefined. When unset, taps resolve to notes only, as in practice.
+   */
+  onTapElement: ((ref: ElementRef | undefined) => void) | undefined;
+  /** The element drawn directly under a point (the smallest when several overlap), or undefined. */
+  elementAtPoint(clientX: number, clientY: number): ElementRef | undefined;
+  /** Highlights the drawing of an element (every node that draws it), or none for undefined. Survives a re-render. */
+  markElement(ref: ElementRef | undefined): void;
+  /**
    * Called just before a new layout replaces the drawing (the width changed, or the score did), while the
    * old one can still be measured, and right after, when the new one is in place and has lost its
    * highlight. The caller keeps its view of the score across a re-layout with these two.
@@ -70,6 +83,23 @@ const REACH_PX = 28;
 
 const NOTE_SELECTOR = "g.note, g.rest, g.mRest";
 
+/** How far from a thin or tiny element (a bar line, a staccato dot) a tap still counts as on it. */
+const ELEMENT_SLOP_PX = 6;
+/** The elements whose box says nothing about where they are painted: a slur, tie or hairpin spans the notes under it. */
+const SPANNERS = new Set(["slur", "tie", "wedge"]);
+
+/** `mapElements` over the DOM: the first glyph is the SMuFL code point of the first `<use href="#E4A2-...">`. */
+const DOM_TREE: SvgTree<Element> = {
+  classes: (node) => [...node.classList],
+  id: (node) => node.id,
+  children: (node) => [...node.children],
+  glyph: (node) => {
+    const use = node.querySelector("use");
+    const href = use?.getAttribute("href") ?? use?.getAttributeNS("http://www.w3.org/1999/xlink", "href") ?? "";
+    return /^#([0-9A-Fa-f]+)-/.exec(href)?.[1]?.toUpperCase();
+  },
+};
+
 export function describeNote(info: NoteInfo): TappedNote {
   const { note } = info;
   let pitch = "rest";
@@ -88,7 +118,7 @@ export function describeNote(info: NoteInfo): TappedNote {
 }
 
 /** The hooks a caller can give before the first layout, so it does not miss that one. */
-export type ScoreViewHooks = Partial<Pick<ScoreView, "onTap" | "onBeforeRender" | "onRender">>;
+export type ScoreViewHooks = Partial<Pick<ScoreView, "onTap" | "onTapElement" | "onBeforeRender" | "onRender">>;
 
 /** Mounts the score in [container] and starts the first layout; `view.rendered` settles when it is drawn. */
 export async function showScore(container: HTMLElement, initial: Score): Promise<ScoreView> {
@@ -105,6 +135,9 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   let pendingWidth = 0;
   let generation = 0;
   let highlighted: SVGGElement[] = [];
+  /** What each drawn element is, rebuilt after every render: Verovio's own ids change each time. */
+  let elementMap = new Map<Element, ElementRef>();
+  let markedElement: ElementRef | undefined;
   const marks = new Map<string, Set<string>>();
   let lastRender: ScoreView["lastRender"];
 
@@ -131,6 +164,12 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     }
   };
 
+  const applyElementMark = () => {
+    for (const el of element.querySelectorAll(".mk-el")) el.classList.remove("mk-el");
+    if (!markedElement) return;
+    for (const [node, ref] of elementMap) if (sameElement(ref, markedElement)) node.classList.add("mk-el");
+  };
+
   const render = async (force = false) => {
     const width = Math.floor(element.clientWidth);
     if (width <= 0) return;
@@ -148,6 +187,8 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     lastRender = { ms, pages: pages.length, width };
     highlighted = [];
     applyMarks();
+    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, score) : new Map();
+    applyElementMark();
     element.dataset.rendered = "true";
     const missing = unmappedNotes(pages.join(""), index);
     element.dataset.unmapped = String(missing.length);
@@ -176,6 +217,54 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
       }
     }
     return best;
+  };
+
+  /** The mapped element drawn at a point: painted geometry first (a slur's box over a note does not count), then a small slop for thin or tiny ones. */
+  const elementAtPoint = (x: number, y: number): ElementRef | undefined => {
+    if (elementMap.size === 0) return undefined;
+    const painted = new Map<Element, DOMRect>();
+    for (const hit of document.elementsFromPoint(x, y)) {
+      if (!element.contains(hit)) continue;
+      for (let node: Element | null = hit; node && node !== element; node = node.parentElement) {
+        if (elementMap.has(node)) painted.set(node, node.getBoundingClientRect());
+      }
+    }
+    const area = (r: DOMRect) => r.width * r.height;
+    let best: Element | undefined;
+    for (const [node, r] of painted) if (!best || area(r) < area(painted.get(best)!)) best = node;
+    if (best) return elementMap.get(best);
+    // A note under the finger beats the slop: a staccato dot next to a note head must not take the note's taps.
+    const direct = document.elementFromPoint(x, y)?.closest(NOTE_SELECTOR);
+    if (direct && element.contains(direct)) return undefined;
+    // Then the box of a glyph or line, with a little slop: a clef's or a bar line's own painting is thin or has gaps.
+    // A note that is as near or nearer keeps the tap, so that the slop never takes a note's taps (the middle of a note's
+    // box is often empty, and a bar line or an articulation may be a few pixels away).
+    const distance = (r: DOMRect) => Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+    const nearest = (selector: string) => {
+      let d = Infinity;
+      for (const g of element.querySelectorAll<SVGGElement>(selector)) d = Math.min(d, distance(g.getBoundingClientRect()));
+      return d;
+    };
+    const noteDistance = nearest(NOTE_SELECTOR);
+    // An articulation is drawn inside its note, so the note's box always holds it: for one, only note heads and rests count.
+    let headDistance: number | undefined;
+    let near: Element | undefined;
+    let nearDistance = ELEMENT_SLOP_PX;
+    let nearArea = Infinity;
+    for (const [node, ref] of elementMap) {
+      if (SPANNERS.has(ref.kind)) continue;
+      const r = node.getBoundingClientRect();
+      const d = distance(r);
+      if (d > ELEMENT_SLOP_PX) continue;
+      const gate = ref.kind === "articulation" ? (headDistance ??= nearest("g.notehead, g.rest, g.mRest")) : noteDistance;
+      if (d >= gate) continue;
+      if (d < nearDistance || (d === nearDistance && near && area(r) < nearArea)) {
+        near = node;
+        nearDistance = d;
+        nearArea = area(r);
+      }
+    }
+    return near ? elementMap.get(near) : undefined;
   };
 
   const firstNotes = (): string[] => {
@@ -209,6 +298,12 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
       applyMarks();
     },
     onTap: hooks.onTap,
+    onTapElement: hooks.onTapElement,
+    elementAtPoint,
+    markElement(ref) {
+      markedElement = ref;
+      applyElementMark();
+    },
     onBeforeRender: hooks.onBeforeRender,
     onRender: hooks.onRender,
     get rendered() {
@@ -231,6 +326,17 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   };
 
   element.addEventListener("click", (event) => {
+    if (view.onTapElement) {
+      const ref = elementAtPoint(event.clientX, event.clientY);
+      if (ref) {
+        view.onTapElement(ref);
+        return;
+      }
+      const info = noteAtPoint(event.clientX, event.clientY);
+      if (info) view.onTap?.(info);
+      else view.onTapElement(undefined);
+      return;
+    }
     const info = noteAtPoint(event.clientX, event.clientY);
     if (info) view.onTap?.(info);
   });

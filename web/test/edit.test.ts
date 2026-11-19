@@ -10,6 +10,11 @@ import { computeWarnings } from '../src/core/score/warnings.ts'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { frac } from '../src/core/score/rational.ts'
 import { startingTempo, tempoSetup } from '../src/core/playback/tempo.ts'
+import { barOf, scoreOf } from './playbackHelpers.ts'
+import { describeElement } from '../src/core/score/elements.ts'
+import type { ElementRef } from '../src/core/score/elements.ts'
+import { buildTimeline } from '../src/core/playback/timeline.ts'
+import { COMMITTED_FIXTURE, read } from './helpers.ts'
 
 const TICKS: Record<string, number> = { whole: 48, half: 24, quarter: 12, eighth: 6, '16th': 3 }
 interface S { id: string; step?: string; octave?: number; alter?: number; acc?: string; type?: string; rest?: boolean }
@@ -584,4 +589,258 @@ test('edit: a tie is added between a note and the next note of the same pitch on
   failsWithoutUndoStep(s, (sc) => ed.addTie(sc, 'b', 'a')) // backwards
   failsWithoutUndoStep(tied.after, (sc) => ed.addTie(sc, 'a', 'b')) // already tied
   assert.equal(byId(throughSession(tied.after, (sc) => ed.toggleTie(sc, 'a')).after, 'b').tieStop, undefined, 'the active mark removes it')
+})
+
+// --- bar lines (change edit-bar-lines, tasks 1.1 and 1.2) ---
+
+const roundTrip = (s: Score): Score => parseMusicXml(serializeMusicXml(s))
+const linesOf = (s: Score, i: number): string => {
+  const b = ed.barLinesOf(s, i)
+  return `${b.start}/${b.end}/${b.times}`
+}
+
+test('bar lines: read a double bar line on either side of the boundary, a final bar line, a start-repeat and a repeat count', () => {
+  const s = scoreOf([
+    barOf('C', { right: '<bar-style>light-light</bar-style>' }),
+    barOf('D'),
+    barOf('E', { left: '<bar-style>light-light</bar-style>' }),
+    barOf('F', { left: '<bar-style>heavy-light</bar-style><repeat direction="forward"/>', right: '<bar-style>light-heavy</bar-style><repeat direction="backward" times="3"/>' }),
+    barOf('G', { right: '<bar-style>light-heavy</bar-style>' }),
+  ])
+  assert.deepEqual([0, 1, 2, 3, 4].map((i) => linesOf(s, i)), ['normal/double/2', 'normal/double/2', 'normal/normal/2', 'repeat/repeat/3', 'normal/double/2'])
+  assert.throws(() => ed.barLinesOf(s, 5), ed.EditError)
+  assert.throws(() => ed.barLinesOf(s, -1), ed.EditError)
+})
+
+test('bar lines: every start and end value round-trips through MusicXML', () => {
+  for (const start of ['normal', 'repeat'] as const) {
+    for (const end of ['normal', 'double', 'repeat'] as const) {
+      const s = scoreOf([barOf('C'), barOf('D'), barOf('E')])
+      ed.setBarStart(s, 1, start)
+      ed.setBarEnd(s, 1, end)
+      if (end === 'repeat') ed.setRepeatTimes(s, 1, 5)
+      const back = roundTrip(s)
+      assert.equal(linesOf(back, 1), `${start}/${end}/${end === 'repeat' ? 5 : 2}`)
+      assert.equal(serializeMusicXml(back), serializeMusicXml(s))
+      assert.equal(linesOf(back, 0), 'normal/normal/2', 'the bar before is untouched')
+    }
+  }
+  const s = scoreOf([barOf('C'), barOf('D')])
+  ed.setBarStart(s, 1, 'repeat')
+  ed.setBarEnd(s, 1, 'repeat')
+  assert.match(serializeMusicXml(s), /<barline location="left">\s*<bar-style>heavy-light<\/bar-style>\s*<repeat direction="forward"\/>\s*<\/barline>/)
+  assert.match(serializeMusicXml(s), /<barline location="right">\s*<bar-style>light-heavy<\/bar-style>\s*<repeat direction="backward"\/>\s*<\/barline>/)
+  ed.setRepeatTimes(s, 1, 3)
+  assert.match(serializeMusicXml(s), /<repeat direction="backward" times="3"\/>/)
+  ed.setRepeatTimes(s, 1, 2)
+  assert.equal(/times=/.test(serializeMusicXml(s)), false, 'the default count is not written')
+  ed.setBarStart(s, 1, 'normal')
+  ed.setBarEnd(s, 1, 'normal')
+  assert.equal(/<barline/.test(serializeMusicXml(s)), false, 'a plain bar line is no bar line element at all')
+})
+
+test('bar lines: the end of a bar owns the double bar line, so one on the next bar\'s left goes', () => {
+  for (const end of ['normal', 'double', 'repeat'] as const) {
+    const s = scoreOf([barOf('C'), barOf('D', { left: '<bar-style>light-light</bar-style>' }), barOf('E')])
+    ed.setBarEnd(s, 0, end)
+    assert.equal(s.measures[1]!.leftBarline, undefined, end)
+    assert.equal(ed.barLinesOf(s, 0).end, end)
+  }
+  // A start-repeat on the next bar is not a double bar line and stays.
+  const s = scoreOf([barOf('C'), barOf('D', { left: '<bar-style>heavy-light</bar-style><repeat direction="forward"/>' })])
+  ed.setBarEnd(s, 0, 'normal')
+  assert.equal(ed.barLinesOf(s, 1).start, 'repeat')
+  // Changing the start of a bar keeps the double bar line before it, moved to the bar before.
+  const t = scoreOf([barOf('C'), barOf('D', { left: '<bar-style>light-light</bar-style>' })])
+  ed.setBarStart(t, 1, 'repeat')
+  assert.deepEqual([linesOf(t, 0), linesOf(t, 1)], ['normal/double/2', 'repeat/normal/2'])
+  ed.setBarStart(t, 1, 'normal')
+  assert.deepEqual([linesOf(t, 0), linesOf(t, 1)], ['normal/double/2', 'normal/normal/2'])
+})
+
+test('bar lines: an ending stays through every edit', () => {
+  const s = scoreOf([
+    barOf('C', { left: '<repeat direction="forward"/>' }),
+    barOf('D', { left: '<ending number="1" type="start"/>', right: '<ending number="1" type="stop"/><repeat direction="backward"/>' }),
+    barOf('E', { left: '<ending number="2" type="start"/>', right: '<ending number="2" type="discontinue"/>' }),
+  ])
+  const endings = (sc: Score): string =>
+    sc.measures.map((m) => `${m.leftBarline?.ending?.type ?? '-'}:${m.rightBarline?.ending?.type ?? '-'}`).join(' ')
+  const before = endings(s)
+  ed.setRepeatTimes(s, 1, 3)
+  ed.setBarStart(s, 1, 'repeat')
+  ed.setBarStart(s, 1, 'normal')
+  ed.setBarEnd(s, 1, 'double')
+  ed.setBarEnd(s, 1, 'normal')
+  ed.setBarEnd(s, 1, 'repeat')
+  ed.setBarStart(s, 2, 'repeat')
+  ed.setBarEnd(s, 2, 'repeat')
+  ed.setBarStart(s, 2, 'normal')
+  ed.setBarEnd(s, 2, 'normal')
+  assert.equal(endings(s), before)
+  assert.equal(endings(roundTrip(s)), before)
+  assert.equal(s.measures[1]!.rightBarline!.times, undefined, 'a repeat set back from normal starts at 2 again')
+})
+
+test('bar lines: a bar out of range, a count outside 2-8 and a count on a bar without an end-repeat fail without an undo step', () => {
+  const s = scoreOf([barOf('C', { right: '<repeat direction="backward"/>' }), barOf('D')])
+  failsWithoutUndoStep(s, (sc) => ed.setBarStart(sc, 2, 'repeat'))
+  failsWithoutUndoStep(s, (sc) => ed.setBarEnd(sc, -1, 'double'))
+  failsWithoutUndoStep(s, (sc) => ed.setBarEnd(sc, 0.5, 'double'))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 0, 1))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 0, 9))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 0, 2.5))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 1, 3))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 5, 3))
+})
+
+test('bar lines: undo and redo in the session restore the bar lines', () => {
+  const s = scoreOf([barOf('C'), barOf('D', { right: '<bar-style>light-light</bar-style>' }), barOf('E')])
+  const start = throughSession(s, (sc) => ed.setBarStart(sc, 1, 'repeat'))
+  assert.deepEqual([linesOf(start.before, 1), linesOf(start.after, 1)], ['normal/double/2', 'repeat/double/2'])
+  const end = throughSession(start.after, (sc) => ed.setBarEnd(sc, 1, 'repeat'))
+  assert.equal(linesOf(end.after, 1), 'repeat/repeat/2')
+  const times = throughSession(end.after, (sc) => ed.setRepeatTimes(sc, 1, 4))
+  assert.deepEqual([linesOf(times.before, 1), linesOf(times.after, 1)], ['repeat/repeat/2', 'repeat/repeat/4'])
+})
+
+// ---------------------------------------------------------------- deleting elements and fixing clefs (change select-and-delete-elements)
+
+const pitches = (s: Score, bar: number): string[] =>
+  s.measures[bar]!.items.filter(isNote).map((n) => (n.pitch ? `${n.pitch.step}${n.pitch.alter === 1 ? '#' : n.pitch.alter === -1 ? 'b' : ''}${n.pitch.octave}` : 'rest'))
+
+test('deleteElement: each kind is removed alone, undo brings it back, and the bar check still runs', () => {
+  const base = parseMusicXml(read(COMMITTED_FIXTURE))
+  const refs: ElementRef[] = [
+    { kind: 'tempo', id: 'd1' },
+    { kind: 'dynamic', id: 'd2' },
+    { kind: 'words', id: 'd4' },
+    { kind: 'slur', noteId: 'n1', number: 1 },
+    { kind: 'tie', noteId: 'n7' },
+    { kind: 'wedge', startId: 'a1' },
+    { kind: 'articulation', noteId: 'a1', mark: 'staccato' },
+    { kind: 'articulation', noteId: 'n2', mark: 'tenuto' },
+    { kind: 'articulation', noteId: 'n3', mark: 'accent' },
+    { kind: 'articulation', noteId: 'n7', mark: 'breath' },
+    { kind: 'articulation', noteId: 'n15', mark: 'fermata' },
+    { kind: 'key', bar: 5 },
+    { kind: 'time', bar: 5 },
+  ]
+  const xmlBefore = serializeMusicXml(base)
+  const warningsBefore = computeWarnings(base, TENOR_SAX)
+  for (const ref of refs) {
+    const session = new EditSession(base)
+    session.apply((s) => ed.deleteElement(s, ref))
+    const after = session.score
+    assert.equal(describeElement(after, ref), undefined, `${JSON.stringify(ref)} is gone`)
+    // Only that element: every other element of the fixture is still there.
+    for (const other of refs) if (other !== ref && !(ref.kind === 'tie' && other.kind === 'tie')) assert.ok(describeElement(after, other), `${JSON.stringify(other)} stays when ${JSON.stringify(ref)} goes`)
+    assert.equal(after.measures.flatMap((m) => m.items.filter(isNote)).length, base.measures.flatMap((m) => m.items.filter(isNote)).length, 'no note goes')
+    // The bar check runs on the result (a deleted 2/4 change leaves bar 6 too short for 3/4).
+    const warnings = computeWarnings(after, TENOR_SAX)
+    if (ref.kind === 'time') assert.ok(warnings.some((w) => w.kind === 'bar-length' && w.bar === '6'), 'bar 6 no longer fits')
+    else assert.deepEqual(warnings, warningsBefore)
+    assert.ok(session.undo())
+    assert.equal(serializeMusicXml(session.score), xmlBefore, `undo restores ${JSON.stringify(ref)}`)
+  }
+})
+
+test('deleteElement: a slur goes with both its ends; a missing element, a bar line, and the first clef, key and time are refused', () => {
+  const s = parseMusicXml(read(COMMITTED_FIXTURE))
+  ed.deleteElement(s, { kind: 'slur', noteId: 'n1', number: 1 })
+  assert.ok(s.measures.every((m) => m.items.filter(isNote).every((n) => n.slurs.length === 0)), 'start and stop both gone')
+  ed.deleteElement(s, { kind: 'tie', noteId: 'n7' })
+  assert.ok(s.measures.every((m) => m.items.filter(isNote).every((n) => !n.tieStart && !n.tieStop)), 'both ends of the tie gone')
+  const refused: ElementRef[] = [
+    { kind: 'clef', bar: 0 },
+    { kind: 'key', bar: 0 },
+    { kind: 'time', bar: 0 },
+    { kind: 'barline', bar: 2 },
+    { kind: 'slur', noteId: 'n1', number: 1 }, // already gone: deleting never adds one back
+    { kind: 'tie', noteId: 'n7' },
+    { kind: 'articulation', noteId: 'n1', mark: 'staccato' },
+    { kind: 'dynamic', id: 'd4' },
+    { kind: 'clef', bar: 2 },
+  ]
+  const refuses = (ref: ElementRef): boolean => {
+    try {
+      ed.deleteElement(s, ref)
+      return false
+    } catch (error) {
+      return error instanceof ed.EditError
+    }
+  }
+  for (const ref of refused) assert.ok(refuses(ref), `${JSON.stringify(ref)} is refused`)
+})
+
+test('setClef: treble to bass keeps every note on its line, so the middle line goes from B4 to D3, and back again', () => {
+  const s = score([[{ id: 'a', step: 'B', octave: 4 }, { id: 'b', step: 'C', octave: 5 }, { id: 'c', step: 'E', octave: 4 }]])
+  ed.setClef(s, 0, { sign: 'F', line: 4 })
+  assert.deepEqual(s.measures[0]!.clef, { sign: 'F', line: 4 })
+  assert.deepEqual(pitches(s, 0), ['D3', 'E3', 'G2'])
+  ed.setClef(s, 0, { sign: 'G', line: 2 })
+  assert.deepEqual(pitches(s, 0), ['B4', 'C5', 'E4'])
+})
+
+test('setClef: explicit accidentals stay with their notes, and the key gives the others their alter again', () => {
+  // G major: F is sharp. Under treble: an F5 with a printed natural, a G4 with a printed sharp, and a plain D4.
+  const s = score([[{ id: 'a', step: 'F', octave: 5, acc: 'natural' }, { id: 'b', step: 'G', octave: 4, alter: 1, acc: 'sharp' }, { id: 'c', step: 'D', octave: 4 }]], { fifths: 1 })
+  ed.setClef(s, 0, { sign: 'F', line: 4 })
+  // Under bass the same places are A3 (natural, printed), B2 (sharp, printed) and F2: F2 has no accidental, so the key makes it F#.
+  assert.deepEqual(pitches(s, 0), ['A3', 'B#2', 'F#2'])
+  const notes = s.measures[0]!.items.filter(isNote)
+  assert.deepEqual(notes.map((n) => n.accidental), ['natural', 'sharp', undefined])
+})
+
+test('setClef and deleteClef: only the bars up to the next clef change move', () => {
+  const s = score([[{ id: 'a', step: 'B', octave: 4 }], [{ id: 'b', step: 'B', octave: 4 }], [{ id: 'c', step: 'D', octave: 3 }], [{ id: 'd', step: 'D', octave: 3 }]], { beats: 1 })
+  ed.setClef(s, 2, { sign: 'F', line: 4 }) // bars 3-4 were read under bass: here set as a change that moves them
+  assert.deepEqual([0, 1, 2, 3].map((b) => pitches(s, b)[0]), ['B4', 'B4', 'F1', 'F1'])
+  ed.setClef(s, 2, { sign: 'G', line: 2 })
+  ed.setClef(s, 1, { sign: 'F', line: 4 }) // bar 2 only: bar 3 has its own clef change
+  assert.deepEqual([0, 1, 2, 3].map((b) => pitches(s, b)[0]), ['B4', 'D3', 'D3', 'D3'])
+  ed.deleteClef(s, 1) // treble again from bar 2, up to bar 3's change
+  assert.deepEqual([0, 1, 2, 3].map((b) => pitches(s, b)[0]), ['B4', 'B4', 'D3', 'D3'])
+  assert.equal(s.measures[1]!.clef, undefined)
+  assert.throws(() => ed.deleteClef(s, 0), ed.EditError)
+  assert.throws(() => ed.deleteClef(s, 1), ed.EditError)
+  assert.throws(() => ed.setClef(s, 0, { sign: 'percussion' }), ed.EditError)
+})
+
+test('deleteClef: the exercise-91 shape (a bass clef read at bar 11) plays B4 for the middle line once the clef is gone', () => {
+  // Bars 1-10 in treble; at bar 11 recognition read a bass clef, so bars 11-14 hold the pitches of the bass staff.
+  const bars: S[][] = []
+  for (let b = 0; b < 14; b++) bars.push([{ id: `m${b}`, step: b < 10 ? 'B' : 'D', octave: b < 10 ? 4 : 3, type: 'half' }, { id: `x${b}`, step: b < 10 ? 'G' : 'B', octave: b < 10 ? 4 : 2, type: 'half' }])
+  const s = score(bars, { beats: 4 })
+  s.measures[10]!.clef = { sign: 'F', line: 4 }
+  const written = (sc: Score, bar: number): number[] => buildTimeline(sc, TENOR_SAX).events.filter((e) => e.barIndex === bar && !e.rest).map((e) => e.written[0]!)
+  assert.deepEqual(written(s, 10), [50, 47], 'before: D3 and B2')
+  ed.deleteClef(s, 10)
+  for (const bar of [10, 11, 12, 13]) assert.deepEqual(written(s, bar), [71, 67], `bar ${bar + 1}: B4 on the middle line, G4 below it`)
+  assert.deepEqual(written(s, 9), [71, 67], 'bar 10 unchanged')
+})
+
+test('deleteKey: a key change to one flat misread at bar 9 of a D major piece goes, and F and C are sharp again', () => {
+  const bars: S[][] = []
+  for (let b = 0; b < 10; b++) bars.push([{ id: `f${b}`, step: 'F', octave: 4 }, { id: `c${b}`, step: 'C', octave: 5 }, { id: `n${b}`, step: 'C', octave: 5, acc: 'natural' }])
+  const s = score(bars, { fifths: 2 })
+  s.measures[8]!.key = { fifths: -1 }
+  ed.resolveAlters(s)
+  assert.deepEqual(pitches(s, 8), ['F4', 'C5', 'C5'], 'under one flat')
+  ed.deleteKey(s, 8)
+  for (const bar of [8, 9]) assert.deepEqual(pitches(s, bar), ['F#4', 'C#5', 'C5'], `bar ${bar + 1}: D major again; a printed natural stays`)
+  assert.equal(s.measures[8]!.key, undefined)
+  assert.throws(() => ed.deleteKey(s, 8), ed.EditError)
+  assert.throws(() => ed.deleteKey(s, 0), ed.EditError)
+})
+
+test('deleteTime: a deleted time change makes the bar check flag the bars that no longer fit', () => {
+  // 3/4, then a 2/4 change at bar 3: bars 3-4 hold two beats.
+  const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c' }], [{ id: 'd' }, { id: 'e' }, { id: 'f' }], [{ id: 'g' }, { id: 'h' }], [{ id: 'i' }, { id: 'j' }]])
+  s.measures[2]!.time = { beats: 2, beatType: 4 }
+  assert.deepEqual(computeWarnings(s, TENOR_SAX).filter((w) => w.kind === 'bar-length'), [])
+  ed.deleteTime(s, 2)
+  assert.deepEqual(computeWarnings(s, TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar), ['3', '4'])
+  assert.throws(() => ed.deleteTime(s, 2), ed.EditError)
+  assert.throws(() => ed.deleteTime(s, 0), ed.EditError)
 })

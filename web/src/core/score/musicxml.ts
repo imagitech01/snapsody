@@ -121,15 +121,23 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
     kids(m, 'miscellaneous-field').some((f) => f.attrs.name === 'time-signature-inferred' && f.text === 'true'),
   )
 
-  // Ids: keep ids present in the source, generate the rest without collisions.
+  // Ids: keep ids present in the source, generate the rest without collisions. Notes are numbered
+  // n1, n2, ... and directions (dynamics, tempo marks, words) d1, d2, ...; a direction never takes an
+  // id a note has, so note ids come out as they would without direction ids.
   const used = new Set<string>()
+  const noteIds = new Set<string>()
   for (const m of kids(part, 'measure')) {
     for (const n of kids(m, 'note')) {
       const id = n.attrs.id
-      if (id) used.add(id)
+      if (id) {
+        used.add(id)
+        noteIds.add(id)
+      }
     }
+    for (const d of kids(m, 'direction')) if (d.attrs.id) used.add(d.attrs.id)
   }
   let counter = 0
+  let directionCounter = 0
   const seen = new Set<string>()
   const nextId = (wanted: string | undefined): string => {
     if (wanted && !seen.has(wanted)) {
@@ -138,6 +146,17 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
     }
     let id: string
     do id = `n${++counter}`
+    while (used.has(id) || seen.has(id))
+    seen.add(id)
+    return id
+  }
+  const nextDirectionId = (wanted: string | undefined): string => {
+    if (wanted && !seen.has(wanted) && !noteIds.has(wanted)) {
+      seen.add(wanted)
+      return wanted
+    }
+    let id: string
+    do id = `d${++directionCounter}`
     while (used.has(id) || seen.has(id))
     seen.add(id)
     return id
@@ -218,7 +237,7 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
           break
         }
         case 'direction': {
-          const direction = parseDirection(c, sawNote)
+          const direction = parseDirection(c, sawNote, nextDirectionId)
           measure.items.push(...direction.items)
           for (const mark of direction.wedges) handleWedge(mark, measure.number)
           break
@@ -332,10 +351,20 @@ interface WedgeMark {
   number: string
 }
 
-function parseDirection(d: XmlElement, sawNote: boolean): { items: MeasureItem[]; wedges: WedgeMark[] } {
+/**
+ * The items of one `<direction>`. The first item takes the direction's `id` (through `nextId`, which
+ * keeps it when it is free); any further one (several dynamics, or a dynamic with a tempo mark) a fresh one.
+ */
+function parseDirection(d: XmlElement, sawNote: boolean, nextId: (wanted: string | undefined) => string): { items: MeasureItem[]; wedges: WedgeMark[] } {
   const items: MeasureItem[] = []
   const wedges: WedgeMark[] = []
-  const tempo: TempoItem = { kind: 'tempo' }
+  let wanted = d.attrs.id
+  const id = (): string => {
+    const given = nextId(wanted)
+    wanted = undefined
+    return given
+  }
+  const tempo: Omit<TempoItem, 'id'> = { kind: 'tempo' }
   let hasTempo = false
   const words: string[] = []
 
@@ -344,7 +373,7 @@ function parseDirection(d: XmlElement, sawNote: boolean): { items: MeasureItem[]
       if (c.name === 'dynamics') {
         for (const mark of c.children) {
           const text = mark.name === 'other-dynamics' ? mark.text : mark.name
-          if (text) items.push({ kind: 'dynamic', mark: text })
+          if (text) items.push({ kind: 'dynamic', id: id(), mark: text })
         }
       } else if (c.name === 'wedge') {
         const type = c.attrs.type
@@ -374,10 +403,10 @@ function parseDirection(d: XmlElement, sawNote: boolean): { items: MeasureItem[]
   const text = words.join(' ')
   if (hasTempo) {
     if (text) tempo.words = text
-    items.push(tempo)
+    items.push({ id: id(), ...tempo })
   } else if (text) {
     // Words alone before the first note are taken as the tempo word ("Moderato").
-    items.push(sawNote ? { kind: 'words', text } : { kind: 'tempo', words: text })
+    items.push(sawNote ? { kind: 'words', id: id(), text } : { kind: 'tempo', id: id(), words: text })
   }
   return { items, wedges }
 }
@@ -483,6 +512,21 @@ function txt(name: string, value: string | number, attrs: Record<string, string>
 export interface SerializeOptions {
   /** Beam marks by note id (display only: see beams.ts). */
   beams?: Map<string, BeamMark[]>
+  /**
+   * For drawing only, never stored (change select-and-delete-elements, design D2): ids that Verovio keeps
+   * on what it draws, so a tap can be traced back to the model. `clef-<bar>` on a bar's clef (the bar's
+   * index, from 0), `slur-<noteId>-<number>` on a slur start, `tie-<noteId>` on a tie start and
+   * `wedge-<startId>` on a hairpin start.
+   */
+  drawingIds?: boolean
+}
+
+/** The drawing ids of `SerializeOptions.drawingIds`. */
+export const drawingId = {
+  clef: (bar: number): string => `clef-${bar}`,
+  slur: (noteId: string, number: number): string => `slur-${noteId}-${number}`,
+  tie: (noteId: string): string => `tie-${noteId}`,
+  wedge: (startId: string): string => `wedge-${startId}`,
 }
 
 export function serializeMusicXml(score: Score, options: SerializeOptions = {}): string {
@@ -534,7 +578,7 @@ export function serializeMusicXml(score: Score, options: SerializeOptions = {}):
       openNumbers.add(number)
       wedgeNumbers.set(w, number)
     } else if (number !== undefined) openNumbers.delete(number)
-    const wedge = el('wedge', { type, number: String(number ?? 1) })
+    const wedge = el('wedge', { type, number: String(number ?? 1), ...(options.drawingIds && type !== 'stop' ? { id: drawingId.wedge(w.start) } : {}) })
     return el('direction', { placement: 'below' }, [el('direction-type', {}, [wedge])])
   }
 
@@ -558,7 +602,7 @@ export function serializeMusicXml(score: Score, options: SerializeOptions = {}):
       )
     }
     if (m.clef) {
-      const clef = el('clef', {}, [txt('sign', m.clef.sign)])
+      const clef = el('clef', options.drawingIds ? { id: drawingId.clef(index) } : {}, [txt('sign', m.clef.sign)])
       if (m.clef.line !== undefined) clef.children.push(txt('line', m.clef.line))
       if (m.clef.octaveChange !== undefined) clef.children.push(txt('clef-octave-change', m.clef.octaveChange))
       attrs.children.push(clef)
@@ -578,18 +622,18 @@ export function serializeMusicXml(score: Score, options: SerializeOptions = {}):
           flushStops()
           for (const w of wedgeStarts.get(item.id) ?? []) measure.children.push(wedgeDirection(w, w.type))
         }
-        measure.children.push(noteEl(item, divisions, options.beams?.get(item.id)))
+        measure.children.push(noteEl(item, divisions, options.beams?.get(item.id), options.drawingIds))
         pendingStops.push(...(wedgeStops.get(item.id) ?? []))
       } else if (item.kind === 'dynamic') {
         const mark = isStandardDynamic(item.mark)
           ? el(item.mark)
           : txt('other-dynamics', item.mark)
         measure.children.push(
-          el('direction', { placement: 'below' }, [el('direction-type', {}, [el('dynamics', {}, [mark])])]),
+          el('direction', { id: item.id, placement: 'below' }, [el('direction-type', {}, [el('dynamics', {}, [mark])])]),
         )
       } else if (item.kind === 'words') {
         measure.children.push(
-          el('direction', { placement: 'above' }, [el('direction-type', {}, [txt('words', item.text)])]),
+          el('direction', { id: item.id, placement: 'above' }, [el('direction-type', {}, [txt('words', item.text)])]),
         )
       } else {
         measure.children.push(tempoEl(item))
@@ -624,7 +668,7 @@ function barlineEl(b: Barline, location: 'left' | 'right'): XmlElement {
 }
 
 function tempoEl(t: TempoItem): XmlElement {
-  const d = el('direction', { placement: 'above' })
+  const d = el('direction', { id: t.id, placement: 'above' })
   if (t.words) d.children.push(el('direction-type', {}, [txt('words', t.words)]))
   if (t.beatUnit || t.perMinute !== undefined) {
     const metronome = el('metronome')
@@ -639,7 +683,7 @@ function tempoEl(t: TempoItem): XmlElement {
   return d
 }
 
-function noteEl(n: Note, divisions: number, beams: BeamMark[] = []): XmlElement {
+function noteEl(n: Note, divisions: number, beams: BeamMark[] = [], drawingIds = false): XmlElement {
   const e = el('note', { id: n.id })
   if (n.grace) e.children.push(el('grace'))
   if (n.chord) e.children.push(el('chord'))
@@ -670,8 +714,11 @@ function noteEl(n: Note, divisions: number, beams: BeamMark[] = []): XmlElement 
 
   const notations = el('notations')
   if (n.tieStop) notations.children.push(el('tied', { type: 'stop' }))
-  if (n.tieStart) notations.children.push(el('tied', { type: 'start' }))
-  for (const s of n.slurs) notations.children.push(el('slur', { type: s.type, number: String(s.number) }))
+  if (n.tieStart) notations.children.push(el('tied', { type: 'start', ...(drawingIds ? { id: drawingId.tie(n.id) } : {}) }))
+  for (const s of n.slurs) {
+    const id: Record<string, string> = drawingIds && s.type === 'start' ? { id: drawingId.slur(n.id, s.number) } : {}
+    notations.children.push(el('slur', { type: s.type, number: String(s.number), ...id }))
+  }
   for (const t of n.tuplets) notations.children.push(el('tuplet', { type: t.type, number: String(t.number) }))
   if (n.staccato || n.tenuto || n.accent || n.breath) {
     const art = el('articulations')

@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import * as ed from '../src/core/score/edit.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { indexScore, renderedNoteIds, unmappedNotes } from '../src/core/score/noteMap.ts'
-import { parseMusicXml } from '../src/core/score/musicxml.ts'
+import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { renderScore } from '../src/core/score/render.ts'
 import { COMMITTED_FIXTURE, LOCAL_EXERCISE_87, read, skipUnless } from './helpers.ts'
 import { n, scoreOf } from './playbackHelpers.ts'
@@ -134,4 +134,20 @@ test('render: the committed fixture shows its tenuto, accent, fermata and hairpi
   assert.equal(glyphsOf(svg, 'fermata').filter((g) => FERMATA.test(g)).length, 1, 'fermata')
   const shapes = hairpinShapes(svg)
   assert.ok(shapes.includes('crescendo') && shapes.includes('diminuendo'), `both hairpins (${shapes.join(', ')})`)
+})
+
+// --- drawing ids (change select-and-delete-elements, task 1.3, design D2) ---
+
+test('render: clef changes, slurs, ties and hairpins are drawn with drawing ids, which the stored MusicXML never has', async () => {
+  const score = parseMusicXml(read(COMMITTED_FIXTURE))
+  score.measures[2]!.clef = { sign: 'F', line: 4 }
+  const [svg] = await renderScore(score, { width: 360 })
+  const drawn = (cls: string, id: string): boolean => new RegExp(`<g[^>]*\\bid="${id}"[^>]*class="${cls}"|<g[^>]*class="${cls}"[^>]*\\bid="${id}"`).test(svg!)
+  assert.ok(drawn('clef', 'clef-2'), 'the clef change at bar 3 (index 2)')
+  assert.ok(drawn('slur', 'slur-n1-1'), 'the slur that starts on n1')
+  assert.ok(drawn('tie', 'tie-n7'), 'the tie that starts on n7')
+  assert.ok(drawn('hairpin', 'wedge-a1') && drawn('hairpin', 'wedge-n4'), 'the crescendo and the diminuendo, by their first note')
+  const stored = serializeMusicXml(score)
+  assert.ok(!/id="(clef|slur|tie|wedge)-/.test(stored), 'the stored score has no drawing ids')
+  assert.match(serializeMusicXml(score, { drawingIds: true }), /<clef id="clef-2">/)
 })

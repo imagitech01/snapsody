@@ -21,7 +21,7 @@
           <line>2</line>
         </clef>
       </attributes>
-      <direction placement="below">
+      <direction id="d1" placement="below">
         <direction-type>
           <dynamics>
             <mf/>
@@ -522,7 +522,7 @@
       </note>
     </measure>
     <measure number="12">
-      <direction placement="below">
+      <direction id="d2" placement="below">
         <direction-type>
           <dynamics>
             <p/>

@@ -1,5 +1,5 @@
 import type { Clef, KeySignature, Measure, Score, TimeSignature } from '../score/model.ts'
-import { isNote, isWedge } from '../score/model.ts'
+import { isDirection, isNote, isWedge } from '../score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../score/musicxml.ts'
 import { prepareScore } from '../score/prepare.ts'
 import type { PreparedScore } from '../score/prepare.ts'
@@ -85,7 +85,8 @@ export function inForceAtEnd(score: Score): InForce {
  * - Every note gets a new id, unique in the merged score and, with `after`, in the piece. Ids are
  *   unique per page only (the parser numbers each page from `n1`), so a hairpin's `start` and `stop`
  *   go through the id map of its own page. A hairpin whose ends are not both on its page is dropped.
- *   Slurs, ties and tuplets carry no ids and stay as they are.
+ *   Dynamics, tempo marks and words get new direction ids the same way (change
+ *   select-and-delete-elements, design D1). Slurs, ties and tuplets carry no ids and stay as they are.
  *
  * Throws when a page has no bars.
  */
@@ -94,9 +95,19 @@ export function mergePages(pages: readonly Score[], after?: Score): MergedPages 
   const used = new Set<string>()
   for (const m of after?.measures ?? []) for (const item of m.items) if (isNote(item)) used.add(item.id)
   let counter = used.size
+  // Direction ids (d1, d2, ...) are made fresh too, as each page numbers its own from d1.
+  for (const m of after?.measures ?? []) for (const item of m.items) if (isDirection(item)) used.add(item.id)
   const freshId = (): string => {
     let id: string
     do id = `n${++counter}`
+    while (used.has(id))
+    used.add(id)
+    return id
+  }
+  let directionCounter = 0
+  const freshDirectionId = (): string => {
+    let id: string
+    do id = `d${++directionCounter}`
     while (used.has(id))
     used.add(id)
     return id
@@ -116,6 +127,7 @@ export function mergePages(pages: readonly Score[], after?: Score): MergedPages 
       if (i === 0) dropRepeated(m, inForce)
       track(m, inForce)
       for (const item of m.items) {
+        if (isDirection(item)) item.id = freshDirectionId()
         if (!isNote(item)) continue
         const id = freshId()
         ids.set(item.id, id)
