@@ -20,14 +20,14 @@ import { computeWarnings } from '../core/score/warnings.ts'
 import type { ScoreWarning } from '../core/score/warnings.ts'
 import type { I18n } from './i18n/index.ts'
 import { LibraryError } from './library.ts'
-import type { Library, PageInfo, PieceInfo, StaffBox } from './library.ts'
+import type { Library, PieceInfo } from './library.ts'
 import type { Router } from './router.ts'
 import type { Settings } from './settings.ts'
 
 /*
  * The editor of a piece (practice-app task 9.6, spec `score-editing`, design D4 and D12): the
- * working score with undo and redo, what is selected, the live warnings, the photo of the selected
- * bar, the bar preview, the title, and saving.
+ * working score with undo and redo, what is selected, the live warnings, the bar preview, the title,
+ * and saving.
  *
  * - Edits go through `EditSession` (core): each `apply` runs an edit function of `core/score/edit.ts`
  *   on a copy, so an edit that throws changes nothing. Undo and redo step through whole scores.
@@ -49,13 +49,17 @@ import type { Settings } from './settings.ts'
  * - Save writes the score (`Library.writeScore`, based on the score file the editor loaded; a
  *   `conflict` when the piece was saved elsewhere since) only when it changed, then renames the
  *   piece when the title changed. An empty title is not accepted. The raw readings are not touched.
+ * - A piece that adding music has just made opens `isNew` (change simplify-editor-and-name-new-pieces,
+ *   D5): `naming` is on, so the editor asks for a name, until the title is typed in, a save succeeds or
+ *   the editor closes. It changes nothing else: an untouched date name saves as it is.
  * - Save & practice (design D12): from an editor opened over the practice screen of the same piece it
  *   goes back to that screen, which opens its session again on the saved score (the router shows only
  *   the screen on top, so the practice screen is made again when it comes back); from anywhere else it
  *   replaces the editor with the practice screen. Either way the practice screen is a new one, without
  *   the `autoplay` it may have been opened with.
  *
- * Not here: drawing the score, the editor's tabs and its sheets (the UI); adding pages (addMusic).
+ * Not here: drawing the score and the editor's tabs (the UI); adding pages (addMusic). The page photos
+ * stay stored with the piece, but the editor no longer shows them.
  */
 
 /** What is selected: a bar (1-based position in the piece), and a note in it, or none. */
@@ -68,26 +72,6 @@ export interface Selection {
 export interface SelectedElement {
   ref: ElementRef
   info: ElementInfo
-}
-
-/**
- * The photo beside the selected bar (spec "Original beside the selected bar"): the page that holds
- * it and, when known, the box of the staff on that photo; `box` null shows the whole photo.
- */
-export interface PhotoView {
-  /** The page in reading order, 1-based: "Photo {page} · Bar {bar}". */
-  page: number
-  /** The page's number in the piece's files (`PageInfo.n`), for `Library.pageImageUrl`. */
-  n: number
-  bar: number
-  box: StaffBox | null
-}
-
-/** One page photo of the piece, for comparing the score with the book (spec `score-capture`). */
-export interface PagePhoto {
-  page: number
-  n: number
-  url: string
 }
 
 /** What "Preview bar N" plays (spec "Preview a bar"): the bar on its own, at the practice tempo, with the instrument in use. */
@@ -111,7 +95,7 @@ export type SaveResult =
   | { ok: false; reason: 'empty-name' | 'conflict' | 'failed'; error?: unknown }
 
 export interface EditorDeps {
-  library: Pick<Library, 'load' | 'writeScore' | 'update' | 'pageImageUrl' | 'readPractice'>
+  library: Pick<Library, 'load' | 'writeScore' | 'update' | 'readPractice'>
   settings: Pick<Settings, 'defaultInstrument'>
   /** The router with the editor screen on top: the leave guard goes on it, and Save & practice goes back to the practice screen under it, or replaces it. */
   router?: Pick<Router, 'setLeaveGuard' | 'confirm' | 'replace' | 'pop' | 'stack'>
@@ -175,8 +159,8 @@ export class EditorSession {
   readonly warningCount: ReadonlySignal<number>
   /** The warning `nextWarning`/`previousWarning` went to last, while it is still there. */
   readonly currentWarning: ReadonlySignal<ScoreWarning | undefined>
-  /** The photo beside the selected bar, or null when nothing is selected. */
-  readonly photo: ReadonlySignal<PhotoView | null>
+  /** The piece is new and has its date name: the editor asks for a name (design D5 of simplify-editor-and-name-new-pieces). */
+  readonly naming: ReadonlySignal<boolean>
   readonly saving: ReadonlySignal<boolean>
   /** True while the bar preview is loading its sound or playing, for the button that starts and stops it. */
   readonly previewing: ReadonlySignal<boolean>
@@ -193,12 +177,13 @@ export class EditorSession {
   private readonly focused: Signal<ScoreWarning | undefined>
   private readonly busy: Signal<boolean>
   private readonly previewState: Signal<boolean>
+  private readonly askName: Signal<boolean>
   /** Beats per minute the user practises the piece at (practice.json), or null. */
   private readonly practiceTempo: number | null
   private player: Player | undefined
   private dropGuard: (() => void) | undefined
 
-  constructor(deps: EditorDeps, info: PieceInfo, score: Score, practiceTempo: number | null) {
+  constructor(deps: EditorDeps, info: PieceInfo, score: Score, practiceTempo: number | null, options: OpenOptions = {}) {
     this.deps = deps
     this.pieceId = info.id
     this.practiceTempo = practiceTempo
@@ -212,12 +197,14 @@ export class EditorSession {
     this.focused = signal(undefined)
     this.busy = signal(false)
     this.previewState = signal(false)
+    this.askName = signal(options.isNew === true)
 
     this.info = this.saveInfo
     this.title = this.typed
     this.selection = this.chosen
     this.saving = this.busy
     this.previewing = this.previewState
+    this.naming = this.askName
     this.score = computed(() => {
       this.version.value
       return this.session.score
@@ -251,10 +238,6 @@ export class EditorSession {
     this.currentWarning = computed(() => {
       const focused = this.focused.value
       return focused && this.warnings.value.find((w) => sameWarning(w, focused))
-    })
-    this.photo = computed(() => {
-      const selected = this.chosen.value
-      return selected ? photoOf(this.saveInfo.value.pages, selected.bar) : null
     })
   }
 
@@ -341,22 +324,10 @@ export class EditorSession {
 
   // ---- Title ---------------------------------------------------------------------------------
 
+  /** The title as typed. Typing it ends `naming`. */
   setTitle(text: string): void {
     this.typed.value = text
-  }
-
-  // ---- Photos --------------------------------------------------------------------------------
-
-  /** The photo of every page, in reading order. */
-  photos(): Promise<PagePhoto[]> {
-    return Promise.all(
-      this.saveInfo.value.pages.map(async (page, index) => ({ page: index + 1, n: page.n, url: await this.deps.library.pageImageUrl(this.pieceId, page.n) })),
-    )
-  }
-
-  /** The URL of the photo `photo` shows. */
-  photoUrl(view: PhotoView): Promise<string> {
-    return this.deps.library.pageImageUrl(this.pieceId, view.n)
+    this.askName.value = false
   }
 
   // ---- Preview -------------------------------------------------------------------------------
@@ -436,6 +407,7 @@ export class EditorSession {
         await this.deps.refreshList?.().catch(() => undefined)
       }
       this.typed.value = name
+      this.askName.value = false
       return { ok: true, info }
     } catch (error) {
       if (error instanceof LibraryError && error.code === 'conflict') return { ok: false, reason: 'conflict', error }
@@ -493,8 +465,9 @@ export class EditorSession {
     this.dropGuard = router.setLeaveGuard(() => this.confirmLeave())
   }
 
-  /** Stops the preview and drops the leave guard. */
+  /** Stops the preview, drops the leave guard, and ends `naming`. */
   close(): void {
+    this.askName.value = false
     this.player?.stop()
     this.dropGuard?.()
     this.dropGuard = undefined
@@ -569,15 +542,6 @@ function sameWarning(a: ScoreWarning, b: ScoreWarning): boolean {
   return a.kind === b.kind && a.bar === b.bar && a.noteId === b.noteId
 }
 
-/** The photo view of [bar] (1-based): its page and, when known, the staff that holds it. */
-export function photoOf(pages: readonly PageInfo[], bar: number): PhotoView | null {
-  const index = pages.findIndex((p) => p.firstBar <= bar && bar <= p.lastBar)
-  const page = pages[index]
-  if (!page) return null
-  const staff = page.staves.find((s) => s.firstBar <= bar && bar <= s.lastBar)
-  return { page: index + 1, n: page.n, bar, box: staff ? { ...staff.box } : null }
-}
-
 /**
  * The bar at [index] as a score of its own, for the preview: with the clef, key and time in force
  * there, without repeat barlines or endings (it plays once), and without hairpins that reach
@@ -601,15 +565,20 @@ export function barExcerpt(score: Score, index: number): Score {
   return excerpt
 }
 
+/** How the editor opens a piece. `isNew`: adding music has just made it, so the editor asks for its name. */
+export interface OpenOptions {
+  isNew?: boolean
+}
+
 /**
  * Opens a piece in the editor: loads it and what the practice session remembers (for the preview
  * tempo), and puts the leave guard on the screen that is on top of the router now, which must be
  * the editor's. Rejects as `Library.load` does (`not-found`, `damaged`, ...).
  */
-export async function openEditor(deps: EditorDeps, pieceId: string): Promise<EditorSession> {
+export async function openEditor(deps: EditorDeps, pieceId: string, options: OpenOptions = {}): Promise<EditorSession> {
   const piece = await deps.library.load(pieceId)
   const practice = await deps.library.readPractice(pieceId).catch(() => null)
-  const session = new EditorSession(deps, piece.info, parseMusicXml(piece.musicxml), practice?.tempo ?? null)
+  const session = new EditorSession(deps, piece.info, parseMusicXml(piece.musicxml), practice?.tempo ?? null, options)
   session.guardLeaving()
   return session
 }

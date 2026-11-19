@@ -35,8 +35,9 @@ export const TABS: readonly Tab[] = ['practice', 'library', 'settings']
 
 /**
  * A screen of the stack. `pieceId` is the id of a piece in the library. `autoplay` opens the
- * piece and starts playing it (the play button of the rotation); `add-music` and `reading` carry
- * the piece the pages are added to, when there is one.
+ * piece and starts playing it (the play button of the rotation); `isNew` opens the editor on a piece
+ * that adding music has just made, which asks for its name (change simplify-editor-and-name-new-pieces,
+ * D4); `add-music` and `reading` carry the piece the pages are added to, when there is one.
  */
 export type Screen =
   | { readonly name: 'home' }
@@ -44,7 +45,7 @@ export type Screen =
   | { readonly name: 'favorites' }
   | { readonly name: 'settings' }
   | { readonly name: 'practice'; readonly pieceId: string; readonly autoplay?: boolean }
-  | { readonly name: 'editor'; readonly pieceId: string }
+  | { readonly name: 'editor'; readonly pieceId: string; readonly isNew?: true }
   | { readonly name: 'add-music'; readonly pieceId?: string }
   | { readonly name: 'reading'; readonly pieceId?: string }
 
@@ -66,8 +67,8 @@ export function isStartScreen(screen: Screen): boolean {
   return TABS.some((tab) => START_SCREENS[tab].name === screen.name)
 }
 
-/** The sheets that slide over a screen (frames 02.3 and 02.4), and the editor's two: the page photos and "go to bar", and Settings' two lists (default instrument, language). */
-export type SheetName = 'tools' | 'loop' | 'pages' | 'goto' | 'instrument' | 'language'
+/** The sheets that slide over a screen (frames 02.3 and 02.4), and Settings' two lists (default instrument, language). */
+export type SheetName = 'tools' | 'loop' | 'instrument' | 'language'
 
 /** What a confirm dialog says. The texts are already in the user's language. */
 export interface ConfirmOptions {

@@ -5,6 +5,7 @@ import type { HighlightTarget } from '../core/playback/cursor.ts'
 import type { Position } from '../core/playback/scheduler.ts'
 import type { Score } from '../core/score/model.ts'
 import type { ElementRef } from '../core/score/elements.ts'
+import type { LineBars } from '../core/score/lines.ts'
 import type { NoteInfo } from '../core/score/noteMap.ts'
 import { createScoreView } from './scoreView.ts'
 import type { ScoreView } from './scoreView.ts'
@@ -36,6 +37,13 @@ import type { ScoreView } from './scoreView.ts'
  * A re-layout (rotation, another score) drops the drawing and with it the highlight and the position. The
  * island keeps the bar that matters in view: the sounding bar while it follows, else the bar that was at
  * the top.
+ *
+ * One line (the editor; change simplify-editor-and-name-new-pieces, design D1). While `line` names a bar, the
+ * island shows only the line of music (Verovio's `g.system`) that holds it: it takes that line's height plus
+ * the bar box's reach above and below, scrolls the line to its top, and stops scrolling under the user's
+ * input. It is the same drawing, clipped, so taps, the bar box and the marks work as they do on the whole
+ * score. After every re-layout it measures again, by the bar, so an edit that moves the line breaks is
+ * followed. When `line` is null again, the island is the whole scroller, with that line still at the top.
  */
 
 export interface ScoreIslandOptions {
@@ -66,6 +74,10 @@ export interface ScoreIslandOptions {
   onTapElement?: (ref: ElementRef | undefined) => void
   /** The element to show as selected (the editor), by reference. */
   selectedElement?: ReadonlySignal<ElementRef | undefined>
+  /** Show only the line that holds this bar, from 1 (the editor), or the whole score for null. */
+  line?: ReadonlySignal<number | null>
+  /** After every layout: the lines of the drawing, with the bars (from 0) each holds. */
+  onLines?: (lines: readonly LineBars[]) => void
 }
 
 export interface ScoreIslandHandle {
@@ -201,6 +213,35 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
     }
   }
 
+  // ---- One line -------------------------------------------------------------------------------
+
+  /**
+   * Shows the line of `line`'s bar, or the whole score: the island's height, whether it scrolls, and where
+   * (`data-line` names the line shown, from 0, for the tests). Nothing changes before the first layout.
+   */
+  const applyLine = (): void => {
+    if (disposed) return
+    const bar = options.line?.peek() ?? null
+    if (bar === null) {
+      if (root.dataset.line === undefined) return
+      delete root.dataset.line
+      root.style.height = ''
+      root.style.overflowY = ''
+      return
+    }
+    const system = view.lineElement(bar - 1)
+    if (!system) return
+    root.style.overflowY = 'hidden'
+    root.style.height = `${Math.ceil(system.getBoundingClientRect().height + BAR_PAD_PX * 2)}px`
+    const top = root.getBoundingClientRect().top + root.clientTop
+    const dy = system.getBoundingClientRect().top - BAR_PAD_PX - top
+    if (Math.abs(dy) >= 0.5) {
+      programmaticAt = now()
+      root.scrollTop += dy
+    }
+    root.dataset.line = String(view.lines.findIndex((l) => l.firstBar <= bar - 1 && bar - 1 <= l.lastBar))
+  }
+
   // ---- The score --------------------------------------------------------------------------------
 
   const view: ScoreView = createScoreView(host, score, {
@@ -219,6 +260,8 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
       anchor = undefined
       if (wanted) scrollToBar(wanted.barIndex, wanted.how, false)
       applyHighlight()
+      applyLine()
+      options.onLines?.(view.lines)
     },
   })
 
@@ -313,15 +356,26 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
       wasFollowing = following
     }),
   )
-  // A bar to look at that did not come from this island's own scrolling ("Go to bar"): show it.
+  // A bar to look at that did not come from this island's own scrolling ("Go to bar"): show it. One line is shown by `line`.
   stops.push(
     effect(() => {
       const bar = options.shownBar.value
       if (bar === null || bar === lastReported) return
       lastReported = bar
+      if (options.line?.peek() != null) return
       scrollToBar(bar - 1, 'top')
     }),
   )
+  // The line to show changed (another bar selected, "Full score"): show it, or the whole score.
+  if (options.line) {
+    const line = options.line
+    stops.push(
+      effect(() => {
+        void line.value
+        applyLine()
+      }),
+    )
+  }
 
   // ---- The user moves the score -----------------------------------------------------------------
 

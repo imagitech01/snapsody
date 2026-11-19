@@ -180,7 +180,7 @@ test('sheets: closing one closes what was opened over it, and a sheet that is no
   router.push({ name: 'practice', pieceId: 'ode' })
   router.openSheet('tools')
   router.openSheet('loop')
-  router.closeSheet('pages')
+  router.closeSheet('instrument')
   assert.deepEqual(overlayKinds(router), ['tools', 'loop'])
   router.closeSheet('tools')
   assert.deepEqual(overlayKinds(router), [], 'the loop sheet was opened over the tools sheet')
@@ -355,7 +355,7 @@ test('editor with edits and a sheet open: back closes the sheet and does not ask
   router.push({ name: 'editor', pieceId: 'ode' })
   const editor = stubEditor(router)
   editor.dirty = true
-  router.openSheet('pages')
+  router.openSheet('tools')
   assert.equal(router.back(), true)
   assert.deepEqual(overlayKinds(router), [])
   assert.equal(editor.asked, 0)

@@ -14,7 +14,10 @@ import { BusyView, HintView, ProblemView, ReadingView } from './AddMusicViews.ts
  * new component, which would lose the flow and its reading, so the route stays `add-music` all through.
  *
  * What the flow does not do, this screen does, on the step the flow ends in:
- *  - `saved`, a new piece: the list is read again, and practice opens in place of this screen;
+ *  - `saved`, a new piece: the list is read again, and the editor opens in place of this screen, asking for the
+ *    piece's name (`isNew`; spec `score-capture` "A new piece opens in the editor", change
+ *    simplify-editor-and-name-new-pieces D4). Back from there goes to where adding music started, and Save &
+ *    practice replaces the editor with practice;
  *  - `saved`, pages added to a piece: back to the editor under this screen, which opens again on the new score;
  *  - `cancelled`: back to where adding music started. Nothing was created and an existing piece is unchanged.
  * The system Back button and the screen's own Back and Cancel are all `flow.cancel()`: while the pages are read
@@ -70,7 +73,7 @@ export function AddMusicScreen({ screen }: { screen: AddMusicRoute }) {
       await view.refresh().catch(() => undefined) // the shell reads the list again when a list screen shows; this makes it right at once
       if (router.screen.peek() !== screen) return
       if (saved.added) router.pop()
-      else router.replace({ name: 'practice', pieceId: saved.pieceId })
+      else router.replace({ name: 'editor', pieceId: saved.pieceId, isNew: true })
     }
   }, [step, flow, router, view, screen])
 

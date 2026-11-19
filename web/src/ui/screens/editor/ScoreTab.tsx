@@ -1,6 +1,6 @@
 import { clampTempo, tempoSetup } from '../../../core/playback/tempo.ts'
 import { firstTempoMarking, setKey, setTempoMarking, setTime } from '../../../core/score/edit.ts'
-import { Stepper } from '../../components/index.ts'
+import { Button, Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
 import { SelectField } from './controls.tsx'
 import type { ToolProps } from './NoteTab.tsx'
@@ -11,6 +11,9 @@ import type { ToolProps } from './NoteTab.tsx'
  * (what `core/score/edit.ts` changes). The tempo is the metronome mark printed in the book, in steps of two
  * beats per minute (holding a button keeps stepping, as one undo step); the speed the user practises at is
  * separate and is not changed here.
+ *
+ * At its foot, "Add pages" (change simplify-editor-and-name-new-pieces, D3): scanning more pages that go after the
+ * last bar. The editor's handler asks to save first, as adding pages opens the piece again.
  */
 
 /** The time signatures offered, as "beats/beat type"; the one the piece has is added when it is none of these. */
@@ -21,7 +24,7 @@ const TEMPO_STEP = 2
 
 const FIFTHS: readonly number[] = [-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7]
 
-export function ScoreTab({ session, run }: ToolProps) {
+export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages: () => void }) {
   const { i18n } = useShell()
   const { t } = i18n
   const score = session.score.value
@@ -94,6 +97,13 @@ export function ScoreTab({ session, run }: ToolProps) {
         repeat
       />
       <p class="editor-hint editor-hint--wide">{t('score.tempoHint')}</p>
+
+      <div class="editor-add-pages">
+        <Button variant="secondary" block onPress={onAddPages}>
+          {t('editor.addPages')}
+        </Button>
+        <p class="editor-hint">{t('editor.addPages.hint', { bar: score.measures.length })}</p>
+      </div>
     </div>
   )
 }

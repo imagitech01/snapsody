@@ -147,7 +147,7 @@ for (const viewport of VIEWPORTS) {
         await go(page, 'closeSheet', 'tools')
         await page.getByRole('dialog').waitFor({ state: 'detached' })
 
-        // The editor: its three tabs, and the two sheets of its pills.
+        // The editor: its three tabs.
         await go(page, 'push', { name: 'editor', pieceId: ID.ode })
         await page.locator('.score-view[data-rendered="true"]').waitFor()
         await settle(page)
@@ -157,14 +157,6 @@ for (const viewport of VIEWPORTS) {
           await tabs.nth(index).click()
           await settle(page)
           await check(page, at(`editor, ${name}`), problems)
-        }
-        for (const sheet of ['pages', 'goto']) {
-          await go(page, 'openSheet', sheet)
-          await page.getByRole('dialog').waitFor()
-          await settle(page)
-          await check(page, at(`editor sheet ${sheet}`), problems)
-          await go(page, 'closeSheet', sheet)
-          await page.getByRole('dialog').waitFor({ state: 'detached' })
         }
       })
 

@@ -1,5 +1,6 @@
-/* The editor (practice-app group 15, frames 06.1 to 06.3): the header with the title field, the score card with
-   its three pills, the strip of the original photo, the three tabs of tools, and Save & practice at the foot.
+/* The editor (practice-app group 15, frames 06.1 to 06.3; change simplify-editor-and-name-new-pieces): the header
+   with the title field, the score card with the warnings and the line strip, the three tabs of tools, and Save &
+   practice at the foot.
    Only tokens are used; the odd pixel values are the frames' own and are marked as such. Denser than the frames
    (design D18): gutter 16, gaps 8 to 12, the title 22, and every control at least 44 x 44. See
    web/src/ui/screens/editor/ and docs/design/deviations.md (06.x). */
@@ -64,6 +65,15 @@
 .editor-title-input[aria-invalid='true'] {
   box-shadow: inset 0 0 0 1px var(--danger);
 }
+/* A new piece asks for its name (change simplify-editor-and-name-new-pieces, D5): the field tinted, its caption in the accent. */
+.editor-title-field--naming .editor-caption {
+  color: var(--primary);
+  font-weight: var(--fw-semibold);
+}
+.editor-title-field--naming .editor-title-input {
+  background: var(--primary-tint);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
 
 /* ---- The score card -------------------------------------------------------------------------- */
 
@@ -81,32 +91,6 @@
   border-radius: var(--radius-card);
   background: var(--surface);
 }
-.editor-nav {
-  display: grid;
-  grid-template-columns: 112fr 110fr 110fr;
-  gap: var(--space-1);
-}
-.editor-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  min-width: 0;
-  min-height: var(--tap); /* the frame's pills are 30px */
-  padding: 0 var(--space-2);
-  border-radius: 0.5625rem;
-  background: var(--surface-muted);
-  color: var(--ink);
-  font-size: var(--fs-10);
-  font-weight: var(--fw-semibold);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.editor-pill:active {
-  filter: brightness(0.94);
-}
-
 /* What needs checking: how many, the way to the next, and what the current one says. Not in the frames. */
 .editor-warnings {
   padding: var(--space-1) var(--space-3);
@@ -143,8 +127,44 @@
   line-height: 1.35;
 }
 
+/* The whole sheet, to find the spot (change simplify-editor-and-name-new-pieces, D1): taller than the frame's 180px; the
+   page scrolls to the tools. One line: the island sets its own height, the line's. */
 .editor-score {
-  height: 11rem; /* the frame's score is 180px high; the page scrolls when the phone is lower than the tools need */
+  height: 24rem;
+}
+.editor-score--line {
+  height: auto;
+}
+/* The scroll bar's room stays when one line stops the scrolling, so the width, and with it the line breaks, stay. */
+.editor .score-island {
+  scrollbar-gutter: stable;
+}
+
+/* The strip under the score: the line before, which line it is, the line after, and Full score. */
+.editor-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+}
+.editor-line-label {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: var(--font-numeric);
+}
+.editor-line-hint {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+}
+.editor-line .editor-text-button {
+  padding: 0 var(--space-2);
+  white-space: nowrap;
 }
 /* The island tints the bar of the selection; the cursor line of the practice screen has no meaning here. */
 .editor .score-cursor {
@@ -164,71 +184,6 @@
 .editor .score-view .mk-el * {
   fill: var(--primary);
   stroke: var(--primary);
-}
-
-/* ---- The photo ------------------------------------------------------------------------------- */
-
-.editor-photo {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 4rem;
-  overflow: hidden;
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.editor-photo--empty {
-  justify-content: flex-start;
-  padding: var(--space-3) var(--space-4);
-}
-/* The crop is as wide as it can be, but not taller than 6rem: a tall crop is narrower, never stretched. */
-.editor-photo-crop {
-  position: relative;
-  flex: none;
-  overflow: hidden;
-  width: min(100%, calc(6rem * var(--aspect, 5)));
-  aspect-ratio: var(--aspect, 5);
-}
-.editor-photo-crop > img {
-  position: absolute;
-  display: block;
-  max-width: none;
-}
-.editor-photo-whole {
-  display: block;
-  width: 100%;
-  max-height: 12rem;
-  object-fit: contain;
-}
-.editor-photo-label,
-.editor-photo-preview {
-  position: absolute;
-  background: var(--bg);
-  color: var(--ink);
-  font-size: var(--fs-10);
-  font-weight: var(--fw-semibold);
-}
-.editor-photo-label {
-  left: var(--space-3);
-  top: var(--space-3);
-  padding: 0.3125rem 0.625rem;
-  border-radius: var(--radius-sm);
-  line-height: 1.2;
-}
-.editor-photo-preview {
-  right: var(--space-3);
-  top: 50%;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: var(--tap);
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-xs);
-}
-.editor-photo-preview:active {
-  filter: brightness(0.94);
 }
 
 /* ---- The tools ------------------------------------------------------------------------------- */
@@ -270,13 +225,14 @@
 }
 .editor-tools-head {
   display: flex;
+  flex-wrap: wrap; /* the heading takes a row of its own when the buttons leave it too little (Dutch) */
   align-items: center;
-  gap: var(--space-2);
+  column-gap: var(--space-2);
   margin-top: var(--space-1);
   padding: 0 var(--space-3);
 }
 .editor-selection {
-  flex: 1;
+  flex: 1 0 5.5rem;
   min-width: 0;
   font-size: var(--fs-12);
   font-weight: var(--fw-semibold);
@@ -292,6 +248,20 @@
 .editor-text-button:disabled {
   color: var(--ink-muted);
   font-weight: var(--fw-medium);
+}
+/* Preview bar, Undo and Redo: one group at the right, also when the heading wraps above it. */
+.editor-tools-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+/* Preview bar: the play or pause icon and its text. */
+.editor-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
 }
 
 .editor-grid {
@@ -499,64 +469,14 @@
   font-size: var(--fs-11);
 }
 
-/* ---- The two sheets -------------------------------------------------------------------------- */
 
-.editor-pages {
+/* ---- Add pages, at the foot of the Score tab (change simplify-editor-and-name-new-pieces, D3) ---- */
+
+.editor-add-pages {
+  grid-column: 1 / -1;
   display: grid;
-  gap: var(--space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.editor-page {
-  display: grid;
-  gap: var(--space-2);
-}
-.editor-page-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-.editor-page-title {
-  font-size: var(--fs-14);
-  font-weight: var(--fw-semibold);
-}
-.editor-page-bars {
-  color: var(--ink-muted);
-  font-size: var(--fs-12);
-}
-.editor-page-photo {
-  display: block;
-  width: 100%;
-  min-height: 4rem;
-  max-height: 18rem;
-  object-fit: contain;
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
-}
-.editor-goto {
-  display: flex;
-  gap: var(--space-3);
-}
-.editor-goto-input {
-  flex: 1;
-  min-width: 0;
-  height: var(--button-h);
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: var(--fs-16);
-  -webkit-appearance: none;
-  appearance: none;
-}
-.editor-goto-input[aria-invalid='true'] {
-  box-shadow: inset 0 0 0 1px var(--danger);
-}
-.editor-goto-error {
-  margin-top: var(--space-3);
-  color: var(--danger);
-  font-size: var(--fs-13);
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
 }

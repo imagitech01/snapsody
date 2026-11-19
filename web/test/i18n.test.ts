@@ -215,7 +215,7 @@ test('placeholders: filled in, numbers without a thousands separator, a missing 
   assert.equal(english.t('bar.position', { bar: 2, bars: 12 }), 'Bar 2 of 12')
   assert.equal(dutch.t('bar.position', { bar: 2, bars: 12 }), 'Maat 2 van 12')
   assert.equal(english.t('bar.range', { from: 9, to: 12 }), 'Bars 9–12')
-  assert.equal(english.t('editor.photo', { page: 1, bar: '3' }), 'Photo 1 · Bar 3')
+  assert.equal(english.t('editor.preview', { bar: '3' }), 'Preview bar 3')
   assert.equal(english.t('unit.bars', { count: 1200 }), '1200 bars')
   assert.equal(english.t('library.noMatch', { query: '{count}' }), 'Nothing matches “{count}”.', 'a value is never filled in again')
   assert.equal(fill('{a} and {b}', { a: 'x' }, new Intl.NumberFormat('en')), 'x and {b}')

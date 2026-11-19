@@ -78,7 +78,7 @@ const scanFiles = async (app: App): Promise<string[]> => (await app.filePaths())
 const pieceJson = async (app: App, id: string): Promise<{ bars: number; pages: unknown[]; name: string }> =>
   JSON.parse((await app.file(`pieces/${id}/piece.json`)) ?? 'null')
 
-test('add music: the hint, a scan of two pages, the pages being read, and one piece that opens in practice', async () => {
+test('add music: the hint, a scan of two pages, the pages being read, and one piece that opens in the editor, asking for its name', async () => {
   await withApp({ seed: '', reader: 'manual' }, async (app) => {
     const { page } = app
     await realPhotos(page)
@@ -117,11 +117,19 @@ test('add music: the hint, a scan of two pages, the pages being read, and one pi
     await photo.waitFor()
     assert.equal(await photo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0), true, 'the page photo loads')
 
-    // The rest is read: one piece of both pages is saved, and practice opens for it.
+    // The rest is read: one piece of both pages is saved, and the editor opens for it, asking for its name.
     await readerFinishes(page)
-    await screenIs(page, 'practice')
+    await screenIs(page, 'editor')
     const [id, ...others] = await pieceIds(app)
     assert.deepEqual(others, [], 'one piece')
+    assert.deepEqual(await app.stack(), [{ name: 'home' }, { name: 'editor', pieceId: id, isNew: true }])
+    const name = page.getByRole('textbox', { name: 'Name this piece' })
+    await name.waitFor()
+    assert.equal(await name.inputValue(), (await pieceJson(app, id!)).name, 'the date name, to type over')
+
+    // Save & practice opens it for practice in the editor's place.
+    await page.getByRole('button', { name: 'Save & practice' }).click()
+    await screenIs(page, 'practice')
     assert.deepEqual(await app.stack(), [{ name: 'home' }, { name: 'practice', pieceId: id }])
     const saved = await pieceJson(app, id!)
     assert.equal(saved.bars, 5, 'page 1 has three bars, page 2 two')
@@ -165,10 +173,15 @@ test('add music: no music on page 2 says which page, creates nothing, and scanni
     await message.getByRole('button', { name: 'Scan again' }).click()
     await page.getByRole('heading', { name: 'Reading page 1 of 2', level: 2 }).waitFor()
     await readerFinishes(page)
-    await screenIs(page, 'practice')
+    await screenIs(page, 'editor')
     assert.equal((await pieceIds(app)).length, 1)
     assert.equal((await pieceJson(app, (await pieceIds(app))[0]!)).bars, 5)
     assert.deepEqual(await scanFiles(app), [])
+    // Back from the new piece's editor, with nothing changed, goes to where adding music started.
+    await page.getByRole('textbox', { name: 'Name this piece' }).waitFor()
+    assert.equal(await app.back(), true)
+    await screenIs(page, 'home')
+    assert.deepEqual(await app.stack(), [{ name: 'home' }])
   })
 })
 

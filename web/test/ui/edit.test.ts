@@ -13,10 +13,9 @@ import { ID } from './pieces.ts'
 import { barsScore, elementsScore } from './scores.ts'
 
 // The edit journey (practice-app design D15, "edit: note, mark, preview, save & practice"; tasks 15.1 to
-// 15.4; specs `score-editing`, `score-capture` "Add pages to a piece", `piece-library` "Rename"). The seeded
-// piece is "Ode to Joy": three pages (bars 1-4, 5-8, 9-12), twelve bars of C5 D5 E5 F5 in 4/4 at 60 BPM, with no staff
-// positions, so its photo strip shows the whole photo. A piece with staff positions and a real picture is made
-// through the library where a journey needs one.
+// 15.4; specs `score-editing`, `score-capture` "Add pages to a piece", `piece-library` "Rename"; change
+// simplify-editor-and-name-new-pieces). The seeded piece is "Ode to Joy": three pages (bars 1-4, 5-8, 9-12), twelve
+// bars of C5 D5 E5 F5 in 4/4 at 60 BPM. A copy of it is made through the library where a journey saves the piece.
 //
 // Nothing opens the editor from a screen yet (the tools sheet of the practice screen is task 13.2), so the
 // journeys push the editor on the router, as the tools sheet does.
@@ -39,7 +38,6 @@ const tabs = (page: Page, name: 'Note' | 'Marks' | 'Score') => page.getByRole('r
 /** "Bar 3 · Note 4": what the tools say is selected. */
 const selection = (page: Page) => textOf(page.locator('.editor-selection'))
 const pitch = (page: Page) => textOf(page.getByRole('group', { name: 'Pitch' }).getByRole('status'))
-const photoLabel = (page: Page) => textOf(page.locator('.editor-photo-label'))
 const warnings = (page: Page) => page.getByRole('group', { name: 'Things to check' })
 
 /** The notes of the stored score of a piece, as the library keeps them now. */
@@ -68,58 +66,18 @@ async function serveSamples(app: App): Promise<void> {
   })
 }
 
-/**
- * A piece that has staff positions and pictures to show: "Ode to Joy" again, three pages of four bars, each page
- * with one staff of two bars twice over, and a picture drawn here for every page. The page photos are blob URLs
- * of those pictures: the fake platform's own URLs are not images a page can load.
- */
-async function makePhotoPiece(page: Page): Promise<string> {
+/** A copy of "Ode to Joy" made through the library: three pages of four bars. */
+async function makeOdePiece(page: Page): Promise<string> {
   return page.evaluate(
     async ({ xml, bars }) => {
       const { platform, shell } = window.__test!
-      const canvas = document.createElement('canvas')
-      canvas.width = 800
-      canvas.height = 1100
-      const ctx = canvas.getContext('2d')!
-      ctx.fillStyle = '#e9e3d3'
-      ctx.fillRect(0, 0, 800, 1100)
-      ctx.strokeStyle = '#2b2b2b'
-      ctx.fillStyle = '#2b2b2b'
-      // Two staves: the first at 22% to 32% of the height, the second at 52% to 62%.
-      for (const top of [242, 572]) {
-        for (let line = 0; line < 5; line++) {
-          ctx.beginPath()
-          ctx.moveTo(60, top + line * 22)
-          ctx.lineTo(740, top + line * 22)
-          ctx.stroke()
-        }
-        for (let n = 0; n < 8; n++) {
-          ctx.beginPath()
-          ctx.ellipse(130 + n * 80, top + 22 * (n % 5), 12, 9, -0.3, 0, Math.PI * 2)
-          ctx.fill()
-        }
-      }
-      const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.8))
-      platform.files.seed('scans/test/page.jpg', new Uint8Array(await blob.arrayBuffer()))
-      const files = platform.files as unknown as { imageUrl: (path: string) => Promise<string>; bytes: (path: string) => Uint8Array | undefined }
-      files.imageUrl = async (path) => URL.createObjectURL(new Blob([files.bytes(path)! as BlobPart], { type: 'image/jpeg' }))
-      const first = { x: 0.075, y: 0.22, width: 0.85, height: 0.1 }
-      const second = { x: 0.075, y: 0.52, width: 0.85, height: 0.1 }
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
       const info = await shell.library.create({
         name: 'Ode to Joy',
         musicxml: xml,
         bars,
         repairs: [],
-        pages: [0, 1, 2].map((p) => ({
-          source: 'scans/test/page.jpg',
-          recognised: xml,
-          firstBar: p * 4 + 1,
-          lastBar: p * 4 + 4,
-          staves: [
-            { box: first, firstBar: p * 4 + 1, lastBar: p * 4 + 2 },
-            { box: second, firstBar: p * 4 + 3, lastBar: p * 4 + 4 },
-          ],
-        })),
+        pages: [0, 1, 2].map((p) => ({ source: 'scans/test/page.jpg', recognised: xml, firstBar: p * 4 + 1, lastBar: p * 4 + 4 })),
       })
       return info.id
     },
@@ -127,7 +85,7 @@ async function makePhotoPiece(page: Page): Promise<string> {
   )
 }
 
-test('edit: the frame shows the title, the score and the photo of the selected bar; a tap selects, Preview bar plays that bar', async () => {
+test('edit: the frame shows the title and the score with no pills or photo; a tap selects, and Preview bar in the tools head plays that bar', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await serveSamples(app)
@@ -135,27 +93,23 @@ test('edit: the frame shows the title, the score and the photo of the selected b
     assert.equal(await title(page).inputValue(), 'Ode to Joy')
     assert.equal(await page.locator('.score-view svg g.note').count(), 48, 'the twelve bars are drawn')
     assert.equal(await selection(page), 'Tap a note to edit it.')
-    await page.locator('.editor-photo--empty').waitFor()
-    assert.equal(await page.getByRole('button', { name: /^Preview bar/ }).count(), 0, 'nothing to preview before a bar is chosen')
+    assert.equal(await page.getByRole('button', { name: /^Pages|Go to bar|Add pages/ }).count(), 0, 'no pills above the score')
+    assert.equal(await page.locator('.editor-score-card img, .editor-photo').count(), 0, 'no photo')
+    const head = page.locator('.editor-tools-head')
+    assert.equal(await head.getByRole('button', { name: 'Preview' }).isDisabled(), true, 'nothing to preview before a bar is chosen')
     assert.equal(await warnings(page).count(), 0, 'nothing to check: no warning and no mark')
     assert.equal(await page.locator('.score-view g.note.mk-flag, .score-view g.note.mk-flagbar').count(), 0)
 
-    // A tap on a note selects it and its bar; the whole photo of page 1 shows (no staff positions are known).
+    // A tap on a note selects it and its bar; Preview names the bar, before Undo and Redo.
     await tapNote(page, ODE[2]![3]!)
     assert.equal(await selection(page), 'Bar 3 · Note 4')
     assert.equal(await page.locator('.score-view g.note.mk-sel').count(), 1)
-    assert.equal(await photoLabel(page), 'Photo 1 · Bar 3', 'the whole photo of the page, labelled with the bar')
-    assert.equal(await page.locator('.editor-photo-crop').count(), 0)
-    await page.getByRole('button', { name: 'Pages 1 / 3' }).waitFor()
-
-    // Another page: the label and the page counter follow.
-    await tapNote(page, ODE[5]![0]!)
-    assert.equal(await selection(page), 'Bar 6 · Note 1')
-    assert.equal(await photoLabel(page), 'Photo 2 · Bar 6')
-    await page.getByRole('button', { name: 'Pages 2 / 3' }).waitFor()
+    assert.deepEqual(
+      await head.getByRole('button').evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim())),
+      ['Preview bar 3', 'Undo', 'Redo'],
+    )
 
     // Preview: the bar plays on its own, the button says Stop while it does, then it is a button to play again.
-    await tapNote(page, ODE[2]![3]!)
     await page.evaluate(() => {
       const w = window as unknown as { __starts: number }
       w.__starts = 0
@@ -165,8 +119,8 @@ test('edit: the frame shows the title, the score and the photo of the selected b
         return start.apply(this, args)
       }
     })
-    await page.getByRole('button', { name: 'Preview bar 3' }).click()
-    await page.getByRole('button', { name: 'Stop preview' }).waitFor()
+    await head.getByRole('button', { name: 'Preview bar 3' }).click()
+    await head.getByRole('button', { name: 'Stop preview' }).waitFor()
     // The sound loads in real time, and the notes are scheduled on the test clock: let it run until they are.
     const starts = () => page.evaluate(() => (window as unknown as { __starts: number }).__starts)
     for (let i = 0; i < 60 && (await starts()) === 0; i++) {
@@ -175,90 +129,252 @@ test('edit: the frame shows the title, the score and the photo of the selected b
     }
     assert.ok((await starts()) >= 1, 'a note of the bar sounded')
     await page.clock.runFor(6000)
-    await page.getByRole('button', { name: 'Preview bar 3' }).waitFor()
+    await head.getByRole('button', { name: 'Preview bar 3' }).waitFor()
     assert.equal(await starts(), 4, 'the four notes of bar 3, and no others')
     assert.deepEqual(await app.screen(), { name: 'editor', pieceId: ID.ode }, 'previewing leaves the editor open')
   })
 })
 
-test('edit: with staff positions the strip shows the staff of the bar with its margin, labelled with the page and the bar', async () => {
+test('edit: a new piece named before "Add pages" is not asked for its name again when the editor comes back', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
-    const id = await makePhotoPiece(page)
-    await openEditor(page, id)
-    const ids = noteIdsByBar(barsScore(12, 60))
-
-    await tapNote(page, ids[2]![3]!)
-    assert.equal(await photoLabel(page), 'Photo 1 · Bar 3')
-    const crop = page.locator('.editor-photo-crop')
-    await crop.waitFor()
-    await page.waitForFunction(() => {
-      const img = document.querySelector<HTMLImageElement>('.editor-photo-crop img')
-      return !!img && img.complete && img.naturalWidth > 0
-    })
-    // The second staff of the page is at 52% to 62% of its height: the crop starts a little above it, and spans the width.
-    const geometry = await crop.evaluate((element) => {
-      const img = element.querySelector('img')!
-      const frame = element.getBoundingClientRect()
-      const drawn = img.getBoundingClientRect()
-      return { frameWidth: frame.width, frameHeight: frame.height, left: (frame.left - drawn.left) / drawn.width, top: (frame.top - drawn.top) / drawn.height, bottom: (frame.bottom - drawn.top) / drawn.height }
-    })
-    assert.ok(Math.abs(geometry.top - (0.52 - 0.1 * 0.5)) < 0.01, `the strip starts above the staff (${geometry.top})`)
-    assert.ok(Math.abs(geometry.bottom - (0.62 + 0.1 * 0.5)) < 0.01, `and ends below it (${geometry.bottom})`)
-    assert.ok(geometry.left < 0.06, 'and starts at the left edge of the staff, with its margin')
-    // The crop keeps the proportions of the photo (800 x 1100): no stretching.
-    const expected = (0.2 * 1100) / (0.89 * 800)
-    assert.ok(Math.abs(geometry.frameHeight / geometry.frameWidth - expected) < 0.05, `proportions ${geometry.frameHeight / geometry.frameWidth} against ${expected}`)
-
-    // Bar 1 is on the first staff: the strip moves up the page.
-    await tapNote(page, ids[0]![0]!)
-    assert.equal(await photoLabel(page), 'Photo 1 · Bar 1')
-    const first = await crop.evaluate((element) => {
-      const frame = element.getBoundingClientRect()
-      const drawn = element.querySelector('img')!.getBoundingClientRect()
-      return (frame.top - drawn.top) / drawn.height
-    })
-    assert.ok(Math.abs(first - (0.22 - 0.1 * 0.5)) < 0.01, `the first staff (${first})`)
-    await tapNote(page, ids[9]![1]!)
-    assert.equal(await photoLabel(page), 'Photo 3 · Bar 10')
-    await page.getByRole('button', { name: 'Pages 3 / 3' }).waitFor()
+    const id = await makeDatedPiece(page)
+    await openNew(page, id)
+    await naming(page).tap()
+    await page.keyboard.type('Ode to Joy')
+    await tabs(page, 'Score').click()
+    await page.locator('.editor-add-pages').getByRole('button', { name: 'Add pages' }).click()
+    await page.getByRole('alertdialog', { name: 'Save your edits first?' }).getByRole('button', { name: 'Save and add pages' }).click()
+    await onScreen(page, 'add-music')
+    await app.back()
+    await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
+    assert.equal(await title(page).inputValue(), 'Ode to Joy')
+    assert.equal(await page.getByText('Name this piece').count(), 0, 'named: not asked again')
+    assert.deepEqual(await app.stack(), [{ name: 'home' }, { name: 'editor', pieceId: id }])
   })
 })
 
-test('edit: go to bar, the page photos and the sheets close with the back button; the pages sheet shows every photo', async () => {
+// ---- One line while editing (change simplify-editor-and-name-new-pieces, tasks 2.2 and 3.2) -----------------
+
+/** The line strip under the score. */
+const lineStrip = (page: Page) => page.getByRole('group', { name: 'Line of music' })
+
+/**
+ * What the island shows: the line it is clipped to (`data-line`, or null for the whole score), its height against the
+ * height of that line's drawing plus the bar box's reach, and the bars (from 1) whose drawing is in the visible area.
+ */
+async function shownLine(page: Page): Promise<{ line: number | null; height: number; lineHeight: number; visibleBars: number[] }> {
+  return page.evaluate(() => {
+    const island = document.querySelector<HTMLElement>('.editor .score-island')!
+    const line = island.dataset.line === undefined ? null : Number(island.dataset.line)
+    const view = island.getBoundingClientRect()
+    const measures = [...island.querySelectorAll('g.measure')]
+    const visibleBars = measures.flatMap((m, index) => {
+      const r = m.getBoundingClientRect()
+      return r.bottom > view.top && r.top < view.bottom ? [index + 1] : []
+    })
+    const systems = [...island.querySelectorAll('g.system')]
+    const system = line === null ? undefined : systems[line]
+    return { line, height: view.height, lineHeight: system ? system.getBoundingClientRect().height + 8 : 0, visibleBars }
+  })
+}
+
+/** The bars (from 1) the strip says the line holds: "Line 2 of 3 · Bars 5–8". */
+async function stripBars(page: Page): Promise<{ line: number; lines: number; bars: number[] }> {
+  const text = await textOf(lineStrip(page).locator('.editor-line-label'))
+  const m = /^Line (\d+) of (\d+) · Bars? (\d+)(?:–(\d+))?$/.exec(text)
+  assert.ok(m, `the strip says which line: "${text}"`)
+  const from = Number(m[3])
+  const to = Number(m[4] ?? m[3])
+  return { line: Number(m[1]), lines: Number(m[2]), bars: Array.from({ length: to - from + 1 }, (_, i) => from + i) }
+}
+
+/** Waits until the island shows the line with this index (from 0), or the whole score for null. */
+const onLine = (page: Page, line: number | null) =>
+  page.waitForFunction((n) => {
+    const shown = document.querySelector<HTMLElement>('.editor .score-island')?.dataset.line
+    return n === null ? shown === undefined : shown === String(n)
+  }, line)
+
+/** Checks that the island shows exactly the line the strip names, at that line's height. */
+async function showsOnlyItsLine(page: Page, what: string): Promise<number[]> {
+  const shown = await shownLine(page)
+  const strip = await stripBars(page)
+  assert.equal(shown.line, strip.line - 1, `${what}: the island shows the line the strip names`)
+  assert.ok(Math.abs(shown.height - shown.lineHeight) <= 1.5, `${what}: the island is the line's height (${shown.height} against ${shown.lineHeight})`)
+  assert.deepEqual(shown.visibleBars, strip.bars, `${what}: only that line's bars are in view`)
+  return strip.bars
+}
+
+test('edit: one line while editing; the full sheet with nothing selected, a tap shows the line, the arrows step, Full score keeps the selection, and a warning on another line shows that line', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await openEditor(page, ID.ode)
+    const width = await page.evaluate(() => document.querySelector<HTMLElement>('.editor .score-view')!.clientWidth)
 
-    await page.getByRole('button', { name: 'Go to bar…' }).click()
-    const sheet = page.getByRole('dialog', { name: 'Go to bar' })
-    await sheet.waitFor()
-    const field = sheet.getByRole('textbox', { name: 'Bar number' })
-    await field.fill('13')
-    await sheet.getByRole('button', { name: 'Show' }).click()
-    await sheet.getByRole('alert').waitFor()
-    assert.match(await textOf(sheet), /Enter a bar from 1 to 12\./)
-    await field.fill('7')
-    await sheet.getByRole('button', { name: 'Show' }).click()
-    await sheet.waitFor({ state: 'detached' })
-    assert.equal(await photoLabel(page), 'Photo 2 · Bar 7', 'bar 7 is on page 2')
-    assert.equal(await selection(page), 'Tap a note to edit it.', 'a bar, not a note, is selected')
-    await page.getByRole('button', { name: 'Preview bar 7' }).waitFor()
+    // Nothing selected: the whole sheet, and no strip.
+    let shown = await shownLine(page)
+    assert.equal(shown.line, null)
+    assert.equal(await lineStrip(page).count(), 0)
+    assert.ok(shown.visibleBars.length > 4, `the full sheet shows more than a line (${shown.visibleBars.join(', ')})`)
 
-    // The back button closes the sheet before it leaves the editor.
-    await page.getByRole('button', { name: 'Pages 2 / 3' }).click()
-    const pages = page.getByRole('dialog', { name: 'Page photos' })
-    await pages.waitFor()
-    assert.equal(await pages.getByRole('listitem').count(), 3)
-    assert.equal(await app.back(), true)
-    await pages.waitFor({ state: 'detached' })
-    assert.deepEqual(await app.screen(), { name: 'editor', pieceId: ID.ode })
+    // A tap on a note in bar 5: the score shrinks to the line that holds bar 5, with the note selected.
+    await tapNote(page, ODE[4]![1]!)
+    await page.locator('.editor .score-island[data-line]').waitFor()
+    assert.equal(await selection(page), 'Bar 5 · Note 2')
+    const fifth = await showsOnlyItsLine(page, 'bar 5')
+    assert.ok(fifth.includes(5), 'the line holds bar 5')
+    const { lines } = await stripBars(page)
+    assert.ok(lines >= 3, `twelve bars take several lines at 360px (${lines})`)
+    assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.editor .score-view')!.clientWidth), width, 'the width, and so the line breaks, stay')
 
-    await page.getByRole('button', { name: 'Pages 2 / 3' }).click()
-    await pages.getByRole('button', { name: 'Go to bar 9' }).click()
-    await pages.waitFor({ state: 'detached' })
-    await page.getByRole('button', { name: 'Pages 3 / 3' }).waitFor()
-    assert.equal(await photoLabel(page), 'Photo 3 · Bar 9')
+    // The next-line arrow selects the first bar of the next line.
+    const at = (await stripBars(page)).line
+    await lineStrip(page).getByRole('button', { name: 'Next line' }).click()
+    await onLine(page, at)
+    const next = await showsOnlyItsLine(page, 'the next line')
+    assert.equal(next[0], fifth.at(-1)! + 1)
+    await page.getByRole('button', { name: `Preview bar ${next[0]}` }).waitFor()
+    assert.equal(await selection(page), 'Tap a note to edit it.', 'a bar, not a note')
+    await lineStrip(page).getByRole('button', { name: 'Previous line' }).click()
+    await onLine(page, at - 1)
+    assert.deepEqual(await showsOnlyItsLine(page, 'back'), fifth)
+    // The first line has no line before it.
+    await tapNote(page, ODE[0]![0]!)
+    await onLine(page, 0)
+    assert.equal(await lineStrip(page).getByRole('button', { name: 'Previous line' }).isDisabled(), true)
+
+    // Full score: the whole sheet again, the selection stays; a tap on a note shrinks it to that note's line.
+    await lineStrip(page).getByRole('button', { name: 'Full score' }).click()
+    await onLine(page, null)
+    assert.equal(await selection(page), 'Bar 1 · Note 1', 'the selection stays')
+    assert.ok((await shownLine(page)).visibleBars.length > fifth.length)
+    assert.equal(await textOf(lineStrip(page).locator('.editor-line-hint')), 'Tap a note to zoom in.')
+    await lineStrip(page).getByRole('button', { name: 'Back to bar 1' }).click()
+    await onLine(page, 0)
+    await lineStrip(page).getByRole('button', { name: 'Full score' }).click()
+    await onLine(page, null)
+    await tapNote(page, ODE[9]![2]!)
+    await page.locator('.editor .score-island[data-line]').waitFor()
+    assert.equal(await selection(page), 'Bar 10 · Note 3')
+    assert.ok((await showsOnlyItsLine(page, 'after Full score')).includes(10))
+
+    // A warning about bar 12 (made here: a half note in its full bar), Next from the first line shows bar 12's line.
+    await tapNote(page, ODE[11]![0]!)
+    await page.getByRole('combobox', { name: 'Length' }).selectOption('half')
+    await warnings(page).waitFor()
+    await lineStrip(page).getByRole('button', { name: 'Full score' }).click()
+    await onLine(page, null)
+    await tapNote(page, ODE[0]![1]!)
+    await onLine(page, 0)
+    await warnings(page).getByRole('button', { name: 'Next' }).click()
+    assert.match(await textOf(page.locator('.editor-warnings-text')), /^Bar 12 /)
+    await page.locator('.editor .score-island:not([data-line="0"])[data-line]').waitFor()
+    assert.ok((await showsOnlyItsLine(page, 'the warning')).includes(12))
+  })
+})
+
+test('edit: a slur is picked from a note on one line to a note on the next, with the arrow between the two taps', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await openEditor(page, ID.ode)
+    await tapNote(page, ODE[0]![0]!)
+    await onLine(page, 0)
+    const first = await showsOnlyItsLine(page, 'line 1')
+    const lastBar = first.at(-1)!
+
+    await tabs(page, 'Marks').click()
+    await page.getByRole('button', { name: 'Slur', exact: true }).click()
+    await tapNote(page, ODE[lastBar - 1]![3]!)
+    await page.getByText('Now tap the last note.').waitFor()
+    await lineStrip(page).getByRole('button', { name: 'Next line' }).click()
+    await onLine(page, 1)
+    await page.getByText('Now tap the last note.').waitFor() // the arrow keeps the pick
+    await tapNote(page, ODE[lastBar]![1]!)
+    await drawn(page, '.score-view g.slur', 2) // drawn in two pieces, one on each line
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const score = await stored(app, ID.ode)
+    assert.deepEqual(noteOf(score, ODE[lastBar - 1]![3]!).slurs, [{ type: 'start', number: 1 }])
+    assert.deepEqual(noteOf(score, ODE[lastBar]![1]!).slurs, [{ type: 'stop', number: 1 }])
+  })
+})
+
+// ---- Naming a new piece (change simplify-editor-and-name-new-pieces, task 3.4) -------------------------------
+
+/** A piece as adding music leaves it: "Ode to Joy"'s music under the date name it was given. */
+async function makeDatedPiece(page: Page): Promise<string> {
+  return page.evaluate(
+    async ({ xml }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({
+        name: '19 Nov, 14:05',
+        musicxml: xml,
+        bars: 12,
+        repairs: [],
+        pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 12 }],
+      })
+      return info.id
+    },
+    { xml: barsScore(12, 60) },
+  )
+}
+
+/** Opens the editor as adding music does for a new piece. */
+async function openNew(page: Page, pieceId: string): Promise<void> {
+  await page.evaluate((id) => window.__test!.shell.router.push({ name: 'editor', pieceId: id, isNew: true }), pieceId)
+  await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
+  await page.locator('.score-view[data-rendered="true"]').waitFor()
+}
+
+const naming = (page: Page) => page.getByRole('textbox', { name: 'Name this piece' })
+const titleFocused = (page: Page) => page.evaluate(() => document.activeElement?.classList.contains('editor-title-input') ?? false)
+
+test('edit: a new piece asks for its name; a tap on the title and typing replaces the date name, and Save & practice stores it', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeDatedPiece(page)
+    await openNew(page, id)
+    assert.equal(await naming(page).inputValue(), '19 Nov, 14:05')
+    assert.equal(await page.locator('.editor-title-field--naming').count(), 1, 'the title is highlighted')
+    assert.equal(await titleFocused(page), false, 'nothing opens the keyboard by itself')
+
+    await naming(page).tap()
+    assert.equal(await titleFocused(page), true)
+    await page.keyboard.type('Ode to Joy')
+    assert.equal(await title(page).inputValue(), 'Ode to Joy', 'the typing replaced the date name')
+    assert.equal(await page.locator('.editor-title-field--naming').count(), 0, 'named: no highlight')
+    await save(page).click()
+    await onScreen(page, 'practice')
+    assert.equal(JSON.parse((await app.file(`pieces/${id}/piece.json`)) ?? '{}').name, 'Ode to Joy')
+  })
+})
+
+test('edit: a new piece whose notes are fixed first keeps the highlight; an editor opened from practice does not ask', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeDatedPiece(page)
+    await openNew(page, id)
+    await tapNote(page, ODE[2]![1]!)
+    assert.equal(await selection(page), 'Bar 3 · Note 2', 'the note is selected')
+    assert.equal(await titleFocused(page), false, 'no keyboard')
+    assert.equal(await naming(page).count(), 1, 'the caption stays')
+    assert.equal(await page.locator('.editor-title-field--naming').count(), 1, 'and so does the highlight')
+    await page.getByRole('button', { name: 'Pitch down' }).click()
+    await save(page).click()
+    await onScreen(page, 'practice')
+    assert.equal(JSON.parse((await app.file(`pieces/${id}/piece.json`)) ?? '{}').name, '19 Nov, 14:05', 'an untouched date name saves as it is')
+
+    // From practice, the editor does not ask again.
+    await page.evaluate((pieceId) => window.__test!.shell.router.push({ name: 'editor', pieceId }), id)
+    await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
+    assert.equal(await naming(page).count(), 0)
+    assert.equal(await page.getByText('Name this piece').count(), 0)
+    assert.equal(await title(page).inputValue(), '19 Nov, 14:05')
+    await title(page).tap()
+    await page.keyboard.type('x')
+    assert.equal(await title(page).inputValue(), '19 Nov, 14:05x', 'no select-all: the caret goes where the tap was')
   })
 })
 
@@ -349,7 +465,7 @@ test('edit: the Note tab makes a rest, inserts notes and rests, and deletes; a r
 test('edit: the Marks tab turns marks on and off, and chooses a slur and a crescendo by their first and last note; both show after saving', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
-    const ode = await makePhotoPiece(page)
+    const ode = await makeOdePiece(page)
     await openEditor(page, ode)
     await tabs(page, 'Marks').click()
     const mark = (name: string) => page.getByRole('button', { name, exact: true })
@@ -430,12 +546,9 @@ test('edit: the Marks tab sets how a bar starts and ends, and the passes of an e
     assert.equal(await start.isDisabled(), true, 'no bar selected: the group is disabled')
     assert.equal(await end.isDisabled(), true)
 
-    // A bar without a note ("Go to bar") has the group too.
-    await page.getByRole('button', { name: 'Go to bar…' }).click()
-    const sheet = page.getByRole('dialog', { name: 'Go to bar' })
-    await sheet.getByRole('textbox', { name: 'Bar number' }).fill('7')
-    await sheet.getByRole('button', { name: 'Show' }).click()
-    await sheet.waitFor({ state: 'detached' })
+    // A bar without a note (a tap on the bar line that closes bar 7) has the group too.
+    const line = await centre(page, '.score-view g.barLine', 6)
+    await page.touchscreen.tap(line.x, line.y)
     await page.getByRole('heading', { name: 'Bar 7' }).waitFor()
     assert.equal(await start.isDisabled(), false)
 
@@ -486,7 +599,7 @@ test('edit: the bar-line group speaks Dutch', async () => {
 test('edit: the Score tab changes the key and the time signature, which draws the score again and checks the bars, and the written tempo', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
-    const ode = await makePhotoPiece(page)
+    const ode = await makeOdePiece(page)
     await openEditor(page, ode)
     await tapNote(page, ODE[2]![3]!)
     await tabs(page, 'Score').click()
@@ -511,13 +624,13 @@ test('edit: the Score tab changes the key and the time signature, which draws th
     // 3/4: every bar has four beats, so every bar is flagged, and Next goes from bar to bar after the selected note (bar 3).
     await time.selectOption('3/4')
     assert.match(await textOf(warnings(page)), /12 things to check/)
-    await page.getByRole('button', { name: 'Next' }).click()
+    await warnings(page).getByRole('button', { name: 'Next' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /Bar 4 adds up to 4 beats but 3\/4 needs 3\./)
-    await page.getByRole('button', { name: 'Next' }).click()
+    await warnings(page).getByRole('button', { name: 'Next' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /Bar 5 adds up/)
-    assert.equal(await photoLabel(page), 'Photo 2 · Bar 5', 'the warning in bar 5 is on page 2')
+    await page.getByRole('button', { name: 'Preview bar 5' }).waitFor() // the warning selected bar 5
     assert.ok((await page.locator('.score-view g.note.mk-flagbar').count()) >= 4, 'the notes of flagged bars are marked')
-    await page.getByRole('button', { name: 'Previous' }).click()
+    await warnings(page).getByRole('button', { name: 'Previous' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /Bar 4 adds up/)
     await time.selectOption('4/4')
     assert.equal(await warnings(page).count(), 0, 'fixed: the flags go')
@@ -557,7 +670,7 @@ test('edit: a warning is marked on the note and goes when the note is fixed (the
     assert.equal(await pitch(page), 'A3')
     assert.match(await textOf(warnings(page)), /1 thing to check/)
     assert.equal(await page.locator('.score-view g.note.mk-flag').count(), 1, 'the note is marked')
-    await page.getByRole('button', { name: 'Next' }).click()
+    await warnings(page).getByRole('button', { name: 'Next' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /A3 is outside the written range of the instrument \(Tenor saxophone/)
     await page.getByRole('button', { name: 'Pitch up' }).click()
     assert.equal(await warnings(page).count(), 0, 'the count goes down and the mark with it')
@@ -687,20 +800,26 @@ test('edit: a piece is renamed through its title (an empty name is refused), and
   })
 })
 
-test('edit: "+ Add pages" opens adding music for this piece, after asking to save the edits that would be lost', async () => {
+test('edit: "Add pages" at the foot of the Score tab opens adding music for this piece, after asking to save the edits that would be lost', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
+    const addPages = page.locator('.editor-add-pages').getByRole('button', { name: 'Add pages' })
     // No edits: straight to the add-music screen for this piece.
     await openEditor(page, ID.ode)
-    await page.getByRole('button', { name: '+ Add pages' }).click()
+    assert.equal(await addPages.count(), 0, 'only on the Score tab')
+    await tabs(page, 'Score').click()
+    assert.equal(await textOf(page.locator('.editor-add-pages .editor-hint')), 'Scan more pages; they go after bar 12.')
+    await addPages.click()
     assert.deepEqual(await app.screen(), { name: 'add-music', pieceId: ID.ode })
     await app.back()
     await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
 
     // With edits: the question first. Cancel stays; Save and add pages saves, then goes on.
     await tapNote(page, ODE[0]![0]!)
+    await tabs(page, 'Note').click()
     await page.getByRole('button', { name: 'Pitch down' }).click()
-    await page.getByRole('button', { name: '+ Add pages' }).click()
+    await tabs(page, 'Score').click()
+    await addPages.click()
     const dialog = page.getByRole('alertdialog', { name: 'Save your edits first?' })
     await dialog.waitFor()
     await dialog.getByRole('button', { name: 'Cancel' }).click()
@@ -708,7 +827,7 @@ test('edit: "+ Add pages" opens adding music for this piece, after asking to sav
     assert.deepEqual(await app.screen(), { name: 'editor', pieceId: ID.ode })
     assert.deepEqual(noteOf(await stored(app, ID.ode), ODE[0]![0]!).pitch, { step: 'C', octave: 5 })
 
-    await page.getByRole('button', { name: '+ Add pages' }).click()
+    await addPages.click()
     await dialog.getByRole('button', { name: 'Save and add pages' }).click()
     await page.waitForFunction(() => window.__test!.shell.router.screen.value.name === 'add-music')
     assert.deepEqual(await app.screen(), { name: 'add-music', pieceId: ID.ode })

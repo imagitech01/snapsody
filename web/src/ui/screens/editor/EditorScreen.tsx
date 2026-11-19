@@ -45,6 +45,7 @@ export function EditorScreen({ screen }: { screen: Extract<Screen, { name: 'edit
         },
       },
       screen.pieceId,
+      { isNew: screen.isNew === true },
     ).then(
       (made) => {
         // The screen was left while the piece loaded: the guard the session put on the stack must not stay.
@@ -63,7 +64,7 @@ export function EditorScreen({ screen }: { screen: Extract<Screen, { name: 'edit
       opened?.close()
       for (const backend of backends) backend.close?.()
     }
-  }, [screen.pieceId])
+  }, [screen.pieceId, screen.isNew])
 
   if (session) return <Editor session={session} />
   return (

@@ -3,6 +3,8 @@ import type { Score } from "../core/score/model.ts";
 import { renderScore } from "../core/score/render.ts";
 import { mapElements, sameElement } from "../core/score/elements.ts";
 import type { ElementRef, SvgTree } from "../core/score/elements.ts";
+import { linesOf } from "../core/score/lines.ts";
+import type { LineBars } from "../core/score/lines.ts";
 
 /**
  * The rendered score in the page (tasks 9.1 and 9.2): one column of SVG, re-laid out when the width
@@ -43,6 +45,10 @@ export interface ScoreView {
   barElement(barIndex: number): SVGGElement | undefined;
   /** The id of the first note (or rest) of a bar (from 0). */
   firstNoteOf(barIndex: number): string | undefined;
+  /** The lines of the drawing, with the bars (from 0) each holds (`linesOf`); empty before the first layout. */
+  readonly lines: readonly LineBars[];
+  /** The SVG group that draws the line (Verovio's `g.system`) holding a bar (from 0), once it is rendered. */
+  lineElement(barIndex: number): SVGGElement | undefined;
   highlight(noteIds: string[]): void;
   clearHighlight(): void;
   /**
@@ -138,6 +144,9 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   /** What each drawn element is, rebuilt after every render: Verovio's own ids change each time. */
   let elementMap = new Map<Element, ElementRef>();
   let markedElement: ElementRef | undefined;
+  /** The lines of the drawing, and each bar's drawing in drawing order (the bars of the score, from 0). */
+  let lines: LineBars[] = [];
+  let measureNodes: SVGGElement[] = [];
   const marks = new Map<string, Set<string>>();
   let lastRender: ScoreView["lastRender"];
 
@@ -188,6 +197,8 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     highlighted = [];
     applyMarks();
     elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, score) : new Map();
+    lines = linesOf<Element>(element, DOM_TREE);
+    measureNodes = [...element.querySelectorAll<SVGGElement>("g.measure")];
     applyElementMark();
     element.dataset.rendered = "true";
     const missing = unmappedNotes(pages.join(""), index);
@@ -283,6 +294,10 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
       return score.measures.length;
     },
     firstNoteOf: (barIndex) => firstOfBar[barIndex],
+    get lines() {
+      return lines;
+    },
+    lineElement: (barIndex) => measureNodes[barIndex]?.closest<SVGGElement>("g.system") ?? undefined,
     barElement(barIndex) {
       const id = firstOfBar[barIndex];
       return id === undefined ? undefined : (elementsFor(id)[0]?.closest<SVGGElement>("g.measure") ?? undefined);

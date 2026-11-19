@@ -23,7 +23,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The device layer's only test (openspec test-pyramid design T7, practice-app design D15 and task
- * 10.6): a scanned page becomes a saved piece that renders, plays, and survives an activity restart,
+ * 10.6): a scanned page becomes a saved piece that opens in the editor (change
+ * simplify-editor-and-name-new-pieces), then renders, plays, and survives an activity restart,
  * on the real Capacitor WebView, plugins, Python and models. It checks that each step completes,
  * nothing more: no music comparison, no accelerator and no timing, so it passes on the emulator's CPU.
  *
@@ -104,14 +105,15 @@ class EndToEndSmokeTest {
         ScannerPlugin.pageSource = PageSource { listOf({ ByteArrayInputStream(page) }) }
         val before = ids()
 
-        // 1-3. Add music: the hint (unless switched off), the injected page, reading, the saved piece.
+        // 1-3. Add music: the hint (unless switched off), the injected page, reading, the saved piece in the editor,
+        // which asks for its name; Save & practice keeps the date name and opens practice.
         var scenario = launch()
         val id: String
         try {
             click(scenario, "Add music")
             val started = System.currentTimeMillis()
             var hinted = false
-            waitFor("practice on the new piece after reading", 600_000) {
+            waitFor("the editor on the new piece after reading", 600_000) {
                 val step = text(scenario, "document.querySelector('[data-screen=\"add-music\"]')?.dataset.step")
                 if (step == "hint" && !hinted) {
                     hinted = true
@@ -120,11 +122,15 @@ class EndToEndSmokeTest {
                 if (step == "no-music" || step == "failed" || step == "unavailable") {
                     throw AssertionError("adding music ended '$step': ${text(scenario, "document.querySelector('[data-screen=\"add-music\"]').textContent")}")
                 }
-                isTrue(scenario, "document.querySelector('[data-screen=\"practice\"]')")
+                isTrue(scenario, button("Save & practice"))
             }
             Log.i(TAG, "reading and save took ${(System.currentTimeMillis() - started) / 1000} s")
             id = (ids() - before).single()
             created = id
+            assertEquals(id, text(scenario, "document.querySelector('[data-screen=\"editor\"]').dataset.pieceId"))
+            assertTrue("the editor asks for a name", isTrue(scenario, "document.querySelector('.editor-title-field--naming')"))
+            click(scenario, "Save & practice")
+            waitFor("practice on the new piece") { isTrue(scenario, "document.querySelector('[data-screen=\"practice\"]')") }
             assertEquals(id, text(scenario, "document.querySelector('[data-screen=\"practice\"]').dataset.pieceId"))
             val info = JSONObject(File(pieces, "$id/piece.json").readText())
             assertTrue("bars in piece.json", info.getInt("bars") > 0)

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Lets the user fix reading mistakes quickly on the phone, with the original photo beside the selected bar, so a misread note never forces a new scan.
+Lets the user fix reading mistakes quickly on the phone, one line of music at a time, so a misread note never forces a new scan.
 
 ## Requirements
 
@@ -94,18 +94,11 @@ The user SHALL be able to add a crescendo or a diminuendo from one note to anoth
 - **THEN** a crescendo hairpin is shown under bar 3 and the notes play gradually louder
 
 ### Requirement: Preview a bar
-The user SHALL be able to hear the selected bar on its own, at the piece's practice tempo, with the instrument in use.
+The user SHALL be able to hear the selected bar on its own, at the piece's practice tempo, with the instrument in use. The control for it SHALL sit with the editing tools, next to undo and redo.
 
 #### Scenario: Check a corrected bar
 - **WHEN** the user corrects a note in bar 3 and taps "Preview bar 3"
 - **THEN** only bar 3 plays, with the correction
-
-### Requirement: Original beside the selected bar
-The editor SHALL show the part of the source photo that holds the selected bar, labelled with its page and bar. When the position of that bar on the photo is not known, it SHALL show the whole photo of its page.
-
-#### Scenario: Compare a bar with the book
-- **WHEN** the user selects a note in bar 3 on page 1
-- **THEN** the strip of page 1's photo with the staff that holds bar 3 is shown, labelled "Photo 1 · Bar 3"
 
 ### Requirement: Save and practice
 "Save & practice" SHALL save the edits and open the piece for practice. Leaving the editor with unsaved edits SHALL ask whether to discard them.
@@ -193,3 +186,22 @@ The user SHALL be able to delete a clef change, or change any clef between trebl
 #### Scenario: Change the first clef
 - **WHEN** a treble-clef piece was read with a bass clef at the start, and the user changes that clef to treble
 - **THEN** the whole piece is drawn in treble clef with its notes in the same places, until the next clef change
+
+### Requirement: One line while editing
+With nothing selected, the editor SHALL show the whole score. Once a note, rest, bar or element is selected, it SHALL show only the line of music that holds it, so the tools get the room. Arrows SHALL step to the line before or after, selecting its first bar, and "Full score" SHALL show the whole score again. A line is as many bars as fit the screen's width.
+
+#### Scenario: Select a note on the full sheet
+- **WHEN** nothing is selected and the user taps a note in bar 5, on the line that holds bars 4 to 7
+- **THEN** the score shrinks to that line, showing bars 4 to 7, with the note selected
+
+#### Scenario: Step to the next line
+- **WHEN** the line with bars 4 to 7 is shown and the user taps the next-line arrow
+- **THEN** the next line is shown and its first bar is selected
+
+#### Scenario: Look for another spot
+- **WHEN** a line is shown and the user taps "Full score"
+- **THEN** the whole score is shown, the selection stays, and tapping a note shrinks the score to that note's line again
+
+#### Scenario: Warning on another line
+- **WHEN** a line is shown and the user taps Next on a warning about bar 12
+- **THEN** the line that holds bar 12 is shown with bar 12 selected

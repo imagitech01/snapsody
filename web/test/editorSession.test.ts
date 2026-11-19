@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { effect, signal } from '@preact/signals'
-import { barExcerpt, openEditor, photoOf } from '../src/app/editorSession.ts'
+import { barExcerpt, openEditor } from '../src/app/editorSession.ts'
 import type { EditorDeps, EditorSession } from '../src/app/editorSession.ts'
 import { createI18n } from '../src/app/i18n/index.ts'
 import type { Language } from '../src/app/i18n/index.ts'
@@ -19,8 +19,8 @@ import { createFakePlatform } from '../src/platform/fake/index.ts'
 import { note, quarters, score } from './helpers.ts'
 
 // The editor session (practice-app task 9.6, spec `score-editing`): selection, edits with undo and
-// redo, live warnings and stepping through them, the photo beside the selected bar, the bar
-// preview, the title, the dirty state with the leave guard, and Save & practice.
+// redo, live warnings and stepping through them, the bar preview, the title and asking for the name
+// of a new piece, the dirty state with the leave guard, and Save & practice.
 
 /** Page 1 (3/4): bar 1 is A3 C5 C5 (a written A3 is below the tenor saxophone), bar 2 is G5 G5 G5. */
 const PAGE_1 = score([note({ step: 'A', octave: 3, type: 'quarter' }) + quarters(2, 'C'), quarters(3, 'G')], [3, 4])
@@ -28,7 +28,7 @@ const PAGE_1 = score([note({ step: 'A', octave: 3, type: 'quarter' }) + quarters
 const PAGE_2 = score([quarters(2, 'E'), quarters(3, 'F')])
 const BOX = { x: 0.05, y: 0.1, width: 0.9, height: 0.25 }
 
-async function setup(options: { practiceTempo?: number } = {}) {
+async function setup(options: { practiceTempo?: number; isNew?: boolean } = {}) {
   const platform = createFakePlatform()
   const library = createLibrary(platform.files, { newId: () => 'piece-1' })
   const settings = await loadSettings(platform.files)
@@ -62,7 +62,7 @@ async function setup(options: { practiceTempo?: number } = {}) {
   const timer: TimerApi = { set: () => 1, clear() {} }
   const deps: EditorDeps = { library, settings, router, i18n, backend: async () => audio, timer }
   router.push({ name: 'editor', pieceId: 'piece-1' })
-  const editor = await openEditor(deps, 'piece-1')
+  const editor = await openEditor(deps, 'piece-1', options.isNew ? { isNew: true } : {})
   return { platform, library, settings, router, i18n, editor, played, deps }
 }
 
@@ -70,25 +70,22 @@ async function setup(options: { practiceTempo?: number } = {}) {
 const idsOf = (editor: EditorSession, bar: number): string[] => notesOf(editor.score.value.measures[bar - 1]!).map((n) => n.id)
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
-// ---- selection and the photo ---------------------------------------------------------------
+// ---- selection -----------------------------------------------------------------------------
 
-test('selection: a note and its bar, a bar alone, and the photo of the page (the staff when it is known)', async () => {
+test('selection: a note and its bar, and a bar alone', async () => {
   const { editor } = await setup()
   assert.equal(editor.selection.value, null)
-  assert.equal(editor.photo.value, null)
 
   const [, c5] = idsOf(editor, 1)
   assert.equal(editor.select(c5!), true)
   assert.deepEqual(editor.selection.value, { bar: 1, noteId: c5 })
   assert.equal(editor.selectedNote.value!.pitch!.step, 'C')
-  assert.deepEqual(editor.photo.value, { page: 1, n: 1, bar: 1, box: null }, 'no staff positions on page 1: the whole photo')
 
   const [e5] = idsOf(editor, 3)
   editor.select(e5!)
-  assert.deepEqual(editor.photo.value, { page: 2, n: 2, bar: 3, box: BOX }, '"Photo 2 · Bar 3": the strip with the staff that holds bar 3')
+  assert.deepEqual(editor.selection.value, { bar: 3, noteId: e5 })
   assert.equal(editor.selectBar(4), true)
   assert.deepEqual(editor.selection.value, { bar: 4, noteId: null })
-  assert.deepEqual(editor.photo.value!.box, { ...BOX, y: 0.5 })
   assert.equal(editor.selectedNote.value, undefined)
 
   assert.equal(editor.select('no-such-note'), false)
@@ -96,14 +93,7 @@ test('selection: a note and its bar, a bar alone, and the photo of the page (the
   assert.equal(editor.selectBar(0), false)
   assert.deepEqual(editor.selection.value, { bar: 4, noteId: null }, 'nothing changed')
   editor.clearSelection()
-  assert.equal(editor.photo.value, null)
-
-  assert.deepEqual(await editor.photos(), [
-    { page: 1, n: 1, url: 'fake://image/pieces/piece-1/pages/1/source.jpg' },
-    { page: 2, n: 2, url: 'fake://image/pieces/piece-1/pages/2/source.jpg' },
-  ])
-  assert.equal(await editor.photoUrl({ page: 2, n: 2, bar: 3, box: BOX }), 'fake://image/pieces/piece-1/pages/2/source.jpg')
-  assert.equal(photoOf([], 1), null)
+  assert.equal(editor.selection.value, null)
 })
 
 // ---- edits ---------------------------------------------------------------------------------
@@ -393,6 +383,33 @@ test('rename: the title is saved as the name; an empty one is refused and nothin
   assert.equal(editor.dirty.value, false)
   assert.deepEqual((await library.list()).pieces.map((p) => p.name), ['Ode to Joy'])
   assert.equal((await library.info('piece-1')).score, 'score-1.musicxml', 'a rename alone does not write the score')
+})
+
+test('naming: a new piece asks for its name until the title is typed, a save succeeds or the editor closes; an existing piece does not ask', async () => {
+  const existing = await setup()
+  assert.equal(existing.editor.naming.value, false, 'opened from practice or the library: not asked again')
+
+  const typed = await setup({ isNew: true })
+  assert.equal(typed.editor.naming.value, true)
+  typed.editor.setTitle('Ode to Joy')
+  assert.equal(typed.editor.naming.value, false, 'typing a title ends it')
+
+  const saved = await setup({ isNew: true })
+  saved.editor.apply((score) => stepPitch(score, idsOf(saved.editor, 1)[1]!, -1))
+  assert.equal(saved.editor.naming.value, true, 'an edit to the notes leaves it on')
+  const result = await saved.editor.save()
+  assert.equal(result.ok, true)
+  assert.equal(saved.editor.naming.value, false, 'a save ends it')
+  assert.equal((await saved.library.info('piece-1')).name, '18 Nov, 14:05', 'an untouched date name saves as it is')
+
+  const emptied = await setup({ isNew: true })
+  emptied.editor.setTitle('  ')
+  assert.deepEqual(await emptied.editor.save(), { ok: false, reason: 'empty-name' }, 'an empty title is still refused')
+  assert.equal((await emptied.library.info('piece-1')).name, '18 Nov, 14:05')
+
+  const closed = await setup({ isNew: true })
+  closed.editor.close()
+  assert.equal(closed.editor.naming.value, false, 'leaving ends it')
 })
 
 test('save: a piece saved elsewhere since it was opened is a conflict, and the edits stay', async () => {
