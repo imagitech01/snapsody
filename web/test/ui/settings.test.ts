@@ -174,6 +174,34 @@ test('settings: the credits name the source and licence of the instrument sounds
   })
 })
 
+test('settings: the privacy policy and the source code are links that open outside the app, in English and in Dutch', async () => {
+  // Spec `app-shell` "Privacy policy and source code" (change add-privacy-policy). The links are not clicked: in the
+  // harness that would really load the pages. On the phone, Capacitor hands them to the browser (design D4).
+  const check = async (page: Page, privacy: string, source: RegExp): Promise<void> => {
+    const rows = [
+      { link: page.getByRole('link', { name: privacy, exact: true }), href: 'https://imagitech.be/snapsody/privacy/' },
+      { link: page.getByRole('link', { name: source }), href: 'https://github.com/imagitech01/snapsody' },
+    ]
+    for (const { link, href } of rows) {
+      assert.equal(await link.count(), 1)
+      assert.equal(await link.getAttribute('href'), href)
+      assert.equal(await link.getAttribute('target'), '_blank', 'never replaces the app')
+      assert.equal(await link.getAttribute('rel'), 'noopener noreferrer')
+    }
+  }
+  await withApp({ seed: '' }, async ({ page }) => {
+    await tab(page, 'Settings').click()
+    await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
+    await check(page, 'Privacy policy', /^Source code/)
+    assert.match(await textOf(page.getByRole('link', { name: /^Source code/ })), /AGPL-3\.0/)
+  })
+  await withApp({ seed: '', language: 'nl-BE' }, async ({ page }) => {
+    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Instellingen' }).click()
+    await page.getByRole('heading', { name: 'Instellingen', level: 1 }).waitFor()
+    await check(page, 'Privacybeleid', /^Broncode/)
+  })
+})
+
 test('settings: when they could not be read at start a change works for this run, and the user is told it will not be kept', async () => {
   await withApp({ seed: 'settings-unreadable' }, async (app) => {
     const { page } = app

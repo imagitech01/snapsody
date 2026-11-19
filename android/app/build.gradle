@@ -10,11 +10,18 @@ def web = new File(repo, 'web')
 // at the main checkout's copy with -Pia.modelAssets=<dir> instead of copying 150 MB.
 def modelAssets = findProperty('ia.modelAssets')?.with { new File(it.toString()) } ?: new File(repo, 'android/model-assets')
 
+// The Play upload key (docs/release.md). Read from Gradle properties, normally in
+// ~/.gradle/gradle.properties, never from the repository. Without them every build still works,
+// except bundleRelease, which stops with a how-to (below).
+def uploadKey = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+    .collectEntries { [(it): findProperty("snapsody.upload.${it}")] }
+def hasUploadKey = uploadKey.values().every { it }
+
 android {
-    namespace = "app.snapsody"
+    namespace = "be.imagitech.snapsody"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "app.snapsody"
+        applicationId "be.imagitech.snapsody"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -30,19 +37,32 @@ android {
             abiFilters 'arm64-v8a'
         }
     }
+    signingConfigs {
+        if (hasUploadKey) {
+            upload {
+                storeFile file(uploadKey.storeFile)
+                storePassword uploadKey.storePassword
+                keyAlias uploadKey.keyAlias
+                keyPassword uploadKey.keyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasUploadKey) signingConfig signingConfigs.upload
         }
     }
     androidResources {
-        // Models are memory-mapped by LiteRT / ONNX Runtime: keep them uncompressed.
+        // Models are memory-mapped by LiteRT / ONNX Runtime: keep them uncompressed (the release
+        // bundle's split APKs too: bundletool takes its uncompressed globs from here).
         noCompress += ['tflite', 'onnx']
     }
     sourceSets {
         main {
-            // Used in place, so the 150 MB are not copied.
+            // Used in place, so the 150 MB are not copied. The release bundle is about 176 MB
+            // compressed with them, under Play's 500 MB base-module limit (docs/release.md).
             assets.srcDirs += modelAssets
         }
     }
@@ -137,6 +157,22 @@ def checkModelAssets = tasks.register('checkModelAssets') {
         ['segnet', 'encoder', 'decoder', 'selftest_tile', 'selftest_reference'].each { role ->
             if (!text.contains("\"role\": \"${role}\"")) throw new GradleException("${modelManifest} has no '${role}' entry. ${howTo}")
         }
+    }
+}
+// Release builds run lint-vital, which reads src/main/assets, where syncWeb writes the web build.
+tasks.matching { it.name.toLowerCase().contains('lint') && !it.name.contains('UnitTest') }.configureEach {
+    dependsOn(syncWeb)
+}
+
+// A release bundle Play would reject (unsigned) is not built: bundleRelease stops before any work.
+gradle.taskGraph.whenReady { graph ->
+    if (!hasUploadKey && graph.hasTask(':app:bundleRelease')) {
+        throw new GradleException("bundleRelease needs the Play upload key. Add to ~/.gradle/gradle.properties:\n" +
+            "  snapsody.upload.storeFile=<path to the upload keystore>\n" +
+            "  snapsody.upload.storePassword=<password>\n" +
+            "  snapsody.upload.keyAlias=upload\n" +
+            "  snapsody.upload.keyPassword=<password>\n" +
+            "(docs/release.md has how to create the key).")
     }
 }
 // On the asset merge, not preBuild: an APK without the models or the web build still fails, while

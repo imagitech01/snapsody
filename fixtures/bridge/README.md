@@ -1,7 +1,7 @@
 # Plugin contract
 
 The calls and events between the web layer's Capacitor adapter (`web/src/platform/capacitor/`)
-and our three local Capacitor plugins (`android/app/src/main/java/app/snapsody/`), as one
+and our three local Capacitor plugins (`android/app/src/main/java/be/imagitech/snapsody/`), as one
 committed example per call and event (openspec practice-app, design D15):
 
 | Plugin | JS name | Calls | Events |
@@ -14,7 +14,7 @@ Each plugin is a plain handler class (`ScannerHandler`, `ReaderHandler`, `Atomic
 thin Capacitor adapter, so the handler runs on the JVM. Three checks use these files, all in the
 quick layer:
 
-- **Kotlin:** `android/app/src/test/java/app/snapsody/{scanner,reader,files}/*Test.kt` run each
+- **Kotlin:** `android/app/src/test/java/be/imagitech/snapsody/{scanner,reader,files}/*Test.kt` run each
   handler on the example requests. The replies and events must have the example's shape, and the
   error examples must be rejected with their code. The shape check is `Contract.kt`.
 - **Fake platform:** `web/test/pluginContract.test.ts` checks that the examples are well formed and

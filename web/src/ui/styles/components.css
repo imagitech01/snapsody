@@ -561,8 +561,14 @@
   align-items: center;
   margin-right: calc(var(--space-2) * -1);
 }
-/* The row is a button: a pressed row shows it. */
-.list-row:has(> button.list-row-main:active) {
+/* A link row looks like the button rows. */
+a.list-row-main {
+  color: inherit;
+  text-decoration: none;
+}
+/* The row is a button or a link: a pressed row shows it. */
+.list-row:has(> button.list-row-main:active),
+.list-row:has(> a.list-row-main:active) {
   filter: brightness(0.97);
 }
 

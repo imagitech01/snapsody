@@ -5,6 +5,8 @@
 #   make test-device   the end-to-end smoke test on the emulator (DEVICE=phone for the S24)
 #
 # Each target prints its duration and exits non-zero when a test fails.
+#
+#   make bundle        the signed release bundle for Google Play (docs/release.md)
 
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
@@ -20,7 +22,7 @@ define timed
 	exit $$status
 endef
 
-.PHONY: test-quick test-mac test-device
+.PHONY: test-quick test-mac test-device bundle
 
 GRADLE = cd android && ./gradlew --console=plain -q
 
@@ -33,3 +35,6 @@ test-mac:
 test-device:
 	$(call timed,test-device,DEVICE=$(DEVICE) tools/test/device.sh)
 
+bundle:
+	$(GRADLE) :app:bundleRelease
+	@echo "android/app/build/outputs/bundle/release/app-release.aab"

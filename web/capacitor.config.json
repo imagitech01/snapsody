@@ -1,5 +1,5 @@
 {
-  "appId": "app.snapsody",
+  "appId": "be.imagitech.snapsody",
   "appName": "Snapsody",
   "webDir": "dist",
   "android": {

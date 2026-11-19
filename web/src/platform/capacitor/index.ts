@@ -17,7 +17,7 @@ export function isNative(): boolean {
 /**
  * The platform of the app on the phone, over the real plugins: Capacitor's Filesystem, App and
  * Device, the community KeepAwake, and our Scanner, Reader and AtomicFiles (android/app/src/main/
- * java/app/snapsody/).
+ * java/be/imagitech/snapsody/).
  */
 export function createCapacitorPlatform(): Platform {
   const plugins: CapacitorPlugins = {

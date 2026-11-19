@@ -8,6 +8,8 @@ import { Icon } from './Icon.tsx'
  *    something;
  *  - a selectable row (`selected`): the row is a radio of a radio group, drawn with a tint and the radio
  *    mark; the caller wraps the rows in an element with `role="radiogroup"` and a name;
+ *  - a link row (`href`): the row is one link to a web page, opened outside the app (`target="_blank"`;
+ *    on the phone Capacitor hands it to the browser, add-privacy-policy design D4);
  *  - a plain row: text only.
  * `trailing` is a control of its own at the end of the row (the star, the play button): it is a sibling of
  * the row's button, never inside it, so each is a button of its own with its own name.
@@ -20,6 +22,8 @@ export interface ListRowProps {
   /** A picture or thumbnail before the text. */
   leading?: ComponentChildren
   onPress?: () => void
+  /** Makes the row a link to this web page instead of a button. Not combined with `onPress` or `selected`. */
+  href?: string
   /** Makes the row a radio: whether it is the chosen one. */
   selected?: boolean
   chevron?: boolean
@@ -35,7 +39,7 @@ export interface ListRowProps {
   size?: 'regular' | 'large' | 'compact'
 }
 
-export function ListRow({ title, subtitle, value, leading, onPress, selected, chevron, expanded, controls, trailing, disabled, look = 'card', size = 'regular' }: ListRowProps) {
+export function ListRow({ title, subtitle, value, leading, onPress, href, selected, chevron, expanded, controls, trailing, disabled, look = 'card', size = 'regular' }: ListRowProps) {
   const text = (
     <>
       {leading ? <span class="list-row-leading">{leading}</span> : null}
@@ -48,11 +52,17 @@ export function ListRow({ title, subtitle, value, leading, onPress, selected, ch
   const classes = ['list-row', `list-row--${look}`, `list-row--${size}`]
   if (selected !== undefined) classes.push('list-row--choice')
   if (selected) classes.push('is-selected')
-  const interactive = onPress !== undefined || selected !== undefined
+  const interactive = onPress !== undefined || selected !== undefined || href !== undefined
   if (!interactive) classes.push('list-row--static')
   return (
     <div class={classes.join(' ')}>
-      {interactive ? (
+      {href !== undefined ? (
+        <a class="list-row-main" href={href} target="_blank" rel="noopener noreferrer">
+          {text}
+          {value ? <span class="list-row-value">{value}</span> : null}
+          {chevron ? <Icon name="chevron-right" size={20} class="list-row-chevron" /> : null}
+        </a>
+      ) : interactive ? (
         <button
           type="button"
           class="list-row-main"

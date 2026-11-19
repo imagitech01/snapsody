@@ -7,7 +7,7 @@
 //   `faultBetweenDeleteAndRename` to cut it off there); DestinationDirectoryExists (0010) for a folder
 //   renamed onto a folder; 0009 for a rename or copy that mixes a file and a folder; 0012 for a
 //   non-recursive delete of a folder with something inside; copy overwrites a file.
-// - AtomicFiles, Scanner and Reader: android/app/src/main/java/app/snapsody/ (port error codes).
+// - AtomicFiles, Scanner and Reader: android/app/src/main/java/be/imagitech/snapsody/ (port error codes).
 import type {
   AppPlugin,
   AtomicFilesPlugin,
@@ -40,7 +40,7 @@ const ERR = {
   failed: 'OS-PLUG-FILE-0013',
 }
 
-export const DATA_ROOT = '/data/user/0/app.snapsody/files'
+export const DATA_ROOT = '/data/user/0/be.imagitech.snapsody/files'
 
 type Node = { kind: 'file'; text: string } | { kind: 'dir' }
 

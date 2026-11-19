@@ -1,6 +1,6 @@
 #!/bin/bash
 # The device layer (openspec test-pyramid design T7b, practice-app design D15): `make test-device`
-# runs app.snapsody.EndToEndSmokeTest (android/app/src/androidTest) on the ia_test_api36 emulator,
+# runs be.imagitech.snapsody.EndToEndSmokeTest (android/app/src/androidTest) on the ia_test_api36 emulator,
 # which it starts headless and stops again; `make test-device DEVICE=phone` runs it on the connected
 # phone instead. See docs/testing.md.
 #
@@ -59,9 +59,9 @@ else
   echo "booted in $(( $(now) - started )) s"
   if [ $fresh = 1 ]; then
     # The AVD may hold the app from earlier use: the snapshot must be a device that never had it.
-    $ADB -s "$SERIAL" uninstall app.snapsody.test > /dev/null 2>&1
-    $ADB -s "$SERIAL" uninstall app.snapsody > /dev/null 2>&1
-    $ADB -s "$SERIAL" shell rm -rf /storage/emulated/0/Android/data/app.snapsody
+    $ADB -s "$SERIAL" uninstall be.imagitech.snapsody.test > /dev/null 2>&1
+    $ADB -s "$SERIAL" uninstall be.imagitech.snapsody > /dev/null 2>&1
+    $ADB -s "$SERIAL" shell rm -rf /storage/emulated/0/Android/data/be.imagitech.snapsody
     $ADB -s "$SERIAL" emu avd snapshot save "$SNAPSHOT" > /dev/null && echo "saved snapshot $SNAPSHOT"
   fi
 fi
@@ -72,8 +72,8 @@ $ADB -s "$SERIAL" install -r -t "$ROOT/android/app/build/outputs/apk/androidTest
 
 step "EndToEndSmokeTest"
 $ADB -s "$SERIAL" logcat -c
-output=$($ADB -s "$SERIAL" shell am instrument -w -e class app.snapsody.EndToEndSmokeTest \
-  app.snapsody.test/androidx.test.runner.AndroidJUnitRunner)
+output=$($ADB -s "$SERIAL" shell am instrument -w -e class be.imagitech.snapsody.EndToEndSmokeTest \
+  be.imagitech.snapsody.test/androidx.test.runner.AndroidJUnitRunner)
 echo "$output"
 $ADB -s "$SERIAL" logcat -d -s EndToEndSmokeTest:I InferenceThread:I | grep -E "took|accelerator" || true
 echo "$output" | grep -q '^OK (1 test)' || { echo "EndToEndSmokeTest FAILED" >&2; exit 1; }

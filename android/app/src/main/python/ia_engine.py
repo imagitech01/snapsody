@@ -71,7 +71,7 @@ def staves_in_source(staves: "list[dict] | None", offset: tuple[int, int], size:
 
 
 class KotlinBackend:
-    """homr._backend.ModelBackend implemented by app.snapsody.inference.InferenceService."""
+    """homr._backend.ModelBackend implemented by be.imagitech.snapsody.inference.InferenceService."""
 
     def __init__(self, service, accelerator: str = "GPU", progress: "Progress | None" = None) -> None:
         self.service = service
@@ -145,7 +145,7 @@ STAGES = {"prepare": 0.02, "segment": 0.05, "detect": 0.42, "read": 0.47, "write
 
 
 class Progress:
-    """Reports progress to a Kotlin listener (app.snapsody.reader.ProgressListener)
+    """Reports progress to a Kotlin listener (be.imagitech.snapsody.reader.ProgressListener)
     and checks for cancellation at every report."""
 
     def __init__(self, listener) -> None:

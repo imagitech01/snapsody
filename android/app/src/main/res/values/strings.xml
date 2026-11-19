@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Snapsody</string>
     <string name="title_activity_main">Snapsody</string>
-    <string name="package_name">app.snapsody</string>
-    <string name="custom_url_scheme">app.snapsody</string>
+    <string name="package_name">be.imagitech.snapsody</string>
+    <string name="custom_url_scheme">be.imagitech.snapsody</string>
 </resources>

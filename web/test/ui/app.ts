@@ -81,6 +81,8 @@ export interface AppOptions {
   reader?: 'manual'
   /** Viewport; the S24's by default. */
   viewport?: { width: number; height: number }
+  /** Device pixels per CSS pixel; 1 by default (the store screenshots use 3). */
+  deviceScaleFactor?: number
   /** What to open instead of the app, as a path under the build, e.g. the component gallery (GALLERY). */
   path?: string
 }
@@ -113,7 +115,7 @@ export class App {
       viewport: options.viewport ?? PHONE,
       hasTouch: true,
       isMobile: true,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: options.deviceScaleFactor ?? 1,
       locale: 'en-GB',
       timezoneId: 'Europe/Brussels',
     })

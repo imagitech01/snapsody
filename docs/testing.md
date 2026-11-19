@@ -269,7 +269,7 @@ eye in the app itself and is named as manual in its tasks:
 
 `android/` is the Capacitor 8 Android project, with the toolchain from the spike:
 AGP 8.13.2, Gradle 8.14.3, Kotlin 2.2.20, Chaquopy 17.2.0, compileSdk 36, minSdk 29 and Java 21
-(`openspec/changes/archive/2026-11-18-practice-app/evidence/spike.md`). The application id is `app.snapsody`.
+(`openspec/changes/archive/2026-11-18-practice-app/evidence/spike.md`). The application id is `be.imagitech.snapsody`.
 
 - **Building it:** `cd android && ./gradlew assembleDebug`. Before the assets are merged, the
   `syncWeb` task runs `npm run sync:android` in `web/`. That command builds the web layer into
@@ -307,7 +307,7 @@ AGP 8.13.2, Gradle 8.14.3, Kotlin 2.2.20, Chaquopy 17.2.0, compileSdk 36, minSdk
 
 ## Device layer
 
-`make test-device` runs `EndToEndSmokeTest` (`android/app/src/androidTest/java/app/snapsody/`), the
+`make test-device` runs `EndToEndSmokeTest` (`android/app/src/androidTest/java/be/imagitech/snapsody/`), the
 only instrumented test (practice-app task 10.6, design D15), on the `ia_test_api36` emulator
 (Android 36.1, arm64, 4 GB), which it starts headless and stops again. It goes through the
 Capacitor activity as a user would, with one page:

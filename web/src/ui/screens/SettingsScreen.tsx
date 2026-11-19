@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks'
 import { SOUND_CREDITS } from '../../app/credits.ts'
+import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../../app/links.ts'
 import { ListRow, ToggleRow } from '../components/index.ts'
 import { useShell } from '../ShellContext.ts'
 
@@ -7,7 +8,8 @@ import { useShell } from '../ShellContext.ts'
  * The Settings tab's start screen (frame 07, specs `app-shell` "General settings" and `instruments`
  * "Default instrument"): the default instrument and the language, each one line that shows the
  * current choice and opens a sheet with the whole list (`SettingsSheets.tsx`, design D19), the
- * count-in (design D17), and the credits of the instrument sounds. A change takes effect at once
+ * count-in (design D17), the credits of the instrument sounds, and the links to the privacy policy and the
+ * source code (add-privacy-policy, spec `app-shell` "Privacy policy and source code"). A change takes effect at once
  * (the settings are signals) and is saved; a save that fails is the shell's notice (`settings.saveFailed`).
  */
 export function SettingsScreen() {
@@ -79,6 +81,14 @@ export function SettingsScreen() {
               </ul>
             </div>
           ) : null}
+        </section>
+
+        <section class="settings-section">
+          <ListRow size="compact" title={t('settings.privacy')} href={PRIVACY_POLICY_URL} chevron />
+        </section>
+
+        <section class="settings-section">
+          <ListRow size="compact" title={t('settings.source')} subtitle={t('settings.source.hint')} href={SOURCE_CODE_URL} chevron />
         </section>
 
         <p class="t-caption settings-offline">{t('settings.offline')}</p>

@@ -6,7 +6,7 @@
  *
  * A plugin call rejects with an error whose `code` says what happened: the Filesystem plugin's
  * "OS-PLUG-FILE-00NN" codes (FILESYSTEM_ERRORS), and for our own plugins (android/app/src/main/
- * java/app/snapsody/) the port's error codes ("unavailable", "not-found", "exists", "invalid",
+ * java/be/imagitech/snapsody/) the port's error codes ("unavailable", "not-found", "exists", "invalid",
  * "failed"). Examples of our plugins' calls and events: fixtures/bridge/.
  */
 

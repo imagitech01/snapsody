@@ -554,7 +554,7 @@ test('a fresh flow is idle, and its buttons do nothing out of turn', async () =>
 
 test('scanFolderOf: the scan folder of a scanned page is removed with it, and no other folder', () => {
   assert.equal(scanFolderOf('scans/1/page-1.jpg'), 'scans/1')
-  assert.equal(scanFolderOf('/data/user/0/app.snapsody/files/scans/ab12/page-2.jpg'), '/data/user/0/app.snapsody/files/scans/ab12')
+  assert.equal(scanFolderOf('/data/user/0/be.imagitech.snapsody/files/scans/ab12/page-2.jpg'), '/data/user/0/be.imagitech.snapsody/files/scans/ab12')
   assert.equal(scanFolderOf('scans/page-1.jpg'), undefined, 'never the scans folder itself')
   assert.equal(scanFolderOf('pieces/p1/pages/1/source.jpg'), undefined)
   assert.equal(scanFolderOf('page-1.jpg'), undefined)
