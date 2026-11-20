@@ -6,7 +6,7 @@ import type { Position } from '../core/playback/scheduler.ts'
 import type { Score } from '../core/score/model.ts'
 import type { ElementRef } from '../core/score/elements.ts'
 import type { LineBars } from '../core/score/lines.ts'
-import type { NoteInfo } from '../core/score/noteMap.ts'
+import type { MultiRests, NoteInfo } from '../core/score/noteMap.ts'
 import { createScoreView } from './scoreView.ts'
 import type { ScoreView } from './scoreView.ts'
 
@@ -76,6 +76,8 @@ export interface ScoreIslandOptions {
   selectedElement?: ReadonlySignal<ElementRef | undefined>
   /** Show only the line that holds this bar, from 1 (the editor), or the whole score for null. */
   line?: ReadonlySignal<number | null>
+  /** A multi-measure rest that still holds: one symbol (`collapse`, the default: practice) or bar by bar (`expand`: the editor). */
+  multiRests?: MultiRests
   /** After every layout: the lines of the drawing, with the bars (from 0) each holds. */
   onLines?: (lines: readonly LineBars[]) => void
 }
@@ -245,6 +247,7 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
   // ---- The score --------------------------------------------------------------------------------
 
   const view: ScoreView = createScoreView(host, score, {
+    ...(options.multiRests ? { multiRests: options.multiRests } : {}),
     onTap: (info) => options.onTapNote(info.note.id, info),
     ...(options.onTapElement ? { onTapElement: (ref: ElementRef | undefined) => options.onTapElement?.(ref) } : {}),
     // The old drawing is still there: remember what to bring back into view once the new one is.

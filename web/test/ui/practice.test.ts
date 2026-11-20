@@ -4,6 +4,7 @@ import type { Page } from 'playwright'
 import { withApp } from './app.ts'
 import { highlighted, noteIdsByBar, tab, tabBar, tapNote, textOf } from './journey.ts'
 import { ID } from './pieces.ts'
+import { HOMR_MARKS_FIXTURE, read } from '../helpers.ts'
 import { barsScore } from './scores.ts'
 
 // The practice journey (practice-app design D15, "practise: home, continue, play, loop with rest, metronome,
@@ -736,5 +737,73 @@ test('practise: a piece that is not there, or whose sound will not load, is said
     await page.getByRole('alert').filter({ hasText: 'The sound of this instrument could not be loaded.' }).waitFor()
     await page.getByRole('button', { name: 'Play', exact: true }).waitFor()
     assert.equal(await page.evaluate(() => window.__test!.platform.device.keepAwake), false, 'a Play that failed does not hold the screen on')
+  })
+})
+
+// ---- A multi-measure rest in practice (change more-marks, task 2.2; spec "Multi-measure rest in practice") ----------------
+
+/** A piece made from the marks fixture: 12 bars, bars 8 to 11 one multi-measure rest. Practised at 120 BPM, two seconds a bar. */
+async function makeMarksPiece(page: Page, practice: Record<string, unknown>): Promise<string> {
+  const xml = read(HOMR_MARKS_FIXTURE)
+  return page.evaluate(
+    async ({ xml, practice }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({ name: 'Long rest', musicxml: xml, bars: 12, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 12 }] })
+      await shell.library.writePractice(info.id, { bar: 1, tempo: 120, loop: null, loopRest: 0, metronome: false, ...practice })
+      await shell.router.push({ name: 'practice', pieceId: info.id })
+      return info.id
+    },
+    { xml, practice },
+  )
+}
+
+test('practise: a loop that starts after a multi-measure rest starts on its bar, and the bar box is over the bar after the symbol', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await makeMarksPiece(page, { loop: { start: 12, end: 12 } })
+    await scoreDrawn(page)
+    assert.equal(await page.locator('.score-view svg g.multiRest').count(), 1, 'the four bars are one symbol')
+    assert.equal(await page.locator('.score-view svg g.measure').count(), 9, 'drawn as 9 measures for 12 bars')
+    assert.equal(await where(page), 'Bar 1 of 12 Following')
+
+    await page.getByRole('button', { name: 'Restart', exact: true }).click()
+    assert.equal(await where(page), 'Bar 12 of 12 Following')
+    // The bar box is over the last drawn measure (not one of the measures before it).
+    const boxes = await page.evaluate(() => {
+      const box = document.querySelector('.score-bar')!.getBoundingClientRect()
+      const last = [...document.querySelectorAll('.score-view svg g.measure')].at(-1)!.getBoundingClientRect()
+      return { dx: Math.abs(box.left - last.left), dy: Math.abs(box.top + 4 - last.top), width: Math.abs(box.width - last.width) }
+    })
+    assert.ok(boxes.dx < 3 && boxes.dy < 3 && boxes.width < 3, `the bar box covers the last measure: ${JSON.stringify(boxes)}`)
+
+    await page.getByRole('button', { name: 'Play', exact: true }).click()
+    await until(page, async () => (await highlighted(page)) !== null, 'a note is highlighted')
+    assert.equal(await highlighted(page), noteIdsByBar(read(HOMR_MARKS_FIXTURE))[11]![0], 'the note of bar 12 sounds first')
+    assert.equal(await page.locator('.score-view svg g.multiRest.hl').count(), 0)
+  })
+})
+
+test('practise: a tap on the multi-measure rest starts at its first bar, and the symbol stays highlighted through its bars until the next note', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await makeMarksPiece(page, {})
+    await scoreDrawn(page)
+    const symbol = page.locator('.score-view svg g.multiRest')
+    await symbol.scrollIntoViewIfNeeded()
+    const box = await symbol.boundingBox()
+    assert.ok(box, 'the symbol is drawn')
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
+    assert.equal(await where(page), 'Bar 8 of 12 Following', 'a tap on the symbol goes to its first bar')
+
+    await page.getByRole('button', { name: 'Play', exact: true }).click()
+    await until(page, async () => (await page.locator('.score-view svg g.multiRest.hl').count()) === 1, 'the symbol is highlighted')
+    await freeze(page)
+    await page.clock.runFor(5000) // 5 s in: bar 10 of 12
+    assert.match(await where(page), /Bar (9|10) of 12/)
+    assert.equal(await page.locator('.score-view svg g.multiRest.hl').count(), 1, 'still the one symbol')
+    await page.clock.runFor(4000) // 9 s in: bar 12
+    assert.equal(await highlighted(page), noteIdsByBar(read(HOMR_MARKS_FIXTURE))[11]![0], 'the note after the run is highlighted on time')
+    assert.equal(await page.locator('.score-view svg g.multiRest.hl').count(), 0)
   })
 })

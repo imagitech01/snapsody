@@ -2,6 +2,7 @@ import type { VerovioToolkit } from "verovio/esm";
 import type { Score } from "./model.ts";
 import { beamScore } from "./beams.ts";
 import { serializeMusicXml } from "./musicxml.ts";
+import type { MultiRests } from "./noteMap.ts";
 
 /**
  * Renders the score model with Verovio (design D7): the model is serialised to MusicXML and
@@ -14,6 +15,8 @@ export interface RenderOptions {
   width: number;
   /** Verovio scale in percent; the page is laid out `width * 100 / scale` units wide. */
   scale?: number;
+  /** A multi-measure rest that still holds: one symbol (`collapse`, practice) or bar by bar (`expand`, the editor). Default `collapse`. */
+  multiRests?: MultiRests;
 }
 
 export const DEFAULT_SCALE = 40;
@@ -54,7 +57,7 @@ export async function renderScore(score: Score, options: RenderOptions): Promise
   // No part-name label or title: they only cost width on a phone (the app shows the name itself).
   // Beams are added for display only (homr writes none; see beams.ts), and so are the ids that let a
   // tap on a clef, slur, tie or hairpin be traced back to the model (elements.ts).
-  if (!tk.loadData(serializeMusicXml({ ...score, partName: "", title: undefined }, { beams: beamScore(score), drawingIds: true }))) throw new Error("Verovio could not read the score");
+  if (!tk.loadData(serializeMusicXml({ ...score, partName: "", title: undefined }, { beams: beamScore(score), drawingIds: true, multiRests: options.multiRests ?? "collapse" }))) throw new Error("Verovio could not read the score");
   const pages: string[] = [];
   for (let page = 1; page <= tk.getPageCount(); page++) pages.push(tk.renderToSVG(page));
   return pages;

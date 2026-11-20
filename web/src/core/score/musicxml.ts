@@ -17,7 +17,7 @@ import type {
   TupletMark,
   WedgeItem,
 } from './model.ts'
-import { isNote, isWedge } from './model.ts'
+import { isNote, isWedge, multiRestRuns } from './model.ts'
 import type { BeamMark } from './beams.ts'
 import type { Frac } from './rational.ts'
 import { ZERO, eq, frac, lcm, mul } from './rational.ts'
@@ -32,6 +32,11 @@ import { el, parseXml, serializeXml } from './xml.ts'
  * fermata, breath marks, dynamics, hairpins (<wedge>), tempo (words, metronome,
  * sound tempo), other direction words, clef, key, time, barlines, repeats,
  * endings, system breaks.
+ *
+ * Also kept (change more-marks, design D1, D2): strong accent, staccatissimo, caesura, one ornament per
+ * note (trill, turn, mordent), tremolo, arpeggio and multi-measure rests. homr 0.7.1 writes a mordent
+ * among the articulations, every turn as <inverted-turn> and every tremolo as start or stop, never as
+ * single; those are read as described at `pairTremolos`. A <doit> is dropped with a warning.
  *
  * Dropped (reported through `warnings` where it can matter): further parts,
  * other voices/staves, <backup>/<forward>, beams, stems, lyrics, other
@@ -170,6 +175,8 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
   let warnedBackup = false
   let sawNote = false
   let lastKept = true
+  /** The first note of the chord being read (or the single note before its chord members). */
+  let chordFirst: Note | undefined
   /** Hairpins started and not yet stopped, in start order; `startNote` is the first note after the start. */
   const openWedges: { type: WedgeItem['type']; number: string; startNote?: Note; startMeasure?: Measure }[] = []
   /** The last note of the melody read so far (not a grace note or a chord member): where a hairpin stop lands. */
@@ -213,6 +220,9 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
             const k = parseKey(key)
             if (k) measure.key = k
           }
+          const style = child(c, 'measure-style')
+          const multiple = intOf(style ? child(style, 'multiple-rest') : undefined)
+          if (multiple !== undefined && multiple >= 2) measure.multiRest = multiple
           const time = child(c, 'time')
           if (time) {
             const t = parseTime(time)
@@ -266,6 +276,12 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
             break
           }
           const note = parseNote(c, divisions, nextId(c.attrs.id), warnings, measure.number)
+          // An arpeggio belongs to the chord: it is kept on its first note, whichever note had it.
+          if (note.chord && note.arpeggio && chordFirst) {
+            chordFirst.arpeggio = true
+            delete note.arpeggio
+          }
+          if (!note.chord) chordFirst = note
           measure.items.push(note)
           seenNoteInMeasure = true
           sawNote = true
@@ -283,6 +299,7 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
           break
       }
     }
+    pairTremolos(measure)
     score.measures.push(measure)
   })
 
@@ -294,6 +311,27 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
     if (first) first.inferred = true
   }
   return score
+}
+
+/**
+ * Settles what kind each tremolo of the bar is (design D2). homr never writes `single`: it alternates
+ * start and stop over the whole piece, whether or not two notes are joined. A `start` whose next note in
+ * the same bar has a `stop` is a two-note tremolo; any other `start` or `stop` is a single one. The
+ * next note skips grace notes and chord members. A tremolo already marked `single` stays so.
+ */
+function pairTremolos(measure: Measure): void {
+  const melody = measure.items.filter(isNote).filter((n) => !n.chord && !n.grace)
+  const paired = new Set<Note>()
+  melody.forEach((n, i) => {
+    const next = melody[i + 1]
+    if (n.tremolo?.kind === 'start' && next?.tremolo?.kind === 'stop') {
+      paired.add(n)
+      paired.add(next)
+    }
+  })
+  for (const n of measure.items) {
+    if (isNote(n) && n.tremolo && !paired.has(n)) n.tremolo.kind = 'single'
+  }
 }
 
 function parseClef(c: XmlElement): Clef {
@@ -472,6 +510,10 @@ function parseNote(n: XmlElement, divisions: number, id: string, warnings: strin
     if (t.attrs.type === 'start') note.tieStart = true
     if (t.attrs.type === 'stop') note.tieStop = true
   }
+  const setOrnament = (kind: NonNullable<Note['ornament']>): void => {
+    if (note.ornament === undefined) note.ornament = kind
+    else warnings.push(`Measure ${bar}: a note with more than one ornament keeps only the first (${note.ornament}); ${kind} was dropped`)
+  }
   for (const notations of kids(n, 'notations')) {
     for (const c of notations.children) {
       if (c.name === 'tied') {
@@ -494,8 +536,29 @@ function parseNote(n: XmlElement, divisions: number, id: string, warnings: strin
         if (child(c, 'tenuto')) note.tenuto = true
         if (child(c, 'accent')) note.accent = true
         if (child(c, 'breath-mark')) note.breath = true
+        if (child(c, 'strong-accent')) note.strongAccent = true
+        if (child(c, 'staccatissimo')) note.staccatissimo = true
+        if (child(c, 'caesura')) note.caesura = true
+        // homr writes a mordent here, which is not valid MusicXML; it is read all the same.
+        if (child(c, 'mordent')) setOrnament('mordent')
+        if (child(c, 'doit')) warnings.push(`Measure ${bar}: a doit mark was dropped (it is neither drawn nor played)`)
+      } else if (c.name === 'ornaments') {
+        for (const o of c.children) {
+          if (o.name === 'trill-mark') setOrnament('trill')
+          else if (o.name === 'turn' || o.name === 'inverted-turn') setOrnament('turn')
+          else if (o.name === 'mordent') setOrnament('mordent')
+          else if (o.name === 'tremolo' && !note.tremolo) {
+            const type = o.attrs.type
+            if (type === 'start' || type === 'stop' || type === 'single') {
+              const strokes = intOf(o)
+              note.tremolo = { kind: type, strokes: strokes !== undefined && strokes > 0 ? strokes : 3 }
+            }
+          }
+        }
       } else if (c.name === 'fermata') {
         note.fermata = true
+      } else if (c.name === 'arpeggiate') {
+        note.arpeggio = true
       }
     }
   }
@@ -519,6 +582,12 @@ export interface SerializeOptions {
    * `wedge-<startId>` on a hairpin start.
    */
   drawingIds?: boolean
+  /**
+   * What to do with a multi-measure rest that still holds (`multiRestRuns`): `collapse` writes its
+   * `<multiple-rest>`, so Verovio draws it as one symbol; `expand` leaves it out, so every bar is drawn.
+   * Default `collapse`: the stored file must keep `multiRest`. The editor draws with `expand`.
+   */
+  multiRests?: 'collapse' | 'expand'
 }
 
 /** The drawing ids of `SerializeOptions.drawingIds`. */
@@ -582,7 +651,10 @@ export function serializeMusicXml(score: Score, options: SerializeOptions = {}):
     return el('direction', { placement: 'below' }, [el('direction-type', {}, [wedge])])
   }
 
+  const collapsedRuns = options.multiRests === 'expand' ? [] : multiRestRuns(score)
   const part = el('part', { id: 'P1' })
+  /** Whether the chord being written is arpeggiated: it is set on the first note and written on all of them. */
+  let arpeggio = false
   score.measures.forEach((m, index) => {
     const measure = el('measure', { number: m.number })
     if (m.newSystem) measure.children.push(el('print', { 'new-system': 'yes' }))
@@ -607,6 +679,9 @@ export function serializeMusicXml(score: Score, options: SerializeOptions = {}):
       if (m.clef.octaveChange !== undefined) clef.children.push(txt('clef-octave-change', m.clef.octaveChange))
       attrs.children.push(clef)
     }
+    // measure-style comes last in <attributes>.
+    const run = collapsedRuns.find((r) => r.start === index)
+    if (run) attrs.children.push(el('measure-style', {}, [txt('multiple-rest', run.length)]))
     if (attrs.children.length > 0) measure.children.push(attrs)
 
     /** Hairpin stops wait until the stop note and its chord are written, and go out before the next direction or note. */
@@ -622,7 +697,8 @@ export function serializeMusicXml(score: Score, options: SerializeOptions = {}):
           flushStops()
           for (const w of wedgeStarts.get(item.id) ?? []) measure.children.push(wedgeDirection(w, w.type))
         }
-        measure.children.push(noteEl(item, divisions, options.beams?.get(item.id), options.drawingIds))
+        if (!item.chord) arpeggio = item.arpeggio === true
+        measure.children.push(noteEl(item, divisions, options.beams?.get(item.id), options.drawingIds, arpeggio))
         pendingStops.push(...(wedgeStops.get(item.id) ?? []))
       } else if (item.kind === 'dynamic') {
         const mark = isStandardDynamic(item.mark)
@@ -683,7 +759,7 @@ function tempoEl(t: TempoItem): XmlElement {
   return d
 }
 
-function noteEl(n: Note, divisions: number, beams: BeamMark[] = [], drawingIds = false): XmlElement {
+function noteEl(n: Note, divisions: number, beams: BeamMark[] = [], drawingIds = false, arpeggio = false): XmlElement {
   const e = el('note', { id: n.id })
   if (n.grace) e.children.push(el('grace'))
   if (n.chord) e.children.push(el('chord'))
@@ -720,15 +796,26 @@ function noteEl(n: Note, divisions: number, beams: BeamMark[] = [], drawingIds =
     notations.children.push(el('slur', { type: s.type, number: String(s.number), ...id }))
   }
   for (const t of n.tuplets) notations.children.push(el('tuplet', { type: t.type, number: String(t.number) }))
-  if (n.staccato || n.tenuto || n.accent || n.breath) {
+  // Valid MusicXML (design D2): the ornaments and the tremolo under <ornaments>, the rest under <articulations>.
+  if (n.ornament || n.tremolo) {
+    const orn = el('ornaments')
+    if (n.ornament) orn.children.push(el(n.ornament === 'trill' ? 'trill-mark' : n.ornament))
+    if (n.tremolo) orn.children.push(txt('tremolo', n.tremolo.strokes, { type: n.tremolo.kind }))
+    notations.children.push(orn)
+  }
+  if (n.staccato || n.staccatissimo || n.tenuto || n.accent || n.strongAccent || n.breath || n.caesura) {
     const art = el('articulations')
     if (n.staccato) art.children.push(el('staccato'))
+    if (n.staccatissimo) art.children.push(el('staccatissimo'))
     if (n.tenuto) art.children.push(el('tenuto'))
     if (n.accent) art.children.push(el('accent'))
+    if (n.strongAccent) art.children.push(el('strong-accent'))
     if (n.breath) art.children.push(el('breath-mark'))
+    if (n.caesura) art.children.push(el('caesura'))
     notations.children.push(art)
   }
   if (n.fermata) notations.children.push(el('fermata'))
+  if (arpeggio) notations.children.push(el('arpeggiate'))
   if (notations.children.length > 0) e.children.push(notations)
   return e
 }

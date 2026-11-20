@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as ed from '../src/core/score/edit.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
-import { isNote, isWedge } from '../src/core/score/model.ts'
+import { isNote, isWedge, notesOf } from '../src/core/score/model.ts'
 import type { Note, Score } from '../src/core/score/model.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import { EditSession } from '../src/core/score/editSession.ts'
@@ -14,7 +14,8 @@ import { barOf, scoreOf } from './playbackHelpers.ts'
 import { describeElement } from '../src/core/score/elements.ts'
 import type { ElementRef } from '../src/core/score/elements.ts'
 import { buildTimeline } from '../src/core/playback/timeline.ts'
-import { COMMITTED_FIXTURE, read } from './helpers.ts'
+import { renderScore } from '../src/core/score/render.ts'
+import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, read } from './helpers.ts'
 
 const TICKS: Record<string, number> = { whole: 48, half: 24, quarter: 12, eighth: 6, '16th': 3 }
 interface S { id: string; step?: string; octave?: number; alter?: number; acc?: string; type?: string; rest?: boolean }
@@ -843,4 +844,203 @@ test('deleteTime: a deleted time change makes the bar check flag the bars that n
   assert.deepEqual(computeWarnings(s, TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar), ['3', '4'])
   assert.throws(() => ed.deleteTime(s, 2), ed.EditError)
   assert.throws(() => ed.deleteTime(s, 0), ed.EditError)
+})
+
+// ---------------------------------------------------------------- the marks of change more-marks (task 4.2)
+
+const marks = (): Score => parseMusicXml(read(HOMR_MARKS_FIXTURE))
+/** One edit through a session: the score before, the score after, and the session to undo with. */
+function edited(source: Score, edit: (s: Score) => unknown) {
+  const session = new EditSession(source)
+  const before = structuredClone(session.score)
+  session.apply(edit)
+  return { before, after: session.score, session }
+}
+
+test('toggles: strong accent and staccatissimo go on and off, undo restores each, a rest refuses them', () => {
+  const s = marks()
+  for (const [toggle, key, id] of [
+    [ed.toggleStrongAccent, 'strongAccent', 'n3'],
+    [ed.toggleStaccatissimo, 'staccatissimo', 'n3'],
+  ] as const) {
+    const on = edited(s, (sc) => toggle(sc, id))
+    assert.equal(byId(on.after, id)[key], true)
+    assert.equal(byId(s, id)[key], undefined, 'the source score is untouched')
+    assert.ok(on.session.undo())
+    assert.deepEqual(on.session.score, on.before, `undo of ${key}`)
+    // Tapping the active mark removes it (n4 has the strong accent, n5 the staccatissimo).
+    const off = edited(s, (sc) => toggle(sc, key === 'strongAccent' ? 'n4' : 'n5'))
+    assert.equal(byId(off.after, key === 'strongAccent' ? 'n4' : 'n5')[key], undefined)
+    assert.ok(off.session.undo())
+    assert.deepEqual(off.session.score, off.before)
+    assert.throws(() => toggle(s, 'n27'), ed.EditError)
+  }
+})
+
+test('toggles: trill, turn and mordent replace each other, tapping the active one removes it, undo restores', () => {
+  const s = marks()
+  // n6 has a trill.
+  const turn = edited(s, (sc) => ed.toggleOrnament(sc, 'n6', 'turn'))
+  assert.equal(byId(turn.after, 'n6').ornament, 'turn')
+  const mordent = edited(turn.after, (sc) => ed.toggleOrnament(sc, 'n6', 'mordent'))
+  assert.equal(byId(mordent.after, 'n6').ornament, 'mordent')
+  const trill = edited(mordent.after, (sc) => ed.toggleOrnament(sc, 'n6', 'trill'))
+  assert.equal(byId(trill.after, 'n6').ornament, 'trill')
+  const none = edited(trill.after, (sc) => ed.toggleOrnament(sc, 'n6', 'trill'))
+  assert.equal(byId(none.after, 'n6').ornament, undefined)
+  for (const step of [turn, mordent, trill, none]) {
+    assert.ok(step.session.undo())
+    assert.deepEqual(step.session.score, step.before)
+  }
+  // A plain note takes one; a rest refuses.
+  assert.equal(byId(edited(s, (sc) => ed.toggleOrnament(sc, 'n3', 'mordent')).after, 'n3').ornament, 'mordent')
+  assert.throws(() => ed.toggleOrnament(s, 'n27', 'trill'), ed.EditError)
+})
+
+test('toggles: a tremolo is a single one of 3 strokes; tapping it removes it, and from a pair it leaves both notes', () => {
+  const s = marks()
+  const on = edited(s, (sc) => ed.toggleTremolo(sc, 'n3'))
+  assert.deepEqual(byId(on.after, 'n3').tremolo, { kind: 'single', strokes: 3 })
+  assert.ok(on.session.undo())
+  assert.deepEqual(on.session.score, on.before)
+  // n9 and n10 are a two-note tremolo (bar 3), n11 a single one.
+  assert.deepEqual([byId(s, 'n9').tremolo?.kind, byId(s, 'n10').tremolo?.kind, byId(s, 'n11').tremolo?.kind], ['start', 'stop', 'single'])
+  for (const id of ['n9', 'n10']) {
+    const off = edited(s, (sc) => ed.toggleTremolo(sc, id))
+    assert.deepEqual([byId(off.after, 'n9').tremolo, byId(off.after, 'n10').tremolo], [undefined, undefined], `tapping ${id}`)
+    assert.ok(off.session.undo())
+    assert.deepEqual(off.session.score, off.before)
+  }
+  const single = edited(s, (sc) => ed.toggleTremolo(sc, 'n11'))
+  assert.equal(byId(single.after, 'n11').tremolo, undefined)
+  assert.equal(byId(single.after, 'n13').tremolo?.kind, 'single', 'the other single tremolos stay')
+  assert.throws(() => ed.toggleTremolo(s, 'n27'), ed.EditError)
+})
+
+test('toggles: an arpeggio is on a chord only, set from any of its notes, and sits on the first note', () => {
+  const s = marks()
+  // n15 n16 n17 are a chord with the arpeggio (bar 5); n19-n21 a chord without (bar 6); n18 a single note.
+  assert.throws(() => ed.toggleArpeggio(s, 'n18'), ed.EditError)
+  assert.throws(() => ed.toggleArpeggio(s, 'n27'), ed.EditError) // a rest
+  const on = edited(s, (sc) => ed.toggleArpeggio(sc, 'n21'))
+  assert.equal(byId(on.after, 'n19').arpeggio, true)
+  assert.equal(byId(on.after, 'n21').arpeggio, undefined)
+  assert.ok(on.session.undo())
+  assert.deepEqual(on.session.score, on.before)
+  const off = edited(s, (sc) => ed.toggleArpeggio(sc, 'n17'))
+  assert.equal(byId(off.after, 'n15').arpeggio, undefined)
+  assert.ok(off.session.undo())
+  assert.deepEqual(off.session.score, off.before)
+  // It is written on every note of the chord.
+  assert.equal(serializeMusicXml(on.after).match(/<arpeggiate\/>/g)?.length, 6)
+  // Deleting down to one note takes the arpeggio off; deleting the first note moves it.
+  const moved = edited(s, (sc) => ed.deleteNote(sc, 'n15'))
+  assert.equal(byId(moved.after, 'n16').arpeggio, true)
+  const single = edited(moved.after, (sc) => ed.deleteNote(sc, 'n17'))
+  assert.equal(byId(single.after, 'n16').arpeggio, undefined)
+})
+
+test('deleteElement: every new mark is removed alone, a two-note tremolo from both notes, and undo brings each back', () => {
+  const base = marks()
+  const mark = (noteId: string, m: string): ElementRef => ({ kind: 'articulation', noteId, mark: m as never })
+  const refs: ElementRef[] = [
+    mark('n1', 'ornament'),
+    mark('n6', 'ornament'),
+    mark('n7', 'ornament'),
+    mark('n4', 'strongAccent'),
+    mark('n5', 'staccatissimo'),
+    mark('n9', 'tremolo'),
+    mark('n11', 'tremolo'),
+    mark('n15', 'arpeggio'),
+    mark('n26', 'caesura'),
+    mark('n21', 'fermata'),
+  ]
+  const xmlBefore = serializeMusicXml(base)
+  for (const ref of refs) {
+    assert.ok(describeElement(base, ref), `${JSON.stringify(ref)} is in the fixture`)
+    const { after, session } = edited(base, (s) => ed.deleteElement(s, ref))
+    assert.equal(describeElement(after, ref), undefined, `${JSON.stringify(ref)} is gone`)
+    for (const other of refs) {
+      if (other === ref) continue
+      const twin = ref.kind === 'articulation' && other.kind === 'articulation' && ref.mark === 'tremolo' && other.mark === 'tremolo' && other.noteId === 'n9'
+      if (!twin) assert.ok(describeElement(after, other), `${JSON.stringify(other)} stays when ${JSON.stringify(ref)} goes`)
+    }
+    assert.ok(session.undo())
+    assert.equal(serializeMusicXml(session.score), xmlBefore, `undo restores ${JSON.stringify(ref)}`)
+  }
+  // The two-note tremolo goes from both notes, whichever note the reference names.
+  for (const id of ['n9', 'n10']) {
+    const s = marks()
+    ed.deleteElement(s, mark(id, 'tremolo'))
+    assert.deepEqual([byId(s, 'n9').tremolo, byId(s, 'n10').tremolo], [undefined, undefined])
+  }
+  // The ornament that goes is the note's own, and the note plays plainly after (the notes stay).
+  const s = marks()
+  ed.deleteElement(s, mark('n6', 'ornament'))
+  assert.equal(byId(s, 'n6').ornament, undefined)
+  assert.equal(notes(s).length, notes(base).length)
+  assert.throws(() => ed.deleteElement(s, mark('n6', 'ornament')), ed.EditError) // already gone
+})
+
+test('notes: a note that becomes a rest loses its new marks, and deleting one note of a tremolo pair leaves no half pair', () => {
+  const s = marks()
+  ed.noteToRest(s, 'n6')
+  assert.equal(byId(s, 'n6').ornament, undefined)
+  ed.noteToRest(s, 'n9')
+  assert.deepEqual([byId(s, 'n9').tremolo, byId(s, 'n10').tremolo], [undefined, undefined])
+  const t = marks()
+  ed.deleteNote(t, 'n10')
+  assert.equal(byId(t, 'n9').tremolo, undefined)
+})
+
+test('grace notes: selected, changed and deleted like notes, and never added', () => {
+  const s = marks()
+  const grace = byId(s, 'n2')
+  assert.equal(grace.grace, true)
+  ed.stepPitch(s, 'n2', 1)
+  assert.equal(name(byId(s, 'n2')), 'E5')
+  ed.setAccidental(s, 'n2', 'sharp')
+  assert.equal(name(byId(s, 'n2')), 'E#5')
+  assert.throws(() => ed.insertNote(s, 'n2', 'after', 'note'), ed.EditError) // nothing is inserted next to one
+  assert.throws(() => ed.setDuration(s, 'n2', { type: 'quarter', dots: 0, triplet: false }), ed.EditError)
+  // Inserting next to an ordinary note never makes a grace note.
+  const fresh = ed.insertNote(s, 'n1', 'after', 'note')
+  assert.equal(byId(s, fresh).grace, undefined)
+  // Deleted as a note; the selection moves on.
+  assert.equal(ed.deleteNote(s, 'n2'), 'n3')
+  assert.equal(notes(s).find((n) => n.id === 'n2'), undefined)
+})
+
+test('multi-measure rest: the editor draws every bar, and a note put into the run ends it for practice too', async () => {
+  const s = marks()
+  const runBars = [7, 8, 9, 10]
+  assert.equal(s.measures[7]!.multiRest, 4)
+  const rests = runBars.map((b) => notesOf(s.measures[b]!)[0]!.id)
+  // Fix a bar inside a long rest: the editor's drawing has the four bars, each with its whole-bar rest.
+  const editor = serializeMusicXml(s, { multiRests: 'expand' })
+  assert.ok(!editor.includes('<multiple-rest>'))
+  assert.equal(editor.match(/<rest measure="yes"\/>/g)?.length, 4)
+  assert.ok(serializeMusicXml(s).includes('<multiple-rest>4</multiple-rest>'), 'practice and the stored file keep the run')
+  // An edit elsewhere keeps the run.
+  const elsewhere = edited(s, (sc) => ed.stepPitch(sc, 'n3', 1))
+  assert.equal(elsewhere.after.measures[7]!.multiRest, 4)
+  // A note put into the third bar of the run: the run goes, in the session's score and in what is saved.
+  const put = edited(s, (sc) => ed.restToNote(sc, rests[2]!))
+  assert.equal(put.after.measures[7]!.multiRest, undefined)
+  const saved = serializeMusicXml(parseMusicXml(serializeMusicXml(put.after)))
+  assert.ok(!saved.includes('<multiple-rest>'))
+  const [svg] = await renderScore(put.after, { width: 900 })
+  assert.equal(svg!.match(/class="measure"/g)?.length, 12, 'bars 8 to 11 are drawn bar by bar')
+  assert.ok(!svg!.includes('class="multiRest"'))
+  // Undo gives the run back.
+  assert.ok(put.session.undo())
+  assert.equal(put.session.score.measures[7]!.multiRest, 4)
+  assert.deepEqual(put.session.score, put.before)
+  // Anything else in a bar of the run ends it too: a fermata on the first rest, a note added after the last.
+  assert.equal(edited(s, (sc) => ed.toggleFermata(sc, rests[0]!)).after.measures[7]!.multiRest, undefined)
+  assert.equal(edited(s, (sc) => ed.insertNote(sc, rests[3]!, 'after', 'note')).after.measures[7]!.multiRest, undefined)
+  // An edit that fails changes nothing, the run included.
+  const session = new EditSession(s)
+  assert.throws(() => session.apply((sc) => ed.toggleTremolo(sc, rests[1]!)), ed.EditError)
+  assert.equal(session.score.measures[7]!.multiRest, 4)
 })

@@ -2,12 +2,13 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { SvgTree } from '../src/core/score/elements.ts'
 import { lineOfBar, linesOf } from '../src/core/score/lines.ts'
+import { drawnBars } from '../src/core/score/noteMap.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { renderScore } from '../src/core/score/render.ts'
 import { parseXml } from '../src/core/score/xml.ts'
 import type { XmlElement } from '../src/core/score/xml.ts'
 import { PRACTICE_EXERCISE } from './fixtures/make-practice-exercise.ts'
-import { read } from './helpers.ts'
+import { HOMR_MARKS_FIXTURE, read } from './helpers.ts'
 
 // The lines of a drawn score (change simplify-editor-and-name-new-pieces, task 2.1).
 
@@ -52,5 +53,35 @@ test('lines: a system without bars is left out, and several pages count on', () 
     { firstBar: 0, lastBar: 1 },
     { firstBar: 2, lastBar: 4 },
     { firstBar: 5, lastBar: 5 },
+  ])
+})
+
+// A collapsed multi-measure rest is one drawn measure for several bars (change more-marks, task 2.2).
+
+test('lines: a collapsed run counts for all its bars, so the bar after it is on the right line', async () => {
+  const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
+  const [svg] = await renderScore(score, { width: 360, multiRests: 'collapse' })
+  const root = parseXml(svg!)
+  const bars = drawnBars(score, 'collapse')
+  const lines = linesOf(root, xmlTree, bars)
+  assert.equal(lines[0]!.firstBar, 0)
+  assert.equal(lines.at(-1)!.lastBar, 11, 'the 12 bars, though 9 measures are drawn')
+  for (const [index, line] of lines.entries()) if (index > 0) assert.equal(line.firstBar, lines[index - 1]!.lastBar + 1)
+  const runLine = lineOfBar(lines, 7)
+  for (const bar of [8, 9, 10]) assert.equal(lineOfBar(lines, bar), runLine, `bar ${bar + 1} is on the line of the symbol`)
+  // The same drawing counted without the table reads 9 bars: the bar after the run would be taken for bar 9.
+  assert.equal(linesOf(root, xmlTree).at(-1)!.lastBar, 8)
+  // Expanded: the identity.
+  const [expanded] = await renderScore(score, { width: 360, multiRests: 'expand' })
+  assert.equal(linesOf(parseXml(expanded!), xmlTree, drawnBars(score, 'expand')).at(-1)!.lastBar, 11)
+})
+
+test('lines: a synthetic drawing with a measure that holds three bars', () => {
+  const node = (cls: string, ...children: XmlElement[]): XmlElement => ({ name: 'g', attrs: { class: cls }, children, text: '' })
+  const root = node('root', node('system', node('measure'), node('measure')), node('system', node('measure')))
+  const bars = { barsOf: [{ first: 0, count: 1 }, { first: 1, count: 3 }, { first: 4, count: 1 }] }
+  assert.deepEqual(linesOf(root, xmlTree, bars), [
+    { firstBar: 0, lastBar: 3 },
+    { firstBar: 4, lastBar: 4 },
   ])
 })

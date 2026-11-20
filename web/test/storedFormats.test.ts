@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_PRACTICE, PIECE_FORMAT, createLibrary } from '../src/app/library.ts'
 import { DEFAULT_SETTINGS, loadSettings } from '../src/app/settings.ts'
-import { isDirection } from '../src/core/score/model.ts'
+import { isDirection, isNote } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
 import type { FakeFiles } from '../src/platform/fake/index.ts'
@@ -167,4 +167,20 @@ test('stored formats: a piece saved before dynamics, tempo marks and words had i
   const saved = serializeMusicXml(score)
   assert.equal([...saved.matchAll(/<direction id="/g)].length, items.length)
   assert.deepEqual(parseMusicXml(saved).measures.flatMap((m) => m.items.filter(isDirection).map((i) => i.id)), ids)
+})
+
+test('stored formats: a piece saved before change more-marks loads unchanged, with the marks it had (task 1.4)', async () => {
+  const files = openStore('v2-before-more-marks')
+  const library = createLibrary(files)
+  const { musicxml } = await library.load('00000000-0000-4000-8000-000000000004')
+  const score = parseMusicXml(musicxml)
+  const notes = score.measures.flatMap((m) => m.items.filter(isNote))
+  assert.equal(notes.filter((n) => n.accent).length, 1, 'one accent')
+  assert.equal(notes.filter((n) => n.tenuto).length, 1, 'one tenuto')
+  assert.equal(notes.filter((n) => n.breath).length, 1, 'one breath mark')
+  assert.equal(notes.filter((n) => n.fermata).length, 1, 'one fermata')
+  assert.equal(notes.filter((n) => n.grace).length, 1, 'one grace note')
+  assert.equal(score.measures.filter((m) => m.multiRest !== undefined).length, 0, 'no multi-measure rest')
+  // Saving it again with the current code writes the same file: nothing is added, nothing is lost.
+  assert.equal(serializeMusicXml(score), musicxml)
 })

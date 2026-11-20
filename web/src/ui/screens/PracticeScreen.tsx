@@ -138,6 +138,7 @@ function Practising({ opened }: { opened: Opened }) {
       <div class="practice-score">
         <ScoreIsland
           label={t('practice.score')}
+          multiRests="collapse"
           score={session.score}
           bar={session.bar}
           following={session.following}

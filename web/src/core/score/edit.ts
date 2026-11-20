@@ -213,10 +213,12 @@ export function toggleStaccato(score: Score, id: string): void {
   else note.staccato = true
 }
 
-/** Tenuto and accent belong to notes; tapping the active mark removes it. */
-function toggleArticulation(score: Score, id: string, mark: 'tenuto' | 'accent'): void {
+const MARK_NAMES = { tenuto: 'a tenuto', accent: 'an accent', strongAccent: 'a strong accent', staccatissimo: 'a staccatissimo' } as const
+
+/** Tenuto, accent, strong accent and staccatissimo belong to notes; tapping the active mark removes it. */
+function toggleArticulation(score: Score, id: string, mark: keyof typeof MARK_NAMES): void {
   const { note } = locate(score, id)
-  if (note.rest) throw new EditError(`A rest cannot have a${mark === 'accent' ? 'n' : ''} ${mark}`)
+  if (note.rest) throw new EditError(`A rest cannot have ${MARK_NAMES[mark]}`)
   if (note[mark]) delete note[mark]
   else note[mark] = true
 }
@@ -227,6 +229,71 @@ export function toggleTenuto(score: Score, id: string): void {
 
 export function toggleAccent(score: Score, id: string): void {
   toggleArticulation(score, id, 'accent')
+}
+
+export function toggleStrongAccent(score: Score, id: string): void {
+  toggleArticulation(score, id, 'strongAccent')
+}
+
+export function toggleStaccatissimo(score: Score, id: string): void {
+  toggleArticulation(score, id, 'staccatissimo')
+}
+
+/**
+ * Sets the ornament of a note; a note has at most one, so a trill, turn or mordent replaces the others,
+ * and choosing the one it has takes it off (change more-marks, D4).
+ */
+export function toggleOrnament(score: Score, id: string, ornament: NonNullable<Note['ornament']>): void {
+  const { note } = locate(score, id)
+  if (note.rest) throw new EditError(`A rest cannot have a ${ornament}`)
+  if (note.ornament === ornament) delete note.ornament
+  else note.ornament = ornament
+}
+
+/** The other note of a two-note tremolo that `id` belongs to: the stop after a start, the start before a stop. */
+function tremoloPartner(score: Score, id: string): Note | undefined {
+  const notes = allNotes(score).map((l) => l.note)
+  const i = notes.findIndex((n) => n.id === id)
+  const kind = notes[i]?.tremolo?.kind
+  if (kind === 'start') {
+    const next = notes[i + 1]
+    return next?.tremolo?.kind === 'stop' ? next : undefined
+  }
+  if (kind === 'stop') {
+    const prev = notes[i - 1]
+    return prev?.tremolo?.kind === 'start' ? prev : undefined
+  }
+  return undefined
+}
+
+/** Takes the tremolo off a note, and off the other note of a two-note tremolo. */
+function removeTremolo(score: Score, id: string): void {
+  const partner = tremoloPartner(score, id)
+  if (partner) delete partner.tremolo
+  delete locate(score, id).note.tremolo
+}
+
+/** A single tremolo with 3 strokes, on or off. A note of a two-note tremolo takes it off both notes. */
+export function toggleTremolo(score: Score, id: string): void {
+  const { note } = locate(score, id)
+  if (note.rest) throw new EditError('A rest cannot have a tremolo')
+  if (note.tremolo) removeTremolo(score, id)
+  else note.tremolo = { kind: 'single', strokes: 3 }
+}
+
+/** The first note of the chord that `id` is in, and whether it is in a chord at all (two or more notes). */
+export function chordOf(score: Score, id: string): { first: Note; inChord: boolean } {
+  const { measure, at } = locate(score, id)
+  const [a, b] = chordSpan(measure.items, at)
+  return { first: measure.items[a] as Note, inChord: b > a }
+}
+
+/** An arpeggio belongs to a chord and sits on its first note; the selected note may be any of the chord's. */
+export function toggleArpeggio(score: Score, id: string): void {
+  const { first, inChord } = chordOf(score, id)
+  if (!inChord || first.rest) throw new EditError('An arpeggio needs a chord')
+  if (first.arpeggio) delete first.arpeggio
+  else first.arpeggio = true
 }
 
 /** A fermata can sit on a note or on a rest. */
@@ -451,6 +518,7 @@ function dropSlursAndTies(score: Score, note: Note): void {
  */
 export function deleteNote(score: Score, id: string): string | undefined {
   dropSlursAndTies(score, locate(score, id).note)
+  removeTremolo(score, id)
   // A hairpin item sits before its first note, so look the note up again once they are gone.
   for (const m of score.measures) m.items = m.items.filter((i) => !(isWedge(i) && (i.start === id || i.stop === id)))
   const { note, measure, barIndex, at } = locate(score, id)
@@ -459,7 +527,16 @@ export function deleteNote(score: Score, id: string): string | undefined {
   measure.items.splice(at, 1)
   // A chord member left behind by its base takes over as the note.
   const after = measure.items[at]
-  if (!note.chord && after && isNote(after) && after.chord) delete after.chord
+  if (!note.chord && after && isNote(after) && after.chord) {
+    delete after.chord
+    // The chord's arpeggio moves to its new first note, unless that leaves one note.
+    const more = measure.items[at + 1]
+    if (note.arpeggio && more && isNote(more) && more.chord) after.arpeggio = true
+  } else if (note.chord) {
+    // A chord down to one note has no arpeggio.
+    const [a, b] = chordSpan(measure.items, at - 1)
+    if (a === b) delete (measure.items[a] as Note).arpeggio
+  }
   normaliseTuplets(measure)
   resolveAlters(score, barIndex, barIndex)
   return (next ?? prev)?.id
@@ -521,6 +598,12 @@ export function noteToRest(score: Score, id: string): void {
   delete note.tenuto
   delete note.accent
   delete note.breath
+  delete note.strongAccent
+  delete note.staccatissimo
+  delete note.caesura
+  delete note.ornament
+  delete note.arpeggio
+  removeTremolo(score, id)
   note.rest = true
   // Later notes in the bar (and a note tied across the barline) lose what they took from this one.
   resolveAlters(score, barIndex, barIndex + 1)
@@ -884,7 +967,8 @@ export function deleteElement(score: Score, ref: ElementRef): void {
     case 'articulation': {
       const { note } = locate(score, ref.noteId)
       if (!note[ref.mark]) return gone()
-      delete note[ref.mark]
+      if (ref.mark === 'tremolo') removeTremolo(score, ref.noteId)
+      else delete note[ref.mark]
       return
     }
   }

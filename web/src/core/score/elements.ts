@@ -1,5 +1,6 @@
 import type { Clef, Measure, Note, Score } from './model.ts'
 import { isDirection, isNote, isWedge } from './model.ts'
+import type { DrawnBars } from './noteMap.ts'
 
 /*
  * The elements of a score other than notes and rests, as the editor selects them (change
@@ -16,9 +17,13 @@ import { isDirection, isNote, isWedge } from './model.ts'
  * - Dynamics, tempo marks and words are drawn per bar, in the order of the source, as `g.dynam`,
  *   `g.tempo` (a tempo mark with a metronome mark) and `g.dir` (words, and a tempo mark of words only).
  *   The nth of them in the nth bar is the nth such model item of that bar that is drawn.
- * - Staccato, tenuto and accent are a `g.artic` inside their note, told apart by their SMuFL glyph.
- *   Fermatas and breath marks are drawn per bar, after the notes: the nth `g.fermata` of a bar is the
- *   fermata of the nth note of that bar that has one, and likewise for `g.breath`.
+ * - Staccato, tenuto, accent, strong accent and staccatissimo are a `g.artic` inside their note, told
+ *   apart by their SMuFL glyph. Fermatas, breath marks, caesuras, arpeggios and the ornaments (`g.trill`,
+ *   `g.turn`, `g.mordent`) are drawn per bar, after the notes: the nth `g.fermata` of a bar is the
+ *   fermata of the nth note (or chord) of that bar that has one, and likewise for the others, each by its
+ *   own class (change more-marks D4; Verovio keeps no id written on these elements). A tremolo (`g.bTrem`
+ *   on one note, `g.fTrem` around a pair) holds its notes, so its strokes, the group's children that are
+ *   not notes, are what maps, to the tremolo of the note (of the pair: its first note).
  * - A key, time signature or clef in a bar's staff before its notes is the one in force at that bar (the
  *   one at the start of a system, or a change). One after the notes is the courtesy one at the end of a
  *   system, so it is the one in force at the next bar. A clef change keeps its drawing id.
@@ -29,7 +34,18 @@ import { isDirection, isNote, isWedge } from './model.ts'
  * Bars in an `ElementRef` are indexes into `score.measures`, from 0; the editor shows them from 1.
  */
 
-export type ArticulationMark = 'staccato' | 'tenuto' | 'accent' | 'fermata' | 'breath'
+export type ArticulationMark =
+  | 'staccato'
+  | 'tenuto'
+  | 'accent'
+  | 'fermata'
+  | 'breath'
+  | 'strongAccent'
+  | 'staccatissimo'
+  | 'caesura'
+  | 'ornament'
+  | 'tremolo'
+  | 'arpeggio'
 
 export type ElementRef =
   /** The clef, key or time signature at that bar: a change, or the first one at bar 0. */
@@ -55,6 +71,8 @@ export interface ElementInfo {
   clef?: Clef
   /** For an articulation: which mark. */
   mark?: ArticulationMark
+  /** For an ornament: which one. */
+  ornament?: NonNullable<Note['ornament']>
   /** For a dynamic: the mark, e.g. "mf". */
   text?: string
   /** False for the first clef, key and time signature, which are changed instead (spec "Delete an element"). */
@@ -133,7 +151,8 @@ export function describeElement(score: Score, ref: ElementRef): ElementInfo | un
       return undefined
     case 'articulation': {
       const at = noteAt(score, ref.noteId)
-      return at?.note[ref.mark] ? { kind: 'articulation', bar: at.bar, mark: ref.mark, deletable: true } : undefined
+      if (!at?.note[ref.mark]) return undefined
+      return { kind: 'articulation', bar: at.bar, mark: ref.mark, ...(ref.mark === 'ornament' ? { ornament: at.note.ornament! } : {}), deletable: true }
     }
   }
 }
@@ -150,14 +169,33 @@ export interface SvgTree<N> {
 }
 
 /** SMuFL glyphs of the articulations Verovio draws as `g.artic` (above and below the note). */
-const ARTIC_GLYPHS: Readonly<Record<string, 'staccato' | 'tenuto' | 'accent'>> = {
+const ARTIC_GLYPHS: Readonly<Record<string, 'staccato' | 'tenuto' | 'accent' | 'strongAccent' | 'staccatissimo'>> = {
   E4A0: 'accent',
   E4A1: 'accent',
   E4A2: 'staccato',
   E4A3: 'staccato',
   E4A4: 'tenuto',
   E4A5: 'tenuto',
+  E4A8: 'staccatissimo',
+  E4A9: 'staccatissimo',
+  E4AC: 'strongAccent',
+  E4AD: 'strongAccent',
 }
+
+/**
+ * The marks Verovio draws per bar, after the notes, as a group of their own: the nth group of a class in a
+ * bar is the mark of the nth note (or chord) in that bar that has it. None of these keep an id written on
+ * the MusicXML element (change more-marks, task 4.1), so the order is all there is.
+ */
+const MEASURE_MARKS: readonly { cls: string; mark: ArticulationMark; has: (n: Note) => boolean }[] = [
+  { cls: 'fermata', mark: 'fermata', has: (n) => n.fermata === true },
+  { cls: 'breath', mark: 'breath', has: (n) => n.breath === true },
+  { cls: 'caesura', mark: 'caesura', has: (n) => n.caesura === true },
+  { cls: 'arpeg', mark: 'arpeggio', has: (n) => n.arpeggio === true },
+  { cls: 'trill', mark: 'ornament', has: (n) => n.ornament === 'trill' },
+  { cls: 'turn', mark: 'ornament', has: (n) => n.ornament === 'turn' },
+  { cls: 'mordent', mark: 'ornament', has: (n) => n.ornament === 'mordent' },
+]
 
 /** The kinds of the clef, key and time signature drawn in a staff, by class. */
 const SIGNATURE_CLASSES: Readonly<Record<string, 'clef' | 'key' | 'time'>> = { clef: 'clef', keySig: 'key', meterSig: 'time' }
@@ -194,7 +232,7 @@ function fromDrawingId(id: string): ElementRef | undefined {
  * A node maps to one element; one element can be drawn by several nodes (a slur over a system break, a
  * key at the start of each system).
  */
-export function mapElements<N>(root: N, tree: SvgTree<N>, score: Score): Map<N, ElementRef> {
+export function mapElements<N>(root: N, tree: SvgTree<N>, score: Score, bars?: Pick<DrawnBars, 'barsOf'>): Map<N, ElementRef> {
   const found = new Map<N, ElementRef>()
   const has = (node: N, cls: string): boolean => tree.classes(node).includes(cls)
   const notesById = new Map<string, Note>()
@@ -241,6 +279,17 @@ export function mapElements<N>(root: N, tree: SvgTree<N>, score: Score): Map<N, 
       else gather(node)
       if (ids.length > 0) own = ids
     }
+    if (has(node, 'bTrem') || has(node, 'fTrem')) {
+      // The strokes are the group's own children that are not notes; the notes inside stay notes. A pair is the tremolo of its first note.
+      const ids: string[] = []
+      const gather = (n: N): void => {
+        if (has(n, 'note') && notesById.has(tree.id(n))) ids.push(tree.id(n))
+        else for (const c of tree.children(n)) gather(c)
+      }
+      for (const c of tree.children(node)) gather(c)
+      const noteId = ids.find((id) => notesById.get(id)?.tremolo)
+      if (noteId) for (const c of tree.children(node)) if (!has(c, 'note')) found.set(c, { kind: 'articulation', noteId, mark: 'tremolo' })
+    }
     if (has(node, 'artic')) {
       const mark = ARTIC_GLYPHS[tree.glyph(node) ?? '']
       const noteId = mark ? (own.find((id) => notesById.get(id)?.[mark]) ?? own[0]) : undefined
@@ -255,13 +304,14 @@ export function mapElements<N>(root: N, tree: SvgTree<N>, score: Score): Map<N, 
     for (const c of tree.children(node)) visitLayer(c, own)
   }
 
-  measures.forEach((measureNode, bar) => {
+  measures.forEach((measureNode, measureIndex) => {
+    const bar = bars?.barsOf[measureIndex]?.first ?? measureIndex // the first bar a drawn measure holds (noteMap.ts `drawnBars`)
     const model = score.measures[bar]
     if (!model) return
     const directions = model.items.filter((i) => isDirection(i) && drawn(i))
     const drawnDirections: N[] = []
-    const fermatas: N[] = []
-    const breaths: N[] = []
+    /** The groups drawn per bar after the notes, by what they are: fermata, breath, caesura, arpeggio and the three ornaments. */
+    const drawnMarks = new Map<string, N[]>()
 
     for (const child of tree.children(measureNode)) {
       if (has(child, 'staff')) {
@@ -285,8 +335,10 @@ export function mapElements<N>(root: N, tree: SvgTree<N>, score: Score): Map<N, 
         continue
       }
       if (has(child, 'dynam') || has(child, 'tempo') || has(child, 'dir')) drawnDirections.push(child)
-      else if (has(child, 'fermata')) fermatas.push(child)
-      else if (has(child, 'breath')) breaths.push(child)
+      else if (MEASURE_MARKS.some((m) => has(child, m.cls))) {
+        const cls = MEASURE_MARKS.find((m) => has(child, m.cls))!.cls
+        drawnMarks.set(cls, [...(drawnMarks.get(cls) ?? []), child])
+      }
       else if (has(child, 'barLine')) found.set(child, { kind: 'barline', bar })
       else if (has(child, 'slur') || has(child, 'tie') || has(child, 'hairpin')) spanner(child)
     }
@@ -312,13 +364,15 @@ export function mapElements<N>(root: N, tree: SvgTree<N>, score: Score): Map<N, 
       }
     }
 
-    const notes = model.items.filter(isNote).filter((n) => !n.chord)
-    for (const [nodes, mark] of [
-      [fermatas, 'fermata'],
-      [breaths, 'breath'],
-    ] as const) {
-      const owners = notes.filter((n) => n[mark])
-      nodes.forEach((node, i) => {
+    // A chord is one unit: its mark is the first of its notes that has it (an arpeggio sits on the first note).
+    const units: Note[][] = []
+    for (const item of model.items.filter(isNote)) {
+      if (item.chord && units.length > 0) units[units.length - 1]!.push(item)
+      else units.push([item])
+    }
+    for (const { cls, mark, has: owns } of MEASURE_MARKS) {
+      const owners = units.map((u) => u.find(owns)).filter((n): n is Note => n !== undefined)
+      drawnMarks.get(cls)?.forEach((node, i) => {
         const note = owners[i]
         if (note) found.set(node, { kind: 'articulation', noteId: note.id, mark })
       })

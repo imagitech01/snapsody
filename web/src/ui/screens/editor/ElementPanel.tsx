@@ -38,9 +38,9 @@ export function ElementPanel({ session, run }: ElementPanelProps) {
 
   const name =
     info.kind === 'articulation'
-      ? info.mark === 'breath'
-        ? t('element.breath')
-        : t(`mark.${info.mark ?? 'staccato'}` as 'mark.staccato')
+      ? info.mark === 'breath' || info.mark === 'caesura'
+        ? t(`element.${info.mark}`)
+        : t(`mark.${info.mark === 'ornament' ? (info.ornament ?? 'trill') : (info.mark ?? 'staccato')}` as 'mark.staccato')
       : t(`element.${info.kind}` as 'element.clef')
   const detail = info.kind === 'clef' ? t(`element.clef.${choiceOf(info)}`) : info.kind === 'dynamic' ? info.text : undefined
   const title = detail ? t('element.titleDetail', { name, detail, bar }) : t('element.title', { name, bar })

@@ -1,4 +1,4 @@
-import { type NoteIndex, type NoteInfo, indexScore, unmappedNotes } from "../core/score/noteMap.ts";
+import { type DrawnBars, type MultiRests, type NoteIndex, type NoteInfo, drawnBars, indexScore, unmappedNotes } from "../core/score/noteMap.ts";
 import type { Score } from "../core/score/model.ts";
 import { renderScore } from "../core/score/render.ts";
 import { mapElements, sameElement } from "../core/score/elements.ts";
@@ -87,7 +87,7 @@ export interface ScoreView {
 
 const REACH_PX = 28;
 
-const NOTE_SELECTOR = "g.note, g.rest, g.mRest";
+const NOTE_SELECTOR = "g.note, g.rest, g.mRest, g.multiRest";
 
 /** How far from a thin or tiny element (a bar line, a staccato dot) a tap still counts as on it. */
 const ELEMENT_SLOP_PX = 6;
@@ -124,7 +124,10 @@ export function describeNote(info: NoteInfo): TappedNote {
 }
 
 /** The hooks a caller can give before the first layout, so it does not miss that one. */
-export type ScoreViewHooks = Partial<Pick<ScoreView, "onTap" | "onTapElement" | "onBeforeRender" | "onRender">>;
+export type ScoreViewHooks = Partial<Pick<ScoreView, "onTap" | "onTapElement" | "onBeforeRender" | "onRender">> & {
+  /** A multi-measure rest that still holds: one symbol (`collapse`, the default: practice) or bar by bar (`expand`: the editor). */
+  multiRests?: MultiRests;
+};
 
 /** Mounts the score in [container] and starts the first layout; `view.rendered` settles when it is drawn. */
 export async function showScore(container: HTMLElement, initial: Score): Promise<ScoreView> {
@@ -136,7 +139,10 @@ export async function showScore(container: HTMLElement, initial: Score): Promise
 /** Like `showScore`, but returns the view at once, with hooks in place before the first layout. */
 export function createScoreView(container: HTMLElement, initial: Score, hooks: ScoreViewHooks = {}): ScoreView {
   let score = initial;
+  const multiRests: MultiRests = hooks.multiRests ?? "collapse";
   let index: NoteIndex = indexScore(score);
+  /** Which drawn measure draws each bar (design D5); every bar looked up by its position goes through it. */
+  let bars: DrawnBars = drawnBars(score, multiRests);
   let renderedWidth = 0;
   let pendingWidth = 0;
   let generation = 0;
@@ -144,7 +150,7 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   /** What each drawn element is, rebuilt after every render: Verovio's own ids change each time. */
   let elementMap = new Map<Element, ElementRef>();
   let markedElement: ElementRef | undefined;
-  /** The lines of the drawing, and each bar's drawing in drawing order (the bars of the score, from 0). */
+  /** The lines of the drawing, and each drawn measure in drawing order (a collapsed multi-measure rest is one for all its bars: `bars`). */
   let lines: LineBars[] = [];
   let measureNodes: SVGGElement[] = [];
   const marks = new Map<string, Set<string>>();
@@ -154,8 +160,31 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   element.className = "score-view";
   container.replaceChildren(element);
 
+  /** The `g.multiRest` that draws a collapsed run, found by its first bar's drawn measure. */
+  const multiRestOf = (barIndex: number): SVGGElement[] => {
+    const group = measureNodes[bars.measureOf[barIndex] ?? -1]?.querySelector<SVGGElement>("g.multiRest");
+    return group ? [group] : [];
+  };
+
+  /** The note ids a drawn group stands for: its own, or every rest of the run for a `g.multiRest` (whose id is Verovio's). */
+  const idsOfGroup = (g: Element): string[] => {
+    if (!g.classList.contains("multiRest")) return [g.id];
+    const first = bars.barsOf[measureNodes.indexOf(g.closest<SVGGElement>("g.measure")!)];
+    if (!first) return [];
+    return [...index.entries()].filter(([, info]) => first.first <= info.barIndex && info.barIndex < first.first + first.count).map(([id]) => id);
+  };
+
+  /** The model note a drawn group is: the first rest of the run for a `g.multiRest`. */
+  const infoOfGroup = (g: Element): NoteInfo | undefined => {
+    if (!g.classList.contains("multiRest")) return index.get(g.id);
+    const id = firstOfBar[bars.barsOf[measureNodes.indexOf(g.closest<SVGGElement>("g.measure")!)]?.first ?? -1];
+    return id === undefined ? undefined : index.get(id);
+  };
+
   const elementsFor = (id: string): SVGGElement[] => {
-    if (!index.has(id)) return [];
+    const info = index.get(id);
+    if (!info) return [];
+    if (bars.runOf(info.barIndex)) return multiRestOf(info.barIndex);
     const escaped = CSS.escape(id);
     return [...element.querySelectorAll<SVGGElement>(`g.note[id="${escaped}"], g.rest[id="${escaped}"], g.mRest[id="${escaped}"]`)];
   };
@@ -169,7 +198,7 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     const groups = [...element.querySelectorAll<SVGGElement>(NOTE_SELECTOR)];
     for (const g of groups) g.classList.remove(...MARK_KINDS.map((k) => `mk-${k}`));
     for (const [kind, ids] of marks) {
-      for (const g of groups) if (ids.has(g.id)) g.classList.add(`mk-${kind}`);
+      for (const g of groups) if (idsOfGroup(g).some((id) => ids.has(id))) g.classList.add(`mk-${kind}`);
     }
   };
 
@@ -186,7 +215,7 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     pendingWidth = width;
     const mine = ++generation;
     const started = performance.now();
-    const pages = await renderScore(score, { width });
+    const pages = await renderScore(score, { width, multiRests });
     if (mine !== generation) return;
     const ms = Math.round(performance.now() - started);
     view.onBeforeRender?.();
@@ -196,12 +225,12 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     lastRender = { ms, pages: pages.length, width };
     highlighted = [];
     applyMarks();
-    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, score) : new Map();
-    lines = linesOf<Element>(element, DOM_TREE);
+    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, score, bars) : new Map();
+    lines = linesOf<Element>(element, DOM_TREE, bars);
     measureNodes = [...element.querySelectorAll<SVGGElement>("g.measure")];
     applyElementMark();
     element.dataset.rendered = "true";
-    const missing = unmappedNotes(pages.join(""), index);
+    const missing = unmappedNotes(pages.join(""), index, bars);
     element.dataset.unmapped = String(missing.length);
     if (missing.length > 0) console.warn(`score view: ${missing.length} model notes have no rendered element`, missing);
     view.onRender?.();
@@ -210,13 +239,13 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   const noteAtPoint = (x: number, y: number): NoteInfo | undefined => {
     const direct = document.elementFromPoint(x, y)?.closest<SVGGElement>(NOTE_SELECTOR);
     if (direct && element.contains(direct)) {
-      const info = index.get(direct.id);
+      const info = infoOfGroup(direct);
       if (info) return info;
     }
     let best: NoteInfo | undefined;
     let bestDistance = REACH_PX;
     for (const g of element.querySelectorAll<SVGGElement>(NOTE_SELECTOR)) {
-      const info = index.get(g.id);
+      const info = infoOfGroup(g);
       if (!info) continue;
       const r = g.getBoundingClientRect();
       const dx = Math.max(r.left - x, 0, x - r.right);
@@ -297,11 +326,8 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     get lines() {
       return lines;
     },
-    lineElement: (barIndex) => measureNodes[barIndex]?.closest<SVGGElement>("g.system") ?? undefined,
-    barElement(barIndex) {
-      const id = firstOfBar[barIndex];
-      return id === undefined ? undefined : (elementsFor(id)[0]?.closest<SVGGElement>("g.measure") ?? undefined);
-    },
+    lineElement: (barIndex) => measureNodes[bars.measureOf[barIndex] ?? -1]?.closest<SVGGElement>("g.system") ?? undefined,
+    barElement: (barIndex) => measureNodes[bars.measureOf[barIndex] ?? -1],
     highlight(ids) {
       clearHighlight();
       highlighted = ids.flatMap(elementsFor);
@@ -327,6 +353,7 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     async setScore(next) {
       score = next;
       index = indexScore(score);
+      bars = drawnBars(score, multiRests);
       firstOfBar = firstNotes();
       await render(true);
     },

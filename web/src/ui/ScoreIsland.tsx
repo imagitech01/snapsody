@@ -40,6 +40,7 @@ export function ScoreIsland(props: ScoreIslandProps) {
       ...(props.onTapElement ? { onTapElement: (ref) => latest.current.onTapElement?.(ref) } : {}),
       ...(props.selectedElement ? { selectedElement: props.selectedElement } : {}),
       ...(props.line ? { line: props.line } : {}),
+      ...(props.multiRests ? { multiRests: props.multiRests } : {}),
       ...(props.onLines ? { onLines: (lines) => latest.current.onLines?.(lines) } : {}),
     })
     handle.current = island
@@ -47,7 +48,7 @@ export function ScoreIsland(props: ScoreIslandProps) {
       island.dispose()
       handle.current = undefined
     }
-  }, [props.bar, props.following, props.shownBar, props.playing, props.selected, props.flagged, props.flaggedBars, props.selectedElement, props.line])
+  }, [props.bar, props.following, props.shownBar, props.playing, props.selected, props.flagged, props.flaggedBars, props.selectedElement, props.line, props.multiRests])
 
   useEffect(() => {
     void handle.current?.setScore(props.score)

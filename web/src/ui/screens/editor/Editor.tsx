@@ -324,6 +324,7 @@ export function Editor({ session }: { session: EditorSession }) {
             <div class={shown ? 'editor-score editor-score--line' : 'editor-score'}>
               <ScoreIsland
                 label={t('editor.scoreLabel')}
+                multiRests="expand"
                 score={score}
                 bar={island.bar}
                 following={island.following}

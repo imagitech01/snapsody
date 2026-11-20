@@ -438,3 +438,121 @@ test('timeline swap: the notes to come use the new pitches at the times they alr
   assert.equal(r.scheduler.useTimeline(buildTimeline(other, ALTO_SAX)), false)
   assert.equal(r.scheduler.useTimeline(buildTimeline(scoreOf([{ body: n({ step: 'C', type: 'half' }) + n({}) + n({}) + n({}) }]), TENOR_SAX)), false)
 })
+
+// --- more-marks group 3: events that carry their own sounds (design D3) ---
+
+const gx = (step: string, octave = 5): string =>
+  `<note><grace/><pitch><step>${step}</step><octave>${octave}</octave></pitch><voice>1</voice><type>eighth</type><staff>1</staff></note>`
+/** The time a handle's sound has ended (a release starts a fade at `when` and takes `fade`). */
+const endOf = (rec: Recorded): number => rec.handle.releases.map((r) => r.when + r.fade).at(-1) ?? Number.NaN
+
+test('sounds: an event with three sounds gives three note-ons at the right beats and each ends at its length; the next note keeps its beat', () => {
+  const r = rig(n({ step: 'C' }) + n({ step: 'D' }))
+  const first = r.timeline.events[0]!
+  const s = (midi: number, off: number, len: number) => ({ midi, offset: frac(off, 8), length: frac(len, 8), gain: first.gain })
+  first.sounds = [s(60, 0, 4), s(64, 2, 4), s(67, 4, 4)]
+  r.scheduler.start()
+  r.run(2)
+  const [a, b, c, d] = r.output.notes
+  assert.equal(r.output.notes.length, 4)
+  assert.deepEqual([a, b, c].map((x) => x!.spec.midi), [[60], [64], [67]])
+  // 120 bpm: 0.5 s a beat, so 1/8 beat is 0.0625 s.
+  close(a!.spec.when, START)
+  close(b!.spec.when, START + 2 * 0.0625)
+  close(c!.spec.when, START + 4 * 0.0625)
+  close(endOf(a!), START + 4 * 0.0625)
+  close(endOf(b!), START + 6 * 0.0625)
+  close(endOf(c!), START + 8 * 0.0625)
+  close(d!.spec.when, START + 0.5, 'the next note is on its beat')
+})
+
+test('sounds: an event without sounds is played as before (all pitches in one note-on for its sounding length)', () => {
+  const r = rig(n({ step: 'C' }) + n({ step: 'D' }))
+  r.scheduler.start()
+  r.run(2)
+  assert.equal(r.output.notes.length, 2)
+  assert.equal(r.output.notes[0]!.spec.midi.length, 1)
+})
+
+test('grace notes: the note before gives up its time, the grace note ends on the beat and the note starts on it', () => {
+  const r = rig(n({ step: 'E', octave: 5 }) + gx('D') + n({ step: 'C', octave: 5 }))
+  r.scheduler.start()
+  r.run(2)
+  const [e, grace, c] = r.output.notes
+  assert.equal(r.output.notes.length, 3)
+  close(grace!.spec.when, START + 0.5 - 0.0625)
+  close(c!.spec.when, START + 0.5)
+  assert.ok(endOf(e!) <= grace!.spec.when + 1e-9, 'E5 is over when the grace note begins')
+  close(endOf(grace!), START + 0.5)
+})
+
+test('grace notes: on the first note of the piece with the count-in off, playback begins that much earlier', () => {
+  const r = rig(gx('D') + n({ step: 'C', octave: 5 }))
+  r.scheduler.start()
+  r.run(2)
+  const [grace, c] = r.output.notes
+  close(grace!.spec.when, START, 'the grace note is the first sound')
+  close(c!.spec.when, START + 0.0625)
+})
+
+test('grace notes: on the first note with the count-in on, they sound in the count-in\'s last beat', () => {
+  const r = rig(gx('D') + n({ step: 'C', octave: 5 }))
+  r.scheduler.start(0, { countIn: { clicks: 4, spacing: frac(1) } })
+  r.run(4)
+  const [grace, c] = r.output.notes
+  const lastClick = r.output.clicks.at(-1)!.when
+  close(lastClick, START + 1.5)
+  close(grace!.spec.when, START + 2 - 0.0625)
+  assert.ok(grace!.spec.when > lastClick, 'after the last click, within its beat')
+  close(c!.spec.when, START + 2, 'the note is on the beat after the count-in')
+})
+
+test('grace notes: at the first bar of a loop they sound before it on every pass, and nothing sounds over them', () => {
+  const r = rig(gx('D') + n({ step: 'C', octave: 5, type: 'whole' }), 120, [n({ step: 'E', type: 'whole' })])
+  const loop = loopSpanOf(r.timeline, { start: 0, end: 0 })!
+  r.scheduler.start(0, { loop })
+  r.run(5)
+  const notes = r.output.notes
+  // Pass 0: grace first (playback begins earlier), then the note. Pass 1 starts 2 s later; its grace sounds just before.
+  close(notes[0]!.spec.when, START)
+  close(notes[1]!.spec.when, START + 0.0625)
+  close(notes[2]!.spec.when, START + 0.0625 + 2 - 0.0625, 'the second pass\'s grace note is 1/8 beat before its start')
+  close(notes[3]!.spec.when, START + 0.0625 + 2)
+  assert.ok(endOf(notes[1]!) <= notes[2]!.spec.when + 1e-9, 'the note of the pass before is over when the grace note begins')
+})
+
+test('grace notes: at a loop start at 60 bpm, the next pass\'s grace note is on time although it begins before the pass is built', () => {
+  // 1/8 beat at 60 bpm is 0.125 s, more than the scheduler's lookahead.
+  const r = rig(gx('D') + n({ step: 'C', octave: 5, type: 'whole' }), 60, [n({ step: 'E', type: 'whole' })])
+  const loop = loopSpanOf(r.timeline, { start: 0, end: 0 })!
+  r.scheduler.start(0, { loop })
+  r.run(14)
+  const notes = r.output.notes
+  // Pass 0 begins 1/8 beat early; each pass is 4 s.
+  close(notes[0]!.spec.when, START)
+  close(notes[1]!.spec.when, START + 0.125)
+  close(notes[2]!.spec.when, START + 0.125 + 4 - 0.125, 'the grace note of pass 1')
+  close(notes[3]!.spec.when, START + 0.125 + 4)
+  close(notes[4]!.spec.when, START + 0.125 + 8 - 0.125, 'the grace note of pass 2')
+  close(notes[5]!.spec.when, START + 0.125 + 8)
+  assert.deepEqual(notes.slice(0, 6).map((x) => x.spec.midi[0]), [60, 58, 60, 58, 60, 58], 'one grace note per pass, none twice (tenor sax sounds a ninth lower)')
+})
+
+test('grace notes: at a tapped start they sound just before it', () => {
+  const r = rig(n({ step: 'C', type: 'whole' }), 120, [gx('D') + n({ step: 'C', octave: 5, type: 'whole' })])
+  r.scheduler.start(1)
+  r.run(3)
+  const [grace, c] = r.output.notes
+  assert.equal(r.output.notes.length, 2, 'nothing of the first bar sounds')
+  close(grace!.spec.when, START)
+  close(c!.spec.when, START + 0.0625)
+})
+
+test('sounds: the accent of an event with sounds belongs to the sound on the beat', () => {
+  const r = rig(gx('D') + n({ step: 'C', octave: 5, accent: true }))
+  r.scheduler.start()
+  r.run(2)
+  const [grace, c] = r.output.notes
+  assert.equal(grace!.spec.accent, undefined)
+  assert.ok(c!.spec.accent && c!.spec.accent.gain > c!.spec.gain)
+})

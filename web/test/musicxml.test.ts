@@ -5,7 +5,8 @@ import { isDirection, isNote, isWedge, notesOf } from '../src/core/score/model.t
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { eq, frac } from '../src/core/score/rational.ts'
 import { barLength } from '../src/core/score/repairs.ts'
-import { COMMITTED_FIXTURE, LOCAL_PAGE, read, skipUnless } from './helpers.ts'
+import { multiRestHolds, multiRestRuns } from '../src/core/score/model.ts'
+import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, LOCAL_PAGE, read, skipUnless } from './helpers.ts'
 
 function measure(m: Measure[], i: number): Measure {
   const x = m[i]
@@ -327,4 +328,178 @@ test('musicxml: one direction with several items gives each its own id, and a di
   assert.deepEqual(noteIds, ['b', 'c'], 'note ids are untouched')
   const all = [...ids, ...noteIds]
   assert.equal(new Set(all).size, all.length, `every id is unique: ${all.join(', ')}`)
+})
+
+// ---- more marks (change more-marks, design D1 and D2) ----
+
+/** The written XML without its indentation, to match elements next to each other. */
+const compact = (xml: string): string => xml.replace(/>\s+</g, '><')
+const marksScore = (warnings: string[] = []) => parseMusicXml(read(HOMR_MARKS_FIXTURE), warnings)
+/** The `i`th note item of bar number `bar` (grace notes and chord members included). */
+const inBar = (score: ReturnType<typeof marksScore>, bar: number, i: number): Note => nth(measure(score.measures, bar - 1), i)
+
+test('marks: every mark homr writes lands on its note', () => {
+  const warnings: string[] = []
+  const s = marksScore(warnings)
+  assert.equal(s.measures.length, 12)
+  assert.equal(inBar(s, 1, 0).ornament, 'mordent', 'a mordent written among the articulations')
+  assert.equal(inBar(s, 1, 1).grace, true)
+  assert.equal(inBar(s, 1, 2).grace, undefined)
+  assert.equal(inBar(s, 1, 3).strongAccent, true)
+  assert.equal(inBar(s, 1, 4).staccatissimo, true)
+  assert.equal(inBar(s, 2, 0).ornament, 'trill')
+  assert.equal(inBar(s, 2, 1).ornament, 'turn', 'an inverted turn is read as a turn')
+  assert.equal(inBar(s, 2, 2).ornament, 'trill')
+  assert.deepEqual(inBar(s, 3, 0).tremolo, { kind: 'start', strokes: 3 })
+  assert.deepEqual(inBar(s, 3, 1).tremolo, { kind: 'stop', strokes: 3 })
+  // a chord arpeggiated on its middle note: kept on the first note of the chord only
+  assert.equal(inBar(s, 5, 0).arpeggio, true)
+  assert.equal(inBar(s, 5, 1).arpeggio, undefined)
+  assert.equal(inBar(s, 5, 2).arpeggio, undefined)
+  assert.equal(inBar(s, 5, 3).arpeggio, undefined)
+  // a fermata on the top, non-first note of a chord stays on that note
+  assert.deepEqual([0, 1, 2, 3].map((i) => inBar(s, 6, i).fermata === true), [false, false, true, false])
+  assert.equal(measure(s.measures, 6).items.length, 4)
+  assert.equal(inBar(s, 7, 0).ornament, undefined, 'a doit is not kept')
+  assert.equal(inBar(s, 7, 0).caesura, undefined)
+  assert.equal(inBar(s, 7, 3).caesura, true, 'a caesura on the last note of bar 7')
+  assert.deepEqual(warnings.filter((w) => !/doit/.test(w)), [])
+})
+
+test('marks: tremolos pair by the rule: adjacent start and stop is a pair, anything else is single', () => {
+  const s = marksScore()
+  assert.deepEqual(inBar(s, 3, 0).tremolo, { kind: 'start', strokes: 3 })
+  assert.deepEqual(inBar(s, 3, 1).tremolo, { kind: 'stop', strokes: 3 })
+  // bar 4: a start on the first note and a stop on the third, with a note between them
+  assert.deepEqual(inBar(s, 4, 0).tremolo, { kind: 'single', strokes: 3 })
+  assert.equal(inBar(s, 4, 1).tremolo, undefined)
+  assert.deepEqual(inBar(s, 4, 2).tremolo, { kind: 'single', strokes: 3 })
+  // a start in one bar and a stop in the next are not a pair either
+  const across = parseMusicXml(
+    '<score-partwise><part-list><score-part id="P1"/></part-list><part id="P1">' +
+      '<measure number="1"><attributes><divisions>1</divisions><time><beats>1</beats><beat-type>4</beat-type></time></attributes>' +
+      '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type><notations><ornaments><tremolo type="start">2</tremolo></ornaments></notations></note></measure>' +
+      '<measure number="2"><note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type><notations><ornaments><tremolo type="stop">2</tremolo></ornaments></notations></note></measure>' +
+      '</part></score-partwise>',
+  )
+  assert.deepEqual(notesOf(across.measures[0]!)[0]!.tremolo, { kind: 'single', strokes: 2 })
+  assert.deepEqual(notesOf(across.measures[1]!)[0]!.tremolo, { kind: 'single', strokes: 2 })
+})
+
+test('marks: a doit is dropped with a warning, and a second ornament on a note is dropped with one', () => {
+  const warnings: string[] = []
+  marksScore(warnings)
+  assert.deepEqual(warnings.filter((w) => /doit/.test(w)).length, 1)
+  assert.match(warnings.find((w) => /doit/.test(w)) ?? '', /^Measure 7: /)
+  const two: string[] = []
+  const s = parseMusicXml(bars(q('a', '<ornaments><trill-mark/><turn/></ornaments>')), two)
+  assert.equal(notesOf(s.measures[0]!)[0]!.ornament, 'trill', 'the first one read is kept')
+  assert.equal(two.length, 1)
+  assert.match(two[0]!, /more than one ornament/)
+})
+
+test('marks: valid MusicXML is read as well: a mordent and a turn under ornaments, a single tremolo', () => {
+  const s = parseMusicXml(bars(q('a', '<ornaments><mordent/></ornaments>') + q('b', '<ornaments><turn/><tremolo type="single">2</tremolo></ornaments>') + q('c', '<ornaments><tremolo type="single"/></ornaments>')))
+  const [a, b, c] = notesOf(s.measures[0]!)
+  assert.equal(a!.ornament, 'mordent')
+  assert.equal(b!.ornament, 'turn')
+  assert.deepEqual(b!.tremolo, { kind: 'single', strokes: 2 })
+  assert.deepEqual(c!.tremolo, { kind: 'single', strokes: 3 }, 'the strokes default to 3')
+})
+
+test('marks: a multi-measure rest is kept on its first bar as n bars of rest', () => {
+  const s = marksScore()
+  assert.equal(measure(s.measures, 7).multiRest, 4)
+  for (const bar of [9, 10, 11, 12]) assert.equal(measure(s.measures, bar - 1).multiRest, undefined)
+  for (const bar of [8, 9, 10, 11]) assert.deepEqual(notesOf(measure(s.measures, bar - 1)).map((n) => n.measureRest), [true])
+  assert.deepEqual(multiRestRuns(s), [{ start: 7, length: 4 }])
+  assert.equal(multiRestHolds(s, 7), true)
+  assert.equal(multiRestHolds(s, 8), false)
+})
+
+test('marks: reading, writing and reading again keeps every mark', () => {
+  const s = marksScore()
+  const written = compact(serializeMusicXml(s))
+  const again = parseMusicXml(written)
+  assert.deepEqual(again, s)
+  // valid MusicXML: the mordent sits under <ornaments>, never among the articulations
+  assert.match(written, /<ornaments><mordent\/><\/ornaments>/)
+  assert.ok(!/<articulations>[^]*?<mordent/.test(written))
+  assert.match(written, /<turn\/>/)
+  assert.ok(!/inverted-turn|doit/.test(written))
+  assert.match(written, /<ornaments><trill-mark\/><\/ornaments>/)
+  assert.match(written, /<tremolo type="start">3<\/tremolo>/)
+  assert.match(written, /<tremolo type="single">3<\/tremolo>/)
+  assert.match(written, /<articulations><staccatissimo\/><\/articulations>/)
+  assert.match(written, /<articulations><strong-accent\/><\/articulations>/)
+})
+
+test('marks: a caesura is written under articulations and read back', () => {
+  const s = parseMusicXml(bars(q('a', '<articulations><caesura/></articulations>')))
+  const written = compact(serializeMusicXml(s))
+  assert.match(written, /<articulations><caesura\/><\/articulations>/)
+  assert.equal(notesOf(parseMusicXml(written).measures[0]!)[0]!.caesura, true)
+})
+
+test('marks: an arpeggio is written on every note of its chord and on no other', () => {
+  const written = compact(serializeMusicXml(marksScore()))
+  const bar5 = /<measure number="5">([^]*?)<\/measure>/.exec(written)![1]!
+  assert.equal(bar5.match(/<arpeggiate\/>/g)!.length, 3, 'on the three chord notes')
+  assert.equal(bar5.match(/<note /g)!.length, 4)
+  assert.equal(written.match(/<arpeggiate\/>/g)!.length, 3)
+  assert.equal(notesOf(parseMusicXml(written).measures[4]!).filter((n) => n.arpeggio).length, 1)
+})
+
+test('marks: a multi-measure rest is written as <multiple-rest> in the first bar, last in its attributes', () => {
+  const written = compact(serializeMusicXml(marksScore()))
+  assert.equal(written.match(/<multiple-rest>/g)!.length, 1)
+  const bar8 = /<measure number="8">([^]*?)<\/measure>/.exec(written)![1]!
+  assert.match(bar8, /^<attributes><measure-style><multiple-rest>4<\/multiple-rest><\/measure-style><\/attributes>/)
+  // the bars stay: 4 explicit whole-bar rests
+  assert.equal(written.match(/<rest measure="yes"\/>/g)!.length, 4)
+  assert.equal(parseMusicXml(written).measures[7]!.multiRest, 4)
+})
+
+test('marks: a run with a note in it is written without <multiple-rest>, and keeps multiRest in the model', () => {
+  const s = marksScore()
+  const bar10 = measure(s.measures, 9)
+  bar10.items = [{ ...nth(measure(s.measures, 6), 0), id: 'extra' }]
+  assert.deepEqual(multiRestRuns(s), [])
+  assert.equal(multiRestHolds(s, 7), false)
+  const written = serializeMusicXml(s)
+  assert.ok(!/multiple-rest/.test(written))
+  assert.equal(parseMusicXml(written).measures[7]!.multiRest, undefined, 'the file no longer says it')
+  assert.equal(s.measures[7]!.multiRest, 4, 'the model is not changed by writing')
+})
+
+test('marks: any other item in a run breaks it: a barline, a direction, a clef, a second note, a fermata on the rest', () => {
+  const broken = (change: (s: ReturnType<typeof marksScore>) => void): number => {
+    const s = marksScore()
+    change(s)
+    return multiRestRuns(s).length
+  }
+  assert.equal(broken(() => {}), 1)
+  assert.equal(broken((s) => { s.measures[9]!.rightBarline = { style: 'light-light' } }), 0)
+  assert.equal(broken((s) => { s.measures[8]!.leftBarline = { repeat: 'forward' } }), 0)
+  assert.equal(broken((s) => { s.measures[10]!.key = { fifths: 2 } }), 0)
+  assert.equal(broken((s) => { s.measures[10]!.time = { beats: 3, beatType: 4 } }), 0)
+  assert.equal(broken((s) => { s.measures[9]!.items.unshift({ kind: 'dynamic', id: 'dx', mark: 'f' }) }), 0)
+  assert.equal(broken((s) => { (s.measures[9]!.items[0] as Note).fermata = true }), 0)
+  assert.equal(broken((s) => { (s.measures[9]!.items[0] as Note).measureRest = false }), 0)
+  assert.equal(broken((s) => { s.measures[7]!.multiRest = 5 }), 0, 'a run that is longer than its rests')
+  assert.equal(broken((s) => { s.measures[7]!.multiRest = 1 }), 0, 'one bar is not a multi-measure rest')
+
+  // A clef, key or time on the run's first bar is drawn before the symbol: the run still holds.
+  assert.equal(broken((s) => { s.measures[7]!.clef = { sign: 'F', line: 4 }; s.measures[7]!.key = { fifths: 2 }; s.measures[7]!.time = { beats: 3, beatType: 4 } }), 1)
+})
+
+test('marks: expand never writes <multiple-rest>, and writing with it does not change the model', () => {
+  const s = marksScore()
+  const before = JSON.stringify(s)
+  const written = compact(serializeMusicXml(s, { multiRests: 'expand' }))
+  assert.ok(!/multiple-rest|measure-style/.test(written))
+  assert.equal(written.match(/<rest measure="yes"\/>/g)!.length, 4, 'every bar is still there')
+  assert.equal(JSON.stringify(s), before)
+  assert.match(compact(serializeMusicXml(s, { multiRests: 'collapse' })), /<multiple-rest>4</)
+  assert.match(compact(serializeMusicXml(s)), /<multiple-rest>4</, 'collapse is the default: saving keeps the run')
 })

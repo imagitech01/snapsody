@@ -5,11 +5,13 @@ import type { Instrument } from '../src/core/instruments/instruments.ts'
 import { stepPitch } from '../src/core/score/edit.ts'
 import { EditSession } from '../src/core/score/editSession.ts'
 import { notesOf } from '../src/core/score/model.ts'
+import { barLength } from '../src/core/score/repairs.ts'
+import { eq, frac } from '../src/core/score/rational.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import { computeWarnings } from '../src/core/score/warnings.ts'
-import { eighths, note, quarters, score } from './helpers.ts'
+import { HOMR_MARKS_FIXTURE, eighths, note, quarters, read, score } from './helpers.ts'
 
 // Warnings are computed from the score and the instrument in use, never stored (design D4).
 
@@ -95,4 +97,19 @@ test('warnings: time signature first, then bars and notes in score order', () =>
 
 test('warnings: an empty score has none', () => {
   assert.deepEqual(computeWarnings({ measures: [] }, TENOR_SAX), [])
+})
+
+test('warnings: the marks homr writes do not trip the bar check or the repairs (change more-marks)', () => {
+  // As homr writes them, the two notes of a tremolo pair carry their own full values, so the bar
+  // adds up as it is: no special rule is needed. Grace notes take no time, and the bars of a
+  // multi-measure rest are whole-bar rests.
+  const s = parseMusicXml(read(HOMR_MARKS_FIXTURE))
+  const tremoloBar = s.measures[2]!
+  assert.deepEqual(notesOf(tremoloBar).map((n) => n.tremolo?.kind), ['start', 'stop'])
+  assert.ok(eq(barLength(tremoloBar), frac(1)), 'the pair counts for both of its notes')
+  assert.ok(notesOf(s.measures[0]!).some((n) => n.grace))
+  assert.deepEqual(computeWarnings(s, PIANO), [])
+  const prepared = prepareRecognisedScore(read(HOMR_MARKS_FIXTURE))
+  assert.deepEqual(prepared.repairs, [])
+  assert.deepEqual(computeWarnings(parseMusicXml(prepared.musicxml), PIANO), [])
 })

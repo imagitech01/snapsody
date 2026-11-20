@@ -75,6 +75,21 @@ export interface Note {
   /** Held about twice its written length (`<fermata/>`); a rest can carry one too. */
   fermata?: boolean
   breath?: boolean
+  /** An even stronger attack than an accent (`<strong-accent/>`; change more-marks, design D1). */
+  strongAccent?: boolean
+  /** Shorter than staccato (`<staccatissimo/>`). */
+  staccatissimo?: boolean
+  /** A short break before the next note (`<caesura/>`). */
+  caesura?: boolean
+  /** At most one per note: a trill (`<trill-mark/>`), a turn (`<turn/>` or `<inverted-turn/>`) or a mordent. */
+  ornament?: 'trill' | 'turn' | 'mordent'
+  /**
+   * A tremolo (`<tremolo>`): `single` repeats the note; `start` and `stop` are the two notes of one
+   * alternating pair (adjacent in a bar). `strokes` is the number of beams across the stem.
+   */
+  tremolo?: { kind: 'single' | 'start' | 'stop'; strokes: number }
+  /** Rolled upwards (`<arpeggiate/>`); kept on the first note of the chord, written on every chord note. */
+  arpeggio?: boolean
 }
 
 /**
@@ -172,6 +187,12 @@ export interface Measure {
   leftBarline?: Barline
   rightBarline?: Barline
   newSystem?: boolean
+  /**
+   * On the first bar of a multi-measure rest: how many bars (this one included) were printed as one
+   * symbol. The bars stay as they are, one whole-bar rest each; whether the run still holds is
+   * `multiRestRuns`.
+   */
+  multiRest?: number
   items: MeasureItem[]
 }
 
@@ -207,4 +228,51 @@ export function freshDirectionId(score: Score, taken: ReadonlySet<string> = new 
 
 export function notesOf(measure: Measure): Note[] {
   return measure.items.filter(isNote)
+}
+
+/** A multi-measure rest that still holds: `length` bars from the bar at index `start`. */
+export interface MultiRestRun {
+  start: number
+  length: number
+}
+
+/**
+ * A bar that is nothing but one whole-bar rest: no barline, direction, other note or mark, and no clef,
+ * key or time, except on the first bar of the run (`first`), where they are drawn before the symbol.
+ */
+function isPlainRestBar(m: Measure, first: boolean): boolean {
+  if (!first && (m.clef || m.key || m.time)) return false
+  if (m.leftBarline || m.rightBarline) return false
+  const [only, ...more] = m.items
+  if (!only || more.length > 0 || !isNote(only)) return false
+  return only.rest === true && only.measureRest === true && !only.grace && !only.chord && !only.fermata
+}
+
+/**
+ * The multi-measure rests that still hold (change more-marks, design D2): a bar with `multiRest` n >= 2
+ * whose n bars, itself included, are all plain whole-bar rests (see `isPlainRestBar`; the first may carry a clef, key or time) and exist in the
+ * score. The one place that says it: the serializer writes `<multiple-rest>` for these and no others,
+ * and whatever maps bars to drawn measures or clears `multiRest` after an edit asks it too. Runs come
+ * in score order and never overlap; a `multiRest` inside a run that holds is ignored.
+ */
+export function multiRestRuns(score: Score): MultiRestRun[] {
+  const runs: MultiRestRun[] = []
+  let covered = 0
+  score.measures.forEach((m, index) => {
+    if (index < covered) return
+    const n = m.multiRest
+    if (n === undefined || n < 2 || index + n > score.measures.length) return
+    for (let k = 0; k < n; k++) {
+      const bar = score.measures[index + k]
+      if (!bar || !isPlainRestBar(bar, k === 0)) return
+    }
+    runs.push({ start: index, length: n })
+    covered = index + n
+  })
+  return runs
+}
+
+/** Whether the bar at `barIndex` starts a multi-measure rest that still holds. */
+export function multiRestHolds(score: Score, barIndex: number): boolean {
+  return multiRestRuns(score).some((r) => r.start === barIndex)
 }

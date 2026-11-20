@@ -7,7 +7,7 @@ import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { frac } from '../src/core/score/rational.ts'
 import { Scheduler } from '../src/core/playback/scheduler.ts'
 import type { NoteOnSpec, NoteOutput, TimerApi, VoiceHandle } from '../src/core/playback/scheduler.ts'
-import { ACCENT_DB, DYNAMIC_GAIN, MAX_ATTACK_GAIN, buildTimeline, expandMeasureOrder, loopSpanOf, midiOf, parseEndingNumbers } from '../src/core/playback/timeline.ts'
+import { ACCENT_DB, DYNAMIC_GAIN, MAX_ATTACK_GAIN, STRONG_ACCENT_DB, buildTimeline, expandMeasureOrder, loopSpanOf, midiOf, parseEndingNumbers } from '../src/core/playback/timeline.ts'
 import type { PlaybackEvent } from '../src/core/playback/timeline.ts'
 import { COMMITTED_FIXTURE, read } from './helpers.ts'
 import { barOf, dyn, n, scoreOf, scoreXml, tenorTimeline, wedge } from './playbackHelpers.ts'
@@ -717,4 +717,238 @@ test('loop rest: the count-in plays before the first pass only, and the position
   assert.equal(second.resting, undefined)
   assert.equal(second.loopPass, 1)
   assert.equal(second.event?.bar, '2', 'the second pass is in bar 2 again')
+})
+
+// --- more-marks group 3: ornaments, grace notes, chord marks, stronger and shorter marks (design D3) ---
+
+/** A note element with raw notations, optionally a chord member or a grace note (divisions 12). */
+function x(spec: { step: string; octave: number; type?: string; alter?: number; notations?: string; chord?: boolean; grace?: boolean }): string {
+  const type = spec.type ?? 'quarter'
+  const ticks = { whole: 48, half: 24, quarter: 12, eighth: 6 }[type] ?? 12
+  return (
+    `<note>${spec.grace ? '<grace/>' : ''}${spec.chord ? '<chord/>' : ''}<pitch><step>${spec.step}</step>${spec.alter ? `<alter>${spec.alter}</alter>` : ''}<octave>${spec.octave}</octave></pitch>` +
+    `${spec.grace ? '' : `<duration>${ticks}</duration>`}<voice>1</voice><type>${type}</type>` +
+    `${spec.notations ? `<notations>${spec.notations}</notations>` : ''}<staff>1</staff></note>`
+  )
+}
+const orn = (inner: string): string => `<ornaments>${inner}</ornaments>`
+const art = (inner: string): string => `<articulations>${inner}</articulations>`
+
+/** The timeline at concert pitch (no transposition), in a key. */
+function inKey(bars: string[], fifths = 0) {
+  const xml = scoreXml(bars.map((body) => ({ body }))).replace('<fifths>0</fifths>', `<fifths>${fifths}</fifths>`)
+  return buildTimeline(parseMusicXml(xml), { transpose: 0 })
+}
+const bt = (f: { n: number; d: number }): number => f.n / f.d
+const soundsOf = (e: PlaybackEvent) => {
+  assert.ok(e.sounds, 'the event carries sounds')
+  return e.sounds
+}
+const pitchesOf = (e: PlaybackEvent): number[] => soundsOf(e).map((s) => s.midi)
+
+test('ornaments: an A4 trill in G major alternates A4 and B4 from the written note, ends on it, and the next note is on its beat', () => {
+  const t = inKey([x({ step: 'A', octave: 4, notations: orn('<trill-mark/>') }) + x({ step: 'G', octave: 4 })], 1)
+  const e = ev(t.events, 0)
+  const midi = pitchesOf(e)
+  assert.equal(midi[0], 69)
+  assert.deepEqual([...new Set(midi)].sort(), [69, 71], 'A4 and B4 only')
+  midi.forEach((m, k) => assert.equal(m, k % 2 === 0 ? 69 : 71, `note ${k}`))
+  assert.equal(midi.at(-1), 69, 'ends on the main note')
+  const s = soundsOf(e)
+  assert.equal(bt(s[0]!.length), 1 / 8, 'ORNAMENT_NOTE')
+  const last = s.at(-1)!
+  assert.equal(bt(last.offset) + bt(last.length), 1, 'the trill fills the note')
+  assert.equal(bt(ev(t.events, 1).start), 1, 'the next note is on its beat')
+})
+
+test('ornaments: an E5 trill in G major alternates E5 and F sharp 5', () => {
+  const t = inKey([x({ step: 'E', octave: 5, notations: orn('<trill-mark/>') })], 1)
+  const midi = pitchesOf(ev(t.events, 0))
+  assert.deepEqual([...new Set(midi)].sort(), [76, 78])
+  assert.equal(midi[0], 76)
+})
+
+test('ornaments: a trill honours an accidental earlier in the bar (F natural, then E5 trill in G major: upper note F5)', () => {
+  const t = inKey([x({ step: 'F', octave: 5 }) + x({ step: 'E', octave: 5, notations: orn('<trill-mark/>') })], 1)
+  assert.deepEqual([...new Set(pitchesOf(ev(t.events, 1)))].sort(), [76, 77])
+})
+
+test('ornaments: a turn on a half note D5 in C major is E5, D5, C5, then D5 held', () => {
+  const t = inKey([x({ step: 'D', octave: 5, type: 'half', notations: orn('<turn/>') }) + x({ step: 'G', octave: 4, type: 'half' })])
+  const e = ev(t.events, 0)
+  assert.deepEqual(pitchesOf(e), [76, 74, 72, 74])
+  const s = soundsOf(e)
+  assert.deepEqual(s.map((k) => bt(k.offset)), [0, 1 / 8, 2 / 8, 3 / 8])
+  assert.deepEqual(s.slice(0, 3).map((k) => bt(k.length)), [1 / 8, 1 / 8, 1 / 8])
+  assert.equal(bt(s[3]!.offset) + bt(s[3]!.length), 2, 'D5 is held to the end of the half note')
+  assert.equal(bt(ev(t.events, 1).start), 2)
+})
+
+test('ornaments: a mordent on a quarter note G4 in C major is G4, F4, then G4 held', () => {
+  const t = inKey([x({ step: 'G', octave: 4, notations: orn('<mordent/>') }) + x({ step: 'A', octave: 4 })])
+  const e = ev(t.events, 0)
+  assert.deepEqual(pitchesOf(e), [67, 65, 67])
+  const s = soundsOf(e)
+  assert.deepEqual(s.map((k) => bt(k.offset)), [0, 1 / 8, 2 / 8])
+  assert.equal(bt(s[2]!.offset) + bt(s[2]!.length), 1)
+  assert.equal(bt(ev(t.events, 1).start), 1)
+})
+
+test('ornaments: the quick notes of a turn take at most a quarter of a short note each', () => {
+  const t = inKey([x({ step: 'D', octave: 5, type: 'eighth', notations: orn('<turn/>') }) + x({ step: 'D', octave: 5, type: 'eighth' })])
+  const s = soundsOf(ev(t.events, 0))
+  assert.equal(bt(s[0]!.length), 1 / 8, 'an eighth is half a beat: a quarter of it is 1/8')
+  const short = inKey([x({ step: 'D', octave: 5, type: 'eighth', notations: orn('<mordent/>') })])
+  assert.ok(soundsOf(ev(short.events, 0)).every((k) => bt(k.length) > 0))
+})
+
+test('ornaments: an ornament is not a note of its own: one event per written note, the cursor and bar span unchanged', () => {
+  const t = inKey([x({ step: 'A', octave: 4, notations: orn('<trill-mark/>') }) + x({ step: 'G', octave: 4, type: 'half' }) + x({ step: 'G', octave: 4 })])
+  assert.equal(t.events.length, 3)
+  assert.deepEqual(t.events.map((e) => bt(e.start)), [0, 1, 3])
+  assert.equal(t.bars[0]!.firstEvent, 0)
+  assert.equal(bt(t.bars[0]!.end), 4)
+  assert.equal(t.eventOfNote(ev(t.events, 0).noteIds[0]!), ev(t.events, 0))
+})
+
+test('tremolo: a two-note tremolo C5/E5 is one event over both notes, alternating for the pair\'s length', () => {
+  const pair = x({ step: 'C', octave: 5, type: 'half', notations: orn('<tremolo type="start">3</tremolo>') }) + x({ step: 'E', octave: 5, type: 'half', notations: orn('<tremolo type="stop">3</tremolo>') })
+  const t = inKey([pair, x({ step: 'G', octave: 4, type: 'whole' })])
+  assert.equal(t.events.length, 2, 'the pair is one event')
+  const e = ev(t.events, 0)
+  assert.equal(e.index, 0)
+  assert.equal(e.noteIds.length, 2)
+  assert.equal(bt(e.length), 4, 'the pair\'s combined value')
+  const s = soundsOf(e)
+  assert.equal(s.length, 32, 'thirty-second notes (1/8 beat) over four beats')
+  s.forEach((k, i) => {
+    assert.equal(k.midi, i % 2 === 0 ? 72 : 76)
+    assert.equal(bt(k.length), 1 / 8)
+  })
+  assert.equal(bt(ev(t.events, 1).start), 4, 'the next note is on its beat')
+  assert.equal(ev(t.events, 1).index, 1)
+  assert.equal(t.eventOfNote(e.noteIds[1]!), e, 'tapping the second note starts the pair')
+  assert.equal(t.bars[0]!.firstEvent, 0)
+  assert.equal(t.bars[1]!.firstEvent, 1)
+  assert.equal(bt(t.bars[0]!.end), 4)
+})
+
+test('tremolo: a single tremolo repeats the note over its value, in notes of 1/2^(strokes+2) of a whole note', () => {
+  const t = inKey([x({ step: 'C', octave: 5, notations: orn('<tremolo type="single">3</tremolo>') }) + x({ step: 'D', octave: 5, notations: orn('<tremolo type="single">2</tremolo>') })])
+  const a = soundsOf(ev(t.events, 0))
+  assert.equal(a.length, 8)
+  assert.ok(a.every((k) => k.midi === 72 && bt(k.length) === 1 / 8))
+  const b = soundsOf(ev(t.events, 1))
+  assert.equal(b.length, 4, 'two strokes: sixteenth notes')
+  assert.equal(bt(b[0]!.length), 1 / 4)
+})
+
+test('grace notes: a grace D5 before a quarter C5 on beat 2 ends exactly on beat 2, and C5 starts exactly on beat 2', () => {
+  const t = inKey([x({ step: 'E', octave: 5 }) + x({ step: 'D', octave: 5, grace: true }) + x({ step: 'C', octave: 5 }) + x({ step: 'G', octave: 4, type: 'half' })])
+  assert.equal(t.events.length, 3, 'a grace note has no event of its own')
+  const e = ev(t.events, 1)
+  assert.equal(bt(e.start), 1)
+  const [grace, main] = soundsOf(e)
+  assert.equal(grace!.midi, 74)
+  assert.equal(bt(grace!.offset), -1 / 8)
+  assert.equal(bt(grace!.length), 1 / 8)
+  assert.equal(bt(grace!.offset) + bt(grace!.length), 0, 'it ends on the beat')
+  assert.equal(main!.midi, 72)
+  assert.equal(bt(main!.offset), 0)
+  assert.equal(bt(main!.length), 1)
+  assert.equal(bt(ev(t.events, 0).sounding), 7 / 8, 'the time comes from the sound of the note before, which stays on the grid')
+  assert.equal(bt(ev(t.events, 0).length), 1)
+  assert.equal(bt(ev(t.events, 2).start), 2)
+})
+
+test('grace notes: several grace notes sound in order, each ending where the next begins, the last on the beat', () => {
+  const t = inKey([x({ step: 'E', octave: 5 }) + x({ step: 'D', octave: 5, grace: true }) + x({ step: 'E', octave: 5, grace: true }) + x({ step: 'C', octave: 5 })])
+  const s = soundsOf(ev(t.events, 1))
+  assert.deepEqual(s.slice(0, 2).map((k) => [k.midi, bt(k.offset)]), [[74, -2 / 8], [76, -1 / 8]])
+})
+
+test('grace notes: a short note before them gives up at most half its value', () => {
+  const t = inKey([x({ step: 'E', octave: 5, type: 'eighth' }) + x({ step: 'D', octave: 5, grace: true }) + x({ step: 'E', octave: 5, grace: true }) + x({ step: 'C', octave: 5, type: 'eighth' })])
+  const [g1, g2] = soundsOf(ev(t.events, 1))
+  assert.equal(bt(g1!.length), 1 / 8, 'half of the eighth (1/2 beat) shared by two graces is 1/8 each')
+  assert.equal(bt(g2!.offset) + bt(g2!.length), 0)
+  assert.ok(bt(ev(t.events, 0).sounding) <= 1 / 2 - 2 / 8 + 1e-12)
+})
+
+test('grace notes: the first note of the piece carries its grace sound before its start', () => {
+  const t = inKey([x({ step: 'D', octave: 5, grace: true }) + x({ step: 'C', octave: 5 })])
+  const s = soundsOf(ev(t.events, 0))
+  assert.equal(bt(s[0]!.offset), -1 / 8)
+  assert.equal(bt(ev(t.events, 0).start), 0)
+})
+
+test('chord marks: an arpeggio C4-E4-G4 has its lowest note on the beat, then E4, then G4, all held to the chord\'s end', () => {
+  const t = inKey([x({ step: 'C', octave: 4, notations: '<arpeggiate/>' }) + x({ step: 'E', octave: 4, chord: true }) + x({ step: 'G', octave: 4, chord: true }) + x({ step: 'A', octave: 4 })])
+  const e = ev(t.events, 0)
+  const s = soundsOf(e)
+  assert.deepEqual(s.map((k) => k.midi), [60, 64, 67])
+  assert.deepEqual(s.map((k) => bt(k.offset)), [0, 1 / 16, 2 / 16])
+  assert.ok(s.every((k) => bt(k.offset) + bt(k.length) === 1), 'all end with the chord')
+  assert.equal(bt(ev(t.events, 1).start), 1)
+})
+
+test('chord marks: a quarter-note chord with a fermata on its top note lasts two beats (two seconds at 60 bpm)', () => {
+  const t = inKey([x({ step: 'C', octave: 4 }) + x({ step: 'E', octave: 4, chord: true }) + x({ step: 'G', octave: 4, chord: true, notations: '<fermata/>' }) + x({ step: 'A', octave: 4 })])
+  const e = ev(t.events, 0)
+  assert.equal(bt(e.length), 2)
+  assert.equal(bt(e.sounding), 2)
+  assert.equal(bt(ev(t.events, 1).start), 2)
+  assert.equal(bt(e.length) * (60 / 60), 2, 'at 60 bpm a beat is a second')
+})
+
+test('strong accent: it starts louder than an accent at the same dynamic, under the same cap', () => {
+  const t = inKey([dyn('p') + x({ step: 'C', octave: 4, notations: art('<accent/>') }) + x({ step: 'C', octave: 4, notations: art('<strong-accent/>') }) + x({ step: 'C', octave: 4 })])
+  const [a, b, c] = t.events
+  assert.equal(a!.gain, b!.gain)
+  assert.ok(b!.attackGain > a!.attackGain, 'strong accent above accent')
+  assert.ok(a!.attackGain > c!.attackGain)
+  assert.ok(Math.abs(20 * Math.log10(b!.attackGain / b!.gain) - STRONG_ACCENT_DB) < 1e-9)
+  assert.equal(STRONG_ACCENT_DB, 7)
+  const loud = inKey([`${dyn('fff')}${x({ step: 'C', octave: 4, notations: art('<strong-accent/>') })}`])
+  assert.ok(ev(loud.events, 0).attackGain <= MAX_ATTACK_GAIN)
+})
+
+test('staccatissimo: it sounds a quarter of the value, shorter than staccato (a half), and tenuto does not cancel it', () => {
+  const t = inKey([x({ step: 'C', octave: 4, notations: art('<staccato/>') }) + x({ step: 'C', octave: 4, notations: art('<staccatissimo/>') }) + x({ step: 'C', octave: 4, notations: art('<staccatissimo/><tenuto/>') })])
+  assert.equal(bt(ev(t.events, 0).sounding), 1 / 2)
+  assert.equal(bt(ev(t.events, 1).sounding), 1 / 4)
+  assert.ok(bt(ev(t.events, 1).sounding) < bt(ev(t.events, 0).sounding))
+  assert.equal(bt(ev(t.events, 2).sounding), 1 / 4, 'tenuto does not cancel staccatissimo')
+  assert.equal(bt(ev(t.events, 1).length), 1)
+})
+
+test('caesura: it leaves a gap of 1/4 beat (a breath mark 1/8) and the next note is on its beat', () => {
+  const t = inKey([x({ step: 'C', octave: 4, notations: art('<caesura/>') }) + x({ step: 'D', octave: 4, notations: art('<breath-mark/>') }) + x({ step: 'E', octave: 4 })])
+  assert.equal(bt(ev(t.events, 0).sounding), 3 / 4)
+  assert.equal(bt(ev(t.events, 1).sounding), 7 / 8)
+  assert.equal(bt(ev(t.events, 1).start), 1)
+  assert.equal(bt(ev(t.events, 2).start), 2)
+})
+
+test('ornaments: a trill on the top note of a chord trills that note while the others are held (C4-E4 held, G4 trills with A4)', () => {
+  const t = inKey([x({ step: 'C', octave: 4, type: 'half' }) + x({ step: 'E', octave: 4, type: 'half', chord: true }) + x({ step: 'G', octave: 4, type: 'half', chord: true, notations: orn('<trill-mark/>') }) + x({ step: 'C', octave: 4, type: 'half' })])
+  const e = ev(t.events, 0)
+  const s = soundsOf(e)
+  const held = s.filter((x) => x.midi === 60 || x.midi === 64)
+  assert.equal(held.length, 2, 'C4 and E4 sound once each')
+  for (const h of held) {
+    assert.equal(bt(h.offset), 0)
+    assert.equal(bt(h.length), bt(e.sounding), 'held for the chord')
+  }
+  const trill = s.filter((x) => x.midi !== 60 && x.midi !== 64).map((x) => x.midi)
+  assert.deepEqual([...new Set(trill)].sort(), [67, 69], 'G4 and A4')
+  assert.equal(trill[0], 67)
+  assert.equal(trill.at(-1), 67)
+  assert.equal(bt(ev(t.events, 1).start), 2, 'the next note is on its beat')
+})
+
+test('ornaments: a mordent on the first note of a chord is played on it, the other note held', () => {
+  const t = inKey([x({ step: 'G', octave: 4, notations: orn('<mordent/>') }) + x({ step: 'B', octave: 4, chord: true }) + x({ step: 'C', octave: 4, type: 'half' }) + x({ step: 'C', octave: 4 })])
+  const s = soundsOf(ev(t.events, 0))
+  assert.deepEqual(s.map((x) => x.midi), [71, 67, 65, 67], 'B4 held, then G4 F4 G4')
 })

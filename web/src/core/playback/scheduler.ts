@@ -147,6 +147,8 @@ interface Action {
   beat: Frac
   kind: ActionKind
   event?: PlaybackEvent
+  /** On or off of one of the event's `sounds` (its index) instead of the event's `pitches`. */
+  sound?: number
   /** Click number, 0-based. */
   click?: number
   /** A metronome beat: the first of its bar. */
@@ -158,6 +160,13 @@ interface Action {
 const KIND_ORDER: Record<ActionKind, number> = { click: 0, tick: 0, off: 1, on: 2, wrap: 3, end: 4 }
 
 const num = (f: Frac): number => f.n / f.d
+
+/** How long before its start the first of an event's sounds begins (its grace notes), 0 when none does. */
+function leadOf(ev: PlaybackEvent): Frac {
+  let lead = ZERO
+  for (const s of ev.sounds ?? []) if (cmp(s.offset, sub(ZERO, lead)) < 0) lead = sub(ZERO, s.offset)
+  return lead
+}
 
 export interface Position {
   /** Beats from the start of the score (fractional). */
@@ -203,7 +212,7 @@ export class Scheduler {
   private countInSpec: CountIn | undefined
   private pass = 0
   /** Voices turned on in this run, by event index, with the time each one is over (Infinity while open). */
-  private voices = new Map<number, { handle: VoiceHandle; endsAt: number }>()
+  private voices = new Map<string, { handle: VoiceHandle; endsAt: number }>()
   /** The note turned on last, for slur joins. */
   private lastOn: { index: number; voice: { handle: VoiceHandle; endsAt: number } } | undefined
 
@@ -273,7 +282,11 @@ export class Scheduler {
     this.firstEvent = first
     this.firstBeat = firstStart
     this.anchorTime = this.clock.currentTime + (options.delay ?? this.startDelay)
-    this.anchorBeat = countIn ? sub(firstStart, mul(countIn.spacing, frac(countIn.clicks))) : firstStart
+    // Grace notes of the first event sound before it: in the last beat of the count-in, or else playback begins that much earlier.
+    const lead = leadOf(events[first]!)
+    const before = sub(firstStart, lead)
+    this.anchorBeat = countIn ? sub(firstStart, mul(countIn.spacing, frac(countIn.clicks))) : before
+    if (countIn && cmp(before, this.anchorBeat) < 0) this.anchorBeat = before
     this.pass = 0
     this.lastOn = undefined
     this.actions = this.buildPass(0)
@@ -403,13 +416,39 @@ export class Scheduler {
         : this.loopTicks
     for (const c of ticks) actions.push({ beat: add(c.start, offset), kind: 'tick', accent: c.accent })
     for (const c of loop?.restClicks ?? []) actions.push({ beat: add(add(loop!.end, c.offset), offset), kind: 'tick', accent: c.accent })
+    // In a loop the first event's grace notes sound at the end of the pass before, so nothing else may sound over them.
+    const latest = loop ? sub(add(loop.end, loop.rest ?? ZERO), leadOf(this.loopEvents[0]!)) : undefined
+    const noLater = (beat: Frac): Frac => (latest && cmp(beat, latest) > 0 ? latest : beat)
+    // The grace notes before a loop's first event belong to the pass before (see below), so a later pass leaves them out.
+    const loopFirst = loop ? this.loopEvents[0] : undefined
     played.forEach((ev, i) => {
       if (ev.rest) return
+      if (ev.sounds) {
+        // The event carries its own sounds: each is a note of its own, from its offset for its length.
+        ev.sounds.forEach((s, k) => {
+          if (pass > 0 && ev === loopFirst && s.offset.n < 0) return
+          const at = add(ev.start, s.offset)
+          actions.push({ beat: add(at, offset), kind: 'on', event: ev, sound: k })
+          actions.push({ beat: add(noLater(add(at, s.length)), offset), kind: 'off', event: ev, sound: k })
+        })
+        return
+      }
       actions.push({ beat: add(ev.start, offset), kind: 'on', event: ev })
       // A slurred note is not released when the next note takes it over; at the end of a pass nothing does.
       const taken = ev.legatoNext && played[i + 1]?.index === ev.index + 1
-      if (!taken) actions.push({ beat: add(add(ev.start, ev.sounding), offset), kind: 'off', event: ev })
+      if (!taken) actions.push({ beat: add(noLater(add(ev.start, ev.sounding)), offset), kind: 'off', event: ev })
     })
+    // The next pass's grace notes sound before its start, so they are scheduled with this pass: the next pass is only
+    // built once this one is handed out, which can be later than they begin (1/8 beat is more than the lookahead at 60 bpm).
+    if (loopFirst?.sounds) {
+      const next = add(offset, this.loopLength)
+      loopFirst.sounds.forEach((s, k) => {
+        if (s.offset.n >= 0) return
+        const at = add(loopFirst.start, s.offset)
+        actions.push({ beat: add(at, next), kind: 'on', event: loopFirst, sound: k })
+        actions.push({ beat: add(add(at, s.length), next), kind: 'off', event: loopFirst, sound: k })
+      })
+    }
     if (loop) actions.push({ beat: add(add(loop.end, loop.rest ?? ZERO), offset), kind: 'wrap' })
     else actions.push({ beat: this.timeline.end, kind: 'end' })
     actions.sort((a, b) => cmp(a.beat, b.beat) || KIND_ORDER[a.kind] - KIND_ORDER[b.kind])
@@ -478,6 +517,19 @@ export class Scheduler {
         this.output.click?.({ when, accent: !!action.accent })
         action.sounded = true
       }
+    } else if (action.kind === 'on' && ev && action.sound !== undefined) {
+      const s = ev.sounds![action.sound]!
+      // Only the sound on the beat carries the accent.
+      const accented = ev.accent && s.offset.n === 0
+      const handle = this.output.noteOn({
+        when,
+        midi: [s.midi],
+        gain: s.gain,
+        attack: true,
+        fade: PLAYBACK_TUNING.attackFade,
+        ...(accented ? { accent: { gain: ev.attackGain, decay: PLAYBACK_TUNING.accentDecay } } : {}),
+      })
+      this.voices.set(`${ev.index}:${action.sound}`, { handle, endsAt: Number.POSITIVE_INFINITY })
     } else if (action.kind === 'on' && ev) {
       const previous = this.lastOn
       const joined = !ev.attack && previous !== undefined && previous.index === ev.index - 1 && previous.voice.endsAt === Number.POSITIVE_INFINITY
@@ -493,12 +545,12 @@ export class Scheduler {
       })
       if (joined) previous.voice.endsAt = when + fade
       const voice = { handle, endsAt: Number.POSITIVE_INFINITY }
-      this.voices.set(ev.index, voice)
+      this.voices.set(`${ev.index}`, voice)
       this.lastOn = { index: ev.index, voice }
     } else if (action.kind === 'off' && ev) {
-      const voice = this.voices.get(ev.index)
+      const voice = this.voices.get(action.sound === undefined ? `${ev.index}` : `${ev.index}:${action.sound}`)
       if (!voice) return
-      const soundingSeconds = num(ev.sounding) * (60 / this.bpmValue)
+      const soundingSeconds = num(action.sound === undefined ? ev.sounding : ev.sounds![action.sound]!.length) * (60 / this.bpmValue)
       const base = ev.staccato ? PLAYBACK_TUNING.staccatoRelease : PLAYBACK_TUNING.releaseFade
       const fade = Math.min(base, soundingSeconds / 2)
       // The sound has ended at `when`: the fade-out lies before it.

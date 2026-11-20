@@ -71,39 +71,51 @@
 .score-view g.note.hl,
 .score-view g.note.hl *,
 .score-view g.rest.hl,
+.score-view g.multiRest.hl,
 .score-view g.rest.hl *,
+.score-view g.multiRest.hl *,
 .score-view g.note.mk-sel,
 .score-view g.note.mk-sel *,
 .score-view g.rest.mk-sel,
-.score-view g.rest.mk-sel * {
+.score-view g.multiRest.mk-sel,
+.score-view g.rest.mk-sel *,
+.score-view g.multiRest.mk-sel * {
   fill: var(--primary);
   stroke: var(--primary);
 }
 .score-view g.note.mk-loop,
 .score-view g.note.mk-loop *,
 .score-view g.rest.mk-loop,
-.score-view g.rest.mk-loop * {
+.score-view g.multiRest.mk-loop,
+.score-view g.rest.mk-loop *,
+.score-view g.multiRest.mk-loop * {
   fill: var(--mark-loop);
   stroke: var(--mark-loop);
 }
 .score-view g.note.mk-start,
 .score-view g.note.mk-start *,
 .score-view g.rest.mk-start,
-.score-view g.rest.mk-start * {
+.score-view g.multiRest.mk-start,
+.score-view g.rest.mk-start *,
+.score-view g.multiRest.mk-start * {
   fill: var(--mark-start);
   stroke: var(--mark-start);
 }
 .score-view g.note.mk-flagbar,
 .score-view g.note.mk-flagbar *,
 .score-view g.rest.mk-flagbar,
-.score-view g.rest.mk-flagbar * {
+.score-view g.multiRest.mk-flagbar,
+.score-view g.rest.mk-flagbar *,
+.score-view g.multiRest.mk-flagbar * {
   fill: var(--mark-flagbar);
   stroke: var(--mark-flagbar);
 }
 .score-view g.note.mk-flag,
 .score-view g.note.mk-flag *,
 .score-view g.rest.mk-flag,
-.score-view g.rest.mk-flag * {
+.score-view g.multiRest.mk-flag,
+.score-view g.rest.mk-flag *,
+.score-view g.multiRest.mk-flag * {
   fill: var(--mark-flag);
   stroke: var(--mark-flag);
 }
@@ -111,7 +123,9 @@
 .score-view g.note.hl,
 .score-view g.note.hl *,
 .score-view g.rest.hl,
-.score-view g.rest.hl * {
+.score-view g.multiRest.hl,
+.score-view g.rest.hl *,
+.score-view g.multiRest.hl * {
   fill: var(--primary);
   stroke: var(--primary);
 }

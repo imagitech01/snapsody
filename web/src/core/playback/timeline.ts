@@ -2,7 +2,7 @@ import type { Instrument } from '../instruments/instruments.ts'
 import type { Barline, Measure, Note, Pitch, Score, TimeSignature, WedgeItem } from '../score/model.ts'
 import { isNote, isWedge } from '../score/model.ts'
 import type { Frac } from '../score/rational.ts'
-import { ZERO, add, cmp, frac, mul, sub } from '../score/rational.ts'
+import { ZERO, add, cmp, div, frac, mul, sub } from '../score/rational.ts'
 import { barQuarters, meterBeatUnit } from './tempo.ts'
 
 /*
@@ -29,8 +29,26 @@ export const BEAT_WHOLE: Frac = frac(1, 4)
 /** A breath mark leaves a gap of 1/8 beat before the next note. */
 export const BREATH_GAP: Frac = frac(1, 8)
 
+/** A caesura leaves a longer gap than a breath mark: 1/4 beat before the next note. */
+export const CAESURA_GAP: Frac = frac(1, 4)
+
 /** Staccato notes sound for about half of their written value. */
 export const STACCATO_FRACTION: Frac = frac(1, 2)
+
+/** Staccatissimo notes sound for a quarter of their written value (tenuto does not take that away). */
+export const STACCATISSIMO_FRACTION: Frac = frac(1, 4)
+
+/** One note of a turn, a mordent or a trill: a thirty-second note, 1/8 beat (at most a quarter of the note it ornaments). */
+export const ORNAMENT_NOTE: Frac = frac(1, 8)
+
+/** Each note of an arpeggio enters this long after the one below it (1/16 beat). */
+export const ARPEGGIO_STEP: Frac = frac(1, 16)
+
+/** One grace note sounds this long, ending on the beat of the note it belongs to (1/8 beat). */
+export const GRACE_NOTE: Frac = frac(1, 8)
+
+/** The note of a tremolo with `strokes` strokes is 1/2^(strokes + 2) of a whole note, that is 1/2^strokes beat (3 strokes: a thirty-second note). */
+const MAX_TREMOLO_STROKES = 6
 
 /** Gain (0..1 of full scale) per printed dynamic mark; mf is the default. */
 export const DYNAMIC_GAIN: Readonly<Record<string, number>> = {
@@ -65,8 +83,23 @@ export const FERMATA_STRETCH: Frac = frac(2)
  */
 export const ACCENT_DB = 4
 const ACCENT_FACTOR = 10 ** (ACCENT_DB / 20)
+/** A strong accent (marcato) starts this many dB louder than its level, under the same cap. */
+export const STRONG_ACCENT_DB = 7
+const STRONG_ACCENT_FACTOR = 10 ** (STRONG_ACCENT_DB / 20)
 /** The largest gain any note reaches, accents included (full scale). */
 export const MAX_ATTACK_GAIN = 1
+
+/**
+ * One note of its own inside an event (ornaments, tremolo, arpeggio, grace notes). `offset` and `length` are
+ * in beats, like the other fields of an event, `offset` from the event's `start` (negative for a grace note).
+ */
+export interface Sound {
+  /** Sounding MIDI note. */
+  midi: number
+  offset: Frac
+  length: Frac
+  gain: number
+}
 
 export interface PlaybackEvent {
   /** Index in `Timeline.events`. */
@@ -94,14 +127,22 @@ export interface PlaybackEvent {
   gain: number
   /** The dynamic mark in force (under a hairpin: the one it started from; after it: the one it reached). */
   dynamic: string
-  /** The note carries an accent. */
+  /** The note carries an accent or a strong accent. */
   accent: boolean
+  /** The accent is a strong accent: `STRONG_ACCENT_DB` instead of `ACCENT_DB`. */
+  strongAccent?: boolean
   /** Gain at the very start of the note: `gain` raised by `ACCENT_DB` for an accent (at most `MAX_ATTACK_GAIN`), `gain` otherwise. */
   attackGain: number
   /** False when the note is slurred from the previous one: no new attack, start in the sustain (not in a set that always strikes, see samples.ts). */
   attack: boolean
   /** True when this note connects into the next event without a gap (slur). */
   legatoNext: boolean
+  /**
+   * The notes this event sounds, when it is more than its `pitches` for `sounding` (ornaments, tremolo,
+   * arpeggio, grace notes): the scheduler plays these instead, each as its own note. Absent: `pitches` start at
+   * `start` and sound for `sounding`. `start`, `length`, `noteIds` and `index` are those of the written note(s) either way.
+   */
+  sounds?: Sound[]
 }
 
 /** One bar as played; a repeated bar appears once per pass. */
@@ -297,7 +338,7 @@ function slurJoins(measures: Measure[]): { joins: Set<string>; successor: Map<st
       previous = item
       for (const s of item.slurs) if (s.type === 'start') open.add(s.number)
       for (const s of item.slurs) if (s.type === 'stop') open.delete(s.number)
-      if (open.size > 0 && !item.rest && !item.staccato) joins.add(item.id)
+      if (open.size > 0 && !item.rest && !item.staccato && !item.staccatissimo) joins.add(item.id)
     }
   }
   return { joins, successor }
@@ -314,12 +355,16 @@ const samePitch = (a: Pitch | undefined, b: Pitch | undefined): boolean =>
 
 const toBeats = (whole: Frac): Frac => mul(whole, frac(4))
 
-/** Sounding length of an event of length `length` beats. Tenuto takes the staccato shortening away; a breath mark still leaves its gap. */
-function soundingLength(length: Frac, staccato: boolean, breath: boolean): Frac {
+/**
+ * Sounding length of an event of length `length` beats. Tenuto takes the staccato shortening away (not the
+ * staccatissimo one); a breath mark or a caesura still leaves its gap, taken from the note's sound.
+ */
+function soundingLength(length: Frac, staccato: boolean, staccatissimo: boolean, gapOf: Frac | undefined): Frac {
   let s = length
   if (staccato) s = mul(length, STACCATO_FRACTION)
-  if (breath) {
-    const gap = cmp(BREATH_GAP, mul(length, frac(1, 2))) > 0 ? mul(length, frac(1, 2)) : BREATH_GAP
+  if (staccatissimo) s = mul(length, STACCATISSIMO_FRACTION)
+  if (gapOf) {
+    const gap = cmp(gapOf, mul(length, frac(1, 2))) > 0 ? mul(length, frac(1, 2)) : gapOf
     const shortened = sub(length, gap)
     if (cmp(shortened, s) < 0) s = shortened
   }
@@ -335,6 +380,54 @@ function meterTable(measures: Measure[]): Meter[] {
     if (m.time) time = m.time
     return { beatUnit: meterBeatUnit(time), barLength: barQuarters(time) }
   })
+}
+
+/** The key signature in force at each measure: the last one stated at or before it, C major (0) when none is. */
+function keyTable(measures: Measure[]): number[] {
+  let fifths = 0
+  return measures.map((m) => {
+    if (m.key) fifths = m.key.fifths
+    return fifths
+  })
+}
+
+const STEPS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'] as const
+const SHARP_ORDER = ['F', 'C', 'G', 'D', 'A', 'E', 'B']
+const FLAT_ORDER = ['B', 'E', 'A', 'D', 'G', 'C', 'F']
+
+/** The alteration a key signature gives a step. */
+function keyAlter(fifths: number, step: string): number {
+  if (fifths > 0) return SHARP_ORDER.slice(0, fifths).includes(step) ? 1 : 0
+  if (fifths < 0) return FLAT_ORDER.slice(0, -fifths).includes(step) ? -1 : 0
+  return 0
+}
+
+/**
+ * The note `by` steps above (or, negative, below) a pitch on the scale of the key in force: the alteration is
+ * the one an earlier note of the same step and octave in the bar had (`barAlters`), else the key signature's.
+ */
+function scaleNeighbour(p: Pitch, by: number, fifths: number, barAlters: Map<string, number>): Pitch {
+  const at = STEPS.indexOf(p.step as (typeof STEPS)[number]) + by
+  const step = STEPS[((at % 7) + 7) % 7]!
+  const octave = p.octave + Math.floor(at / 7)
+  return { step, octave, alter: barAlters.get(`${step}${octave}`) ?? keyAlter(fifths, step) }
+}
+
+/** What an event needs to sound its marks once its final length is known. */
+interface EventMarks {
+  head: Note
+  fifths: number
+  /** The alterations of the notes before it in its bar, only kept for an ornament. */
+  barAlters: Map<string, number>
+  /**
+   * The note that carries the event's ornament (the first one read, as the parser keeps one per note) and its place
+   * in `pitches`: the head, or a chord member, whose ornament is played while the other notes of the chord are held.
+   */
+  ornamented?: { note: Note; index: number }
+  /** The grace notes before it, in order; each is the sounding MIDI notes of one grace note or chord. */
+  graces: number[][]
+  /** A two-note tremolo: how many of the event's `pitches` belong to the first note (the rest are the second's). */
+  pairSplit?: number
 }
 
 /** Where a note of a bar began, in the bar's own (written) time and on the timeline. */
@@ -443,8 +536,95 @@ function applyDynamics(events: PlaybackEvent[], changes: DynamicChange[], hairpi
       ev.gain = level
       ev.dynamic = mark
     }
-    ev.attackGain = ev.accent ? Math.max(ev.gain, Math.min(MAX_ATTACK_GAIN, ev.gain * ACCENT_FACTOR)) : ev.gain
+    const factor = ev.strongAccent ? STRONG_ACCENT_FACTOR : ACCENT_FACTOR
+    ev.attackGain = ev.accent ? Math.max(ev.gain, Math.min(MAX_ATTACK_GAIN, ev.gain * factor)) : ev.gain
   }
+}
+
+const sound = (midi: number, offset: Frac, length: Frac, gain: number): Sound => ({ midi, offset, length, gain })
+
+/** `count` notes of `each` beats from 0, the last one cut to end at `end`. */
+function repeated(each: Frac, end: Frac, make: (k: number, offset: Frac, length: Frac) => void): void {
+  const count = Math.max(1, Math.ceil(num(end) / num(each) - 1e-9))
+  for (let k = 0; k < count; k++) {
+    const offset = mul(each, frac(k))
+    const length = cmp(add(offset, each), end) > 0 ? sub(end, offset) : each
+    make(k, offset, length)
+  }
+}
+
+/**
+ * The sounds of an event that is more than its `pitches` held for `sounding` (design D3): an ornament on a single
+ * note, a tremolo, an arpeggio, and the grace notes before it. Undefined for a plain event.
+ */
+function soundsOf(ev: PlaybackEvent, info: EventMarks | undefined, graceEach: Frac | undefined, instrument: Pick<Instrument, 'transpose'>): Sound[] | undefined {
+  if (!info || ev.rest) return undefined
+  const { head } = info
+  const gain = ev.gain
+  const end = ev.sounding
+  const out: Sound[] = []
+  const graces = info.graces
+  if (graceEach && graces.length > 0) {
+    graces.forEach((group, j) => {
+      const offset = mul(graceEach, frac(j - graces.length))
+      for (const midi of group) out.push(sound(midi, offset, graceEach, gain))
+    })
+  }
+  const graced = out.length > 0
+  const pitches = ev.pitches
+  const split = info.pairSplit
+  const note = (written: Pitch): number => concertMidi(midiOf(written), instrument)
+  const ornamented = info.ornamented
+  if (ornamented && ornamented.note.ornament && ornamented.note.pitch && split === undefined && cmp(end, ZERO) > 0) {
+    const { note: carrier, index } = ornamented
+    const ornament = carrier.ornament!
+    const main = pitches[index]!
+    const upper = note(scaleNeighbour(carrier.pitch!, 1, info.fifths, info.barAlters))
+    const lower = note(scaleNeighbour(carrier.pitch!, -1, info.fifths, info.barAlters))
+    // In a chord, the other notes are held for the chord's length under the ornament.
+    pitches.forEach((midi, k) => {
+      if (k !== index) out.push(sound(midi, ZERO, end, gain))
+    })
+    if (ornament === 'trill') {
+      // Main and upper note alternate and the trill ends on the main note, which takes up what is left.
+      const each = cmp(ORNAMENT_NOTE, div(end, frac(3))) < 0 ? ORNAMENT_NOTE : div(end, frac(3))
+      let count = Math.floor(num(end) / num(each) + 1e-9)
+      if (count % 2 === 0) count--
+      for (let k = 0; k < count; k++) {
+        const offset = mul(each, frac(k))
+        out.push(sound(k % 2 === 0 ? main : upper, offset, k === count - 1 ? sub(end, offset) : each, gain))
+      }
+    } else {
+      // Turn: upper, main, lower, then the main note held. Mordent: main, lower, then the main note held.
+      const lead = ornament === 'turn' ? [upper, main, lower] : [main, lower]
+      const quarter = div(end, frac(4))
+      const each = cmp(ORNAMENT_NOTE, quarter) < 0 ? ORNAMENT_NOTE : quarter
+      lead.forEach((midi, k) => out.push(sound(midi, mul(each, frac(k)), each, gain)))
+      const at = mul(each, frac(lead.length))
+      out.push(sound(main, at, sub(end, at), gain))
+    }
+  } else if (head.tremolo && (head.tremolo.kind === 'single' || (head.tremolo.kind === 'start' && split !== undefined))) {
+    const strokes = Math.min(MAX_TREMOLO_STROKES, Math.max(1, Math.round(head.tremolo.strokes)))
+    const each = frac(1, 2 ** strokes)
+    // One note, or one chord, repeated; or the two notes of a pair in turn over the pair's combined value.
+    const sets = split === undefined ? [pitches] : [pitches.slice(0, split), pitches.slice(split)]
+    repeated(each, end, (k, offset, length) => {
+      for (const midi of sets[k % sets.length]!) out.push(sound(midi, offset, length, gain))
+    })
+  } else if (head.arpeggio && pitches.length > 1 && cmp(end, ZERO) > 0) {
+    // From the lowest note up; the roll takes at most half of the chord.
+    const room = div(end, frac(2 * (pitches.length - 1)))
+    const step = cmp(ARPEGGIO_STEP, room) < 0 ? ARPEGGIO_STEP : room
+    ;[...pitches]
+      .sort((a, b) => a - b)
+      .forEach((midi, k) => {
+        const offset = mul(step, frac(k))
+        out.push(sound(midi, offset, sub(end, offset), gain))
+      })
+  } else if (graced) {
+    for (const midi of pitches) out.push(sound(midi, ZERO, end, gain))
+  }
+  return out.length > 0 ? out : undefined
 }
 
 /**
@@ -454,6 +634,7 @@ function applyDynamics(events: PlaybackEvent[], changes: DynamicChange[], hairpi
 export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transpose'>): Timeline {
   const { joins, successor } = slurJoins(score.measures)
   const meters = meterTable(score.measures)
+  const keys = keyTable(score.measures)
   const events: PlaybackEvent[] = []
   const bars: BarSpan[] = []
   const clicks: BeatClick[] = []
@@ -468,7 +649,11 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
   const lastIdOf = new Map<PlaybackEvent, string>()
   let cursor: Frac = ZERO
   /** Tenuto/breath/staccato flags per event, applied once its final length is known. */
-  const flags = new Map<PlaybackEvent, { staccato: boolean; tenuto: boolean; breath: boolean }>()
+  const flags = new Map<PlaybackEvent, { staccato: boolean; staccatissimo: boolean; tenuto: boolean; breath: boolean; caesura: boolean }>()
+  /** What each event needs to sound its ornament, tremolo, arpeggio and grace notes. */
+  const marks = new Map<PlaybackEvent, EventMarks>()
+  /** Grace notes met, waiting for the note they belong to. */
+  let pendingGraces: number[][] = []
 
   /** A note has been placed in an event: it may start or end a hairpin. */
   const noteIn = (id: string, event: PlaybackEvent): void => {
@@ -495,6 +680,10 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
       meter: meters[played.barIndex]!,
     }
     const segments: Segment[] = []
+    /** The alteration of each step and octave as last written in this bar. */
+    const barAlters = new Map<string, number>()
+    /** The event of a two-note tremolo's first note, waiting for the second. */
+    let tremoloOpen: PlaybackEvent | undefined
     /** How far into the bar the written notes have come (a fermata does not count). */
     let inBar: Frac = ZERO
     /** Moves on by a note of written length `len`; a held note takes twice as long. Returns the time it took. */
@@ -506,7 +695,7 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
       return took
     }
 
-    for (const item of m.items) {
+    for (const [at, item] of m.items.entries()) {
       if (item.kind === 'dynamic') {
         if (dynamicGain(item.mark) !== undefined) changes.push({ index: events.length, mark: item.mark })
         continue
@@ -518,15 +707,41 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
         pending.push(item)
         continue
       }
-      if (!isNote(item) || item.grace) continue
+      if (isNote(item) && item.grace) {
+        // A grace note has no event and no cursor of its own: its sound is built on the note that follows.
+        if (item.pitch) {
+          const midi = concertMidi(midiOf(item.pitch), instrument)
+          if (item.chord && pendingGraces.length > 0) pendingGraces[pendingGraces.length - 1]!.push(midi)
+          else pendingGraces.push([midi])
+          barAlters.set(`${item.pitch.step}${item.pitch.octave}`, Math.round(item.pitch.alter ?? 0))
+        }
+        continue
+      }
+      if (!isNote(item)) continue
       const len = toBeats(item.duration)
+      // A fermata on any note of a chord holds the whole chord.
+      let fermata = !!item.fermata
+      if (!item.chord) {
+        for (let j = at + 1; j < m.items.length; j++) {
+          const next = m.items[j]!
+          if (!isNote(next) || next.grace || !next.chord) break
+          if (next.fermata) fermata = true
+        }
+      }
 
       if (item.chord && events.length > 0 && item.pitch) {
         const last = events[events.length - 1]!
         last.pitches.push(concertMidi(midiOf(item.pitch), instrument))
         last.written.push(midiOf(item.pitch))
         last.noteIds.push(item.id)
-        last.accent ||= !!item.accent
+        last.accent ||= !!item.accent || !!item.strongAccent
+        last.strongAccent ||= !!item.strongAccent
+        const info = marks.get(last)
+        if (info && item.ornament && !info.ornamented) {
+          info.ornamented = { note: item, index: last.pitches.length - 1 }
+          info.barAlters = new Map(barAlters)
+        }
+        barAlters.set(`${item.pitch.step}${item.pitch.octave}`, Math.round(item.pitch.alter ?? 0))
         noteIn(item.id, last)
         continue
       }
@@ -535,14 +750,41 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
       // A tie continues the previous event when that was the tie's start in the played order.
       if (pitched && item.tieStop && tieOpen && samePitch(tieOpen.pitch, item.pitch)) {
         const ev = tieOpen.event
-        ev.length = add(ev.length, advance(len, !!item.fermata))
+        ev.length = add(ev.length, advance(len, fermata))
         ev.noteIds.push(item.id)
+        pendingGraces = []
         const f = flags.get(ev)!
         f.staccato ||= !!item.staccato
+        f.staccatissimo ||= !!item.staccatissimo
         f.tenuto ||= !!item.tenuto
         f.breath = !!item.breath
+        f.caesura = !!item.caesura
         lastIdOf.set(ev, item.id)
         tieOpen = item.tieStart ? { event: ev, pitch: item.pitch! } : undefined
+        noteIn(item.id, ev)
+        continue
+      }
+
+      // The second note of a two-note tremolo joins the event of the first, like a tied note: one event for the pair.
+      if (pitched && tremoloOpen && item.tremolo?.kind === 'stop') {
+        const ev = tremoloOpen
+        tremoloOpen = undefined
+        const info = marks.get(ev)!
+        info.pairSplit = ev.pitches.length
+        ev.length = add(ev.length, advance(len, fermata))
+        ev.pitches.push(concertMidi(midiOf(item.pitch!), instrument))
+        ev.written.push(midiOf(item.pitch!))
+        ev.noteIds.push(item.id)
+        pendingGraces = []
+        const f = flags.get(ev)!
+        f.staccato ||= !!item.staccato
+        f.staccatissimo ||= !!item.staccatissimo
+        f.tenuto ||= !!item.tenuto
+        f.breath = !!item.breath
+        f.caesura = !!item.caesura
+        lastIdOf.set(ev, item.id)
+        tieOpen = item.tieStart ? { event: ev, pitch: item.pitch! } : undefined
+        barAlters.set(`${item.pitch!.step}${item.pitch!.octave}`, Math.round(item.pitch!.alter ?? 0))
         noteIn(item.id, ev)
         continue
       }
@@ -552,7 +794,7 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
       const ev: PlaybackEvent = {
         index: events.length,
         start,
-        length: advance(len, !!item.fermata),
+        length: advance(len, fermata),
         sounding: ZERO,
         rest: !pitched,
         pitches: writtenMidi === undefined ? [] : [concertMidi(writtenMidi, instrument)],
@@ -564,14 +806,27 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
         staccato: !!item.staccato,
         gain: DYNAMIC_GAIN[DEFAULT_DYNAMIC]!,
         dynamic: DEFAULT_DYNAMIC,
-        accent: !!item.accent && pitched,
+        accent: (!!item.accent || !!item.strongAccent) && pitched,
+        ...(item.strongAccent && pitched ? { strongAccent: true } : {}),
         attackGain: DYNAMIC_GAIN[DEFAULT_DYNAMIC]!,
         attack: true,
         legatoNext: false,
       }
-      flags.set(ev, { staccato: !!item.staccato, tenuto: !!item.tenuto, breath: !!item.breath })
+      flags.set(ev, { staccato: !!item.staccato, staccatissimo: !!item.staccatissimo, tenuto: !!item.tenuto, breath: !!item.breath, caesura: !!item.caesura })
       lastIdOf.set(ev, item.id)
       events.push(ev)
+      if (pitched) {
+        marks.set(ev, {
+          head: item,
+          fifths: keys[played.barIndex]!,
+          barAlters: item.ornament ? new Map(barAlters) : new Map(),
+          graces: pendingGraces,
+          ...(item.ornament ? { ornamented: { note: item, index: 0 } } : {}),
+        })
+        if (item.tremolo?.kind === 'start') tremoloOpen = ev
+        barAlters.set(`${item.pitch!.step}${item.pitch!.octave}`, Math.round(item.pitch!.alter ?? 0))
+      }
+      pendingGraces = []
       tieOpen = pitched && item.tieStart ? { event: ev, pitch: item.pitch! } : undefined
       noteIn(item.id, ev)
     }
@@ -586,15 +841,37 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
   for (const ev of events) {
     const f = flags.get(ev)!
     const staccato = f.staccato && !f.tenuto
-    ev.sounding = ev.rest ? ZERO : soundingLength(ev.length, staccato, f.breath)
-    ev.staccato = staccato
+    const gap = f.caesura ? (f.breath && cmp(BREATH_GAP, CAESURA_GAP) > 0 ? BREATH_GAP : CAESURA_GAP) : f.breath ? BREATH_GAP : undefined
+    ev.sounding = ev.rest ? ZERO : soundingLength(ev.length, staccato, f.staccatissimo, gap)
+    ev.staccato = staccato || f.staccatissimo
+  }
+  // Grace notes take their time from the sound of the event before them, which stays on the beat grid.
+  const graceLength = new Map<PlaybackEvent, Frac>()
+  for (const ev of events) {
+    const graces = marks.get(ev)?.graces ?? []
+    if (ev.rest || graces.length === 0) continue
+    const before = events[ev.index - 1]
+    let each = GRACE_NOTE
+    if (before) {
+      const room = div(mul(before.length, frac(1, 2)), frac(graces.length))
+      if (cmp(room, each) < 0) each = room
+      const latest = sub(before.length, mul(each, frac(graces.length)))
+      if (cmp(latest, before.sounding) < 0) before.sounding = latest
+    }
+    graceLength.set(ev, each)
+  }
+  for (const ev of events) {
+    const sounds = soundsOf(ev, marks.get(ev), graceLength.get(ev), instrument)
+    if (sounds) ev.sounds = sounds
   }
   for (let k = 0; k + 1 < events.length; k++) {
     const a = events[k]!
     const b = events[k + 1]!
     const lastId = lastIdOf.get(a)!
     if (a.rest || b.rest || !joins.has(lastId) || successor.get(lastId) !== b.noteIds[0]) continue
-    if (flags.get(a)!.staccato || flags.get(a)!.breath) continue
+    if (flags.get(a)!.staccato || flags.get(a)!.staccatissimo || flags.get(a)!.breath || flags.get(a)!.caesura) continue
+    // An event that carries its own sounds (ornament, grace notes...) is played as separate notes: no slur into or out of it.
+    if (a.sounds || b.sounds) continue
     a.legatoNext = true
     b.attack = false
   }

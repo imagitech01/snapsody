@@ -5,10 +5,10 @@ import type { ElementRef, SvgTree } from '../src/core/score/elements.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
-import { renderScore } from '../src/core/score/render.ts'
+import { loadToolkit, renderScore } from '../src/core/score/render.ts'
 import { parseXml } from '../src/core/score/xml.ts'
 import type { XmlElement } from '../src/core/score/xml.ts'
-import { COMMITTED_FIXTURE, read } from './helpers.ts'
+import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, read } from './helpers.ts'
 
 // Selecting elements other than notes (change select-and-delete-elements, tasks 1.2 and 1.4).
 
@@ -177,4 +177,93 @@ test('elements: clef, key and time changes map to the change, also where a syste
   assert.equal(count({ kind: 'slur', noteId: 'n8', number: 2 }), 2, 'both pieces of the slur over the system break')
   // The key of bar 0 is still drawn at the start of system 1 only.
   assert.equal(count({ kind: 'key', bar: 0 }), 1)
+})
+
+// ---------------------------------------------------------------- the marks of change more-marks (task 4.1)
+
+const homrMarks = (): Score => parseMusicXml(read(HOMR_MARKS_FIXTURE))
+
+/** The editor draws a multi-measure rest bar by bar (`expand`), and maps with the identity table. */
+async function drawnExpanded(score: Score, width = 900) {
+  const [svg] = await renderScore(score, { width, multiRests: 'expand' })
+  const root = parseXml(svg!)
+  const map = mapElements(root, xmlTree, score)
+  const groups = (cls: string): XmlElement[] => {
+    const out: XmlElement[] = []
+    const walk = (e: XmlElement): void => {
+      if (e.name === 'g' && xmlTree.classes(e).includes(cls)) out.push(e)
+      for (const c of e.children) walk(c)
+    }
+    walk(root)
+    return out
+  }
+  return { map, groups, svg: svg! }
+}
+
+test('elements: every new mark of the homr fixture maps to the note it is drawn for, and none is left unmapped', async () => {
+  const score = homrMarks()
+  const { map, groups } = await drawnExpanded(score)
+  const mark = (noteId: string, m: string): ElementRef => ({ kind: 'articulation', noteId, mark: m as never })
+  const expected: ElementRef[] = [
+    mark('n1', 'ornament'), // mordent, bar 1
+    mark('n4', 'strongAccent'),
+    mark('n5', 'staccatissimo'),
+    mark('n6', 'ornament'), // trill
+    mark('n7', 'ornament'), // turn
+    mark('n8', 'ornament'), // trill
+    mark('n9', 'tremolo'), // the pair of bar 3, on its first note
+    mark('n11', 'tremolo'), // two single tremolos in bar 4
+    mark('n13', 'tremolo'),
+    mark('n15', 'arpeggio'),
+    mark('n21', 'fermata'), // on the third note of a chord
+    mark('n26', 'caesura'),
+  ]
+  const marks = [...map.values()].filter((r) => r.kind === 'articulation')
+  assert.deepEqual([...new Set(marks.map(key))].sort(), [...new Set(expected.map(key))].sort())
+  for (const ref of marks) assert.ok(describeElement(score, ref), `${key(ref)} is in the score`)
+  // Each ornament maps by its own kind.
+  const kindOf = (cls: string): (string | undefined)[] => groups(cls).map((g) => (map.get(g)?.kind === 'articulation' ? describeElement(score, map.get(g)!)?.ornament : undefined))
+  assert.deepEqual([kindOf('trill'), kindOf('turn'), kindOf('mordent')], [['trill', 'trill'], ['turn'], ['mordent']])
+  // Every drawn group of a new kind is mapped; a tremolo is mapped by its strokes (its notes stay notes).
+  for (const cls of ['artic', 'trill', 'turn', 'mordent', 'arpeg', 'caesura', 'fermata']) {
+    const missing = groups(cls).filter((g) => !map.has(g))
+    assert.deepEqual(missing.map((g) => g.attrs.id), [], `${cls} groups are all mapped`)
+  }
+  for (const cls of ['bTrem', 'fTrem']) {
+    const strokes = groups(cls).flatMap((g) => g.children.filter((c) => !xmlTree.classes(c).includes('note')))
+    assert.ok(strokes.length > 0, `${cls} has strokes`)
+    assert.ok(strokes.every((s) => map.get(s)), `${cls} strokes are mapped`)
+    assert.ok(groups(cls).every((g) => !map.has(g)), `${cls} itself is not, so a tap on its notes still selects a note`)
+  }
+  assert.equal(groups('bTrem').length, 2)
+  assert.equal(groups('fTrem').length, 1)
+})
+
+test('elements: a strong accent and a staccatissimo drawn below the note are told by their glyphs too', async () => {
+  // A staccatissimo on a note with its stem up is drawn below it; a strong accent is below only when it says so.
+  const note = (id: string, step: string, tail: string) =>
+    `<note id="${id}"><pitch><step>${step}</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>quarter</type><notations>${tail}</notations></note>`
+  const xml = `<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name></part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>2</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+    ${note('lo1', 'C', '<articulations><strong-accent placement="below"/></articulations>')}${note('lo2', 'D', '<articulations><staccatissimo/></articulations>')}${note('hi1', 'A', '<articulations><strong-accent/></articulations>')}${note('hi2', 'B', '<articulations><staccatissimo/></articulations>')}</measure></part></score-partwise>`
+  const score = parseMusicXml(xml)
+  // Drawn straight from this MusicXML: the app never writes `placement`, so only Verovio's own choice would show below forms.
+  const tk = await loadToolkit()
+  tk.setOptions({ scale: 40, pageWidth: 3000, pageHeight: 60000, adjustPageHeight: true, header: 'none', footer: 'none' })
+  assert.ok(tk.loadData(xml))
+  const root = parseXml(tk.renderToSVG(1))
+  const map = mapElements(root, xmlTree, score)
+  const arts: XmlElement[] = []
+  const walk = (e: XmlElement): void => {
+    if (xmlTree.classes(e).includes('artic')) arts.push(e)
+    for (const c of e.children) walk(c)
+  }
+  walk(root)
+  const glyphs = arts.map((g) => xmlTree.glyph(g))
+  for (const g of ['E4AC', 'E4AD', 'E4A8', 'E4A9']) assert.ok(glyphs.includes(g), `${g} is drawn (${glyphs.join(',')})`)
+  assert.deepEqual([...map.values()].filter((r) => r.kind === 'articulation').map(key).sort(), [
+    key({ kind: 'articulation', noteId: 'hi1', mark: 'strongAccent' }),
+    key({ kind: 'articulation', noteId: 'hi2', mark: 'staccatissimo' }),
+    key({ kind: 'articulation', noteId: 'lo1', mark: 'strongAccent' }),
+    key({ kind: 'articulation', noteId: 'lo2', mark: 'staccatissimo' }),
+  ].sort())
 })

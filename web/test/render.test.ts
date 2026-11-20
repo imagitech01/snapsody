@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as ed from '../src/core/score/edit.ts'
 import type { Score } from '../src/core/score/model.ts'
-import { indexScore, renderedNoteIds, unmappedNotes } from '../src/core/score/noteMap.ts'
+import { drawnBars, indexScore, renderedNoteIds, unmappedNotes } from '../src/core/score/noteMap.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { renderScore } from '../src/core/score/render.ts'
-import { COMMITTED_FIXTURE, LOCAL_EXERCISE_87, read, skipUnless } from './helpers.ts'
+import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, LOCAL_EXERCISE_87, read, skipUnless } from './helpers.ts'
 import { n, scoreOf } from './playbackHelpers.ts'
 
 async function checkRender(xml: string) {
@@ -150,4 +150,59 @@ test('render: clef changes, slurs, ties and hairpins are drawn with drawing ids,
   const stored = serializeMusicXml(score)
   assert.ok(!/id="(clef|slur|tie|wedge)-/.test(stored), 'the stored score has no drawing ids')
   assert.match(serializeMusicXml(score, { drawingIds: true }), /<clef id="clef-2">/)
+})
+
+// ---- The marks of homr and the multi-measure rest (change more-marks, tasks 2.1 and 2.2) ----------------------
+
+const count = (svg: string, cls: string): number => (svg.match(new RegExp(`<g\\b[^>]*class="${cls}[" ]`, 'g')) ?? []).length
+
+test('render: practice draws the run of the marks fixture as one g.multiRest, the editor one g.measure per bar', async () => {
+  const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
+  const [practice] = await renderScore(score, { width: 360, multiRests: 'collapse' })
+  const [editor] = await renderScore(score, { width: 360, multiRests: 'expand' })
+  assert.equal(count(practice!, 'multiRest'), 1)
+  assert.equal(count(editor!, 'multiRest'), 0)
+  assert.equal(count(editor!, 'measure'), 12, 'one drawn measure per bar')
+  assert.equal(count(practice!, 'measure'), 9, 'bars 8 to 11 are one drawn measure: 12 - 3')
+  assert.equal(count(practice!, 'multiRest'), 1)
+  const [default_] = await renderScore(score, { width: 360 })
+  assert.equal(count(default_!, 'multiRest'), 1, 'collapse is the default')
+})
+
+test('render: every mark of the fixture is drawn, collapsed or not', async () => {
+  const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
+  for (const multiRests of ['collapse', 'expand'] as const) {
+    const [svg] = await renderScore(score, { width: 360, multiRests })
+    for (const cls of ['mordent', 'turn', 'trill', 'arpeg', 'caesura', 'bTrem', 'fTrem']) assert.ok(count(svg!, cls) > 0, `${cls} is drawn (${multiRests})`)
+    const glyphs = [...svg!.matchAll(/class="artic"[^>]*>\s*<use [^>]*href="#(\w+)-/g)].map((m) => m[1]!)
+    assert.ok(glyphs.some((g) => /^E4A[CD]$/.test(g)), `a strong accent (marcato) is drawn (${multiRests}): ${glyphs}`)
+    assert.ok(glyphs.some((g) => /^E4A[89]$/.test(g)), `a staccatissimo is drawn (${multiRests}): ${glyphs}`)
+  }
+})
+
+test('render: a collapsed run maps its four rests to its one g.multiRest, and none of them is reported unmapped', async () => {
+  const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
+  const index = indexScore(score)
+  const restIds = [...index].filter(([, info]) => info.barIndex >= 7 && info.barIndex <= 10).map(([id]) => id)
+  assert.equal(restIds.length, 4)
+  const [practice] = await renderScore(score, { width: 360, multiRests: 'collapse' })
+  // Verovio keeps none of the model ids on the symbol: the table is what resolves them.
+  for (const id of restIds) assert.ok(!practice!.includes(`id="${id}"`), `${id} is not in the drawing`)
+  assert.deepEqual(unmappedNotes(practice!, index, drawnBars(score, 'collapse')), [])
+  assert.deepEqual(unmappedNotes(practice!, index), restIds, 'without the table the rests are reported')
+  const [editor] = await renderScore(score, { width: 360, multiRests: 'expand' })
+  assert.deepEqual(unmappedNotes(editor!, index, drawnBars(score, 'expand')), [])
+})
+
+test('drawn bars: the table sends each bar to its drawn measure; a collapsed run is one measure, expanding is the identity', () => {
+  const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
+  const collapsed = drawnBars(score, 'collapse')
+  assert.deepEqual(collapsed.measureOf, [0, 1, 2, 3, 4, 5, 6, 7, 7, 7, 7, 8])
+  assert.deepEqual(collapsed.barsOf[7], { first: 7, count: 4 })
+  assert.equal(collapsed.barsOf.length, 9)
+  assert.deepEqual(collapsed.runOf(9), { start: 7, length: 4 })
+  assert.equal(collapsed.runOf(11), undefined)
+  const expanded = drawnBars(score, 'expand')
+  assert.deepEqual(expanded.measureOf, Array.from({ length: 12 }, (_, i) => i))
+  assert.equal(expanded.runOf(8), undefined)
 })

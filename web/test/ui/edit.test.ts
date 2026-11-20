@@ -1003,3 +1003,57 @@ test('edit: a tap on a bar line selects its bar and shows the bar-line controls 
   })
 })
 
+
+test('edit: Trill from the Marks tab is stored as <trill-mark/> on its note, a tap on the trill selects it and Delete removes it; Arpeggio needs a chord (change more-marks)', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const ode = await makeOdePiece(page)
+    await openEditor(page, ode)
+    await tabs(page, 'Marks').click()
+    const mark = (name: string) => page.getByRole('button', { name, exact: true })
+    const on = async (name: string) => (await mark(name).getAttribute('aria-pressed')) === 'true'
+    const names = ['Staccatissimo', 'Strong accent', 'Trill', 'Turn', 'Mordent', 'Tremolo', 'Arpeggio']
+    for (const name of names) assert.equal(await mark(name).count(), 1, `${name} chip`)
+
+    // A single note has no chord: Arpeggio is disabled, and the others are not.
+    const target = ODE[1]![1]!
+    await tapNote(page, target)
+    assert.equal(await mark('Arpeggio').isDisabled(), true, 'Arpeggio is disabled on a single note')
+    for (const name of names.slice(0, 6)) assert.equal(await mark(name).isDisabled(), false, `${name} is enabled`)
+
+    // Trill, then Turn replaces it, then Trill again.
+    await mark('Trill').click()
+    assert.equal(await on('Trill'), true)
+    await drawn(page, '.score-view g.trill', 1)
+    await mark('Turn').click()
+    assert.deepEqual([await on('Trill'), await on('Turn')], [false, true], 'a turn replaces the trill')
+    await mark('Trill').click()
+    assert.deepEqual([await on('Trill'), await on('Turn'), await on('Mordent')], [true, false, false])
+    await drawn(page, '.score-view g.turn', 0)
+
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const info = JSON.parse((await app.file(`pieces/${ode}/piece.json`)) ?? '{}') as { score: string }
+    const xml = (await app.file(`pieces/${ode}/${info.score}`)) ?? ''
+    const own = new RegExp(`<note id="${target}"[^>]*>(?:(?!</note>).)*</note>`, 's').exec(xml)?.[0] ?? ''
+    assert.match(own, /<trill-mark\/>/, 'the stored note has the trill')
+    assert.equal(xml.match(/<trill-mark\/>/g)?.length, 1, 'and no other note has one')
+    assert.equal(noteOf(await stored(app, ode), target).ornament, 'trill')
+
+    // Tap the trill on the score: it is selected and named with its bar; Delete removes it, and the note keeps its place.
+    await openEditor(page, ode)
+    await drawn(page, '.score-view g.trill', 1)
+    const trill = await centre(page, '.score-view g.trill')
+    await page.touchscreen.tap(trill.x, trill.y)
+    await panel(page).waitFor()
+    assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Trill · bar 2')
+    assert.equal(await page.locator('.score-view g.trill.mk-el').count(), 1, 'the trill is highlighted')
+    await panel(page).getByRole('button', { name: 'Delete' }).click()
+    await drawn(page, '.score-view g.trill', 0)
+    await panel(page).waitFor({ state: 'detached' })
+    await save(page).click()
+    await onScreen(page, 'practice')
+    assert.equal(noteOf(await stored(app, ode), target).ornament, undefined)
+    assert.ok(!((await app.file(`pieces/${ode}/${info.score}`)) ?? '').includes('trill-mark'), 'the stored file has no trill')
+  })
+})

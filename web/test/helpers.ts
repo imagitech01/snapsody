@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url))
 
 export const COMMITTED_FIXTURE = here('./fixtures/all-elements.musicxml')
+/** A single-part piece with the marks homr 0.7.1 reads, written the way homr writes them (change more-marks). */
+export const HOMR_MARKS_FIXTURE = here('./fixtures/homr-marks.musicxml')
 /** Local-only, copyrighted material; tests that need it skip when it is absent. */
 export const LOCAL_PAGE = here('../../fixtures/local/page.musicxml')
 export const LOCAL_EXERCISE_87 = here('../../fixtures/local/exercise87_crop_padded.mac.musicxml')
