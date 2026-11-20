@@ -12,10 +12,10 @@
 - [x] 2.2 Regenerate the tenor sax, alto sax and trumpet; the other sets stay byte-identical. Run the `check_*` tools.
 - [x] 2.3 Measure pitch, level and brightness wobble before and after; record it in `docs/samples.md`.
 - [x] 2.4 Listen: held notes, now and steady side by side, for all instruments. Verify: manual by ear (the user, 2026-11-19, on a page of rendered clips; they chose the tenor sax, the alto sax and the trumpet).
-- [ ] 2.5 In the app on the S24: whole notes on the tenor sax, the alto sax and the trumpet. Verify: manual by ear (the user).
+- [x] 2.5 In the app on the S24: whole notes on the tenor sax, the alto sax and the trumpet. Verify: manual by ear (the user).
 
 ## 3. Integration
 
-- [ ] 3.2 On the S24, with count-in on: let the metronome click on its own, press Play, and listen for a stray click off the beat. Verify: manual by ear (the user); cancelling a click is proven on fakes only.
-- [ ] 3.3 `make test-device` on the emulator, once before archive.
+- [x] 3.2 On the S24, with count-in on: let the metronome click on its own, press Play, and listen for a stray click off the beat. Verify: manual by ear (the user); cancelling a click is proven on fakes only.
+- [x] 3.3 `make test-device` on the emulator, once before archive.
 - [x] 3.1 `make test-mac` and `openspec validate steady-notes-and-free-metronome --strict` are green.
