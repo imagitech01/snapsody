@@ -2,6 +2,7 @@ import type { Instrument } from '../instruments/instruments.ts'
 import type { Score } from '../score/model.ts'
 import { frac } from '../score/rational.ts'
 import type { Frac } from '../score/rational.ts'
+import { FreeMetronome } from './freeMetronome.ts'
 import { PITCH_REFERENCE_DEFAULT, clampPitchReference } from './samples.ts'
 import { Scheduler } from './scheduler.ts'
 import type { Clock, CountIn, NoteOutput, Position, StartOptions, TimerApi } from './scheduler.ts'
@@ -26,6 +27,13 @@ import { outputLatency } from './webaudio.ts'
  * Live changes while playing: the metronome and the instrument take effect without a restart (the
  * metronome from the next beat, the instrument from the next note); tempo, loop and rest continue
  * from the current note, which starts again.
+ *
+ * The metronome on its own (design D1 of steady-notes-and-free-metronome): switching the metronome on
+ * while stopped or paused starts a `FreeMetronome` at once, in the time signature of the bar Play would
+ * start from. It is a flag next to the state (`metronomeAlone`), not a state of its own, so nothing
+ * that reads the state (the Play button) changes. Only `setMetronome(true)` starts it: a player made
+ * with `metronome: true` stays silent. Play stops it before the piece starts; pause, stop and the end
+ * of the piece never start it again.
  */
 
 export interface AudioBackend extends Clock {
@@ -76,6 +84,8 @@ export interface PlayerOptions {
   /** A4 in Hz, 430 to 450 (default 440): all sound follows it. */
   pitchReference?: number
   onState?: (state: PlayerState) => void
+  /** Called when the metronome starts or stops sounding on its own (`metronomeAlone`). */
+  onMetronomeAlone?: (sounding: boolean) => void
 }
 
 export const DEFAULT_BPM = DEFAULT_TEMPO
@@ -111,6 +121,14 @@ export class Player {
   private pausedNoteId: string | undefined
   /** The first note of the current run, for pausing during a count-in. */
   private runStartNoteId: string | undefined
+  /** The metronome sounding on its own, while no music plays. */
+  private alone: FreeMetronome | undefined
+  /** The score and bar it counts, for a beat-unit change while it sounds. */
+  private aloneBar: { score: Score; barIndex: number } | undefined
+  /** Counts the starts and stops of the metronome on its own, so that a start still loading when it is overtaken does nothing. */
+  private aloneId = 0
+  /** A start of the metronome on its own that is waiting for the backend or the score. */
+  private aloneStarting: Promise<void> | undefined
 
   constructor(options: PlayerOptions) {
     this.o = options
@@ -179,6 +197,11 @@ export class Player {
     return this.scheduler
   }
 
+  /** True while the metronome sounds on its own (no music playing). */
+  get metronomeAlone(): boolean {
+    return this.alone !== undefined
+  }
+
   get backendInstance(): AudioBackend | undefined {
     return this.audio
   }
@@ -210,6 +233,9 @@ export class Player {
    */
   async play(options: { fromNoteId?: string } = {}): Promise<void> {
     const resuming = this.stateValue === 'paused' && !options.fromNoteId
+    // The music takes over from the metronome on its own at once, before anything loads: its click
+    // that has not sounded yet is taken back, so it cannot sound over the count-in off the grid.
+    this.stopMetronomeAlone()
     this.runId++
     this.scheduler?.stop()
     const run = this.runId
@@ -239,11 +265,8 @@ export class Player {
       this.runInstrument = instrument
       this.timelineValue = timeline
       const loop = this.loopSpan(timeline)
-      const startId = options.fromNoteId ?? this.startNoteId
+      const first = this.startEvent(timeline, options.fromNoteId)
       this.pausedNoteId = undefined
-      let from: PlaybackEvent | undefined = startId ? timeline.eventOfNote(startId) : undefined
-      if (!from && loop) from = timeline.eventAtBeat(loop.start)
-      const first = from ?? timeline.events[0]
       this.runStartNoteId = first?.noteIds[0]
       const start: StartOptions = {}
       if (loop) start.loop = loop
@@ -266,6 +289,15 @@ export class Player {
       if (!keepBackend) this.backendPromise = undefined
       throw e
     }
+  }
+
+  /** The event Play starts from: `fromNoteId`, else the paused or tapped note, else the start of the loop, else the first. */
+  private startEvent(timeline: Timeline, fromNoteId?: string): PlaybackEvent | undefined {
+    const startId = fromNoteId ?? this.startNoteId
+    let from: PlaybackEvent | undefined = startId ? timeline.eventOfNote(startId) : undefined
+    const loop = this.loopSpan(timeline)
+    if (!from && loop) from = timeline.eventAtBeat(loop.start)
+    return from ?? timeline.events[0]
   }
 
   /** Pauses; Play continues at the note that was heard. A pause during the count-in resumes at its start. */
@@ -294,7 +326,9 @@ export class Player {
     else if (this.stateValue !== 'loading') await this.play()
   }
 
+  /** Stops the music, and the metronome on its own: Stop leaves nothing sounding. */
   stop(): void {
+    this.stopMetronomeAlone()
     this.runId++
     this.scheduler?.stop()
     this.pausedNoteId = undefined
@@ -322,13 +356,16 @@ export class Player {
   setTempo(bpm: number): number {
     this.bpmValue = clampTempo(bpm)
     this.scheduler?.setBpm(this.quarterBpm())
+    this.alone?.setBpm(this.quarterBpm())
     return this.bpmValue
   }
 
-  /** Sets the beat unit tempo is counted in (the quarter bpm follows). */
+  /** Sets the beat unit tempo is counted in (the quarter bpm follows, and the beats of the metronome on its own). */
   setBeatUnit(unit: Quarters): void {
     this.unit = unit
     this.scheduler?.setBpm(this.quarterBpm())
+    // The beat, the count of the bar and the quarter bpm change together, in one step.
+    if (this.alone && this.aloneBar) this.alone.setBeat(unit, countInClicks(this.aloneBar.score, this.aloneBar.barIndex, unit), this.quarterBpm())
   }
 
   setCountIn(on: boolean): void {
@@ -385,11 +422,77 @@ export class Player {
 
   /**
    * Switches the metronome on or off, also while playing: no restart, the clicks start from the next
-   * beat (see `Scheduler.setMetronome`).
+   * beat (see `Scheduler.setMetronome`). Switched on while stopped or paused, it sounds on its own at
+   * once; this can be the first gesture, so the backend may be made here. Resolves when it sounds (or
+   * at once when nothing has to start), and rejects, like a failed Play, when the backend cannot be
+   * made; the setting stays on and nothing sounds. Switched off, it stops at once.
    */
-  setMetronome(on: boolean): void {
+  setMetronome(on: boolean): Promise<void> {
     this.metronomeOn = on
     this.scheduler?.setMetronome(on)
+    if (!on) {
+      this.stopMetronomeAlone()
+      return Promise.resolve()
+    }
+    if (this.stateValue !== 'stopped' && this.stateValue !== 'paused') return Promise.resolve()
+    return this.startMetronomeAlone()
+  }
+
+  /**
+   * Silences the metronome on its own and leaves the setting as it is (the app going to the background,
+   * the screen being left). It does not start again by itself.
+   */
+  stopMetronomeAlone(): void {
+    this.aloneId++
+    this.aloneStarting = undefined
+    const alone = this.alone
+    if (!alone) return
+    this.alone = undefined
+    this.aloneBar = undefined
+    alone.stop()
+    this.o.onMetronomeAlone?.(false)
+  }
+
+  private startMetronomeAlone(): Promise<void> {
+    if (this.alone) return Promise.resolve()
+    if (this.aloneStarting) return this.aloneStarting
+    const id = ++this.aloneId
+    // Made here, inside the gesture (an AudioContext must be created or resumed in one), before any await.
+    const backend = (this.backendPromise ??= this.o.backend(this.instrumentValue))
+    const starting = (async () => {
+      let audio: AudioBackend
+      try {
+        audio = await backend
+      } catch (e) {
+        // Asked for again by the next gesture, as after a failed Play.
+        if (this.backendPromise === backend) this.backendPromise = undefined
+        if (id !== this.aloneId) return
+        throw e
+      }
+      const score = await this.o.loadScore()
+      // Switched off, played, stopped or silenced while it loaded: the later wish wins.
+      if (id !== this.aloneId || !this.metronomeOn || (this.stateValue !== 'stopped' && this.stateValue !== 'paused')) return
+      this.audio = audio
+      // The bar Play would start from gives the beats of the bar, as it gives the count-in's.
+      const first = this.startEvent(buildTimeline(score, this.instrumentValue))
+      const barIndex = first?.barIndex ?? 0
+      const alone = new FreeMetronome({
+        clock: audio,
+        output: audio.output,
+        bpm: this.quarterBpm(),
+        spacing: this.unit,
+        beatsPerBar: countInClicks(score, barIndex, this.unit),
+        ...(this.o.timer ? { timer: this.o.timer } : {}),
+      })
+      this.alone = alone
+      this.aloneBar = { score, barIndex }
+      alone.start()
+      this.o.onMetronomeAlone?.(true)
+    })().finally(() => {
+      if (this.aloneStarting === starting) this.aloneStarting = undefined
+    })
+    this.aloneStarting = starting
+    return starting
   }
 
   /** Sets A4 in Hz (a whole number from 430 to 450); the notes that start from now on follow it. Returns the value set. */

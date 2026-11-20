@@ -1,4 +1,4 @@
-import type { ClickSpec, NoteOnSpec, NoteOutput, VoiceHandle } from './scheduler.ts'
+import type { ClickHandle, ClickSpec, NoteOnSpec, NoteOutput, VoiceHandle } from './scheduler.ts'
 import type { SampleMap } from './samples.ts'
 import { PITCH_REFERENCE_DEFAULT, clampPitchReference, parseSampleMap, pickSample, soundFolder } from './samples.ts'
 import { PLAYBACK_TUNING } from './scheduler.ts'
@@ -217,7 +217,12 @@ export class Sampler implements NoteOutput {
     this.bank = bank
   }
 
-  click(spec: ClickSpec): void {
+  /**
+   * A click on its own gain node, so it can be taken back: cancelling one that has not started silences
+   * that node and stops its oscillator before its start, and it never sounds. One that has started is
+   * left alone (cutting a 50 ms blip short would only add a click of its own).
+   */
+  click(spec: ClickSpec): ClickHandle | void {
     const osc = this.ctx.createOscillator?.()
     if (!osc) return
     const level = spec.accent ? CLICK.accentGain : CLICK.beatGain
@@ -234,6 +239,18 @@ export class Sampler implements NoteOutput {
     osc.onended = () => {
       osc.disconnect()
       gain.disconnect()
+    }
+    return {
+      cancel: () => {
+        if (this.ctx.currentTime >= spec.when) return
+        gain.gain.cancelScheduledValues(0)
+        gain.gain.value = 0
+        try {
+          osc.stop(0)
+        } catch {
+          // already stopped
+        }
+      },
     }
   }
 

@@ -228,6 +228,13 @@
   background: var(--primary-tint);
   color: var(--primary);
 }
+/* Clicking on its own, with no music: the icon is filled in, so it shows in landscape too (where the text is hidden). */
+.metronome-toggle--alone .icon {
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: 0 0 0 0.25rem var(--primary);
+}
 .metronome-text {
   display: grid;
   gap: 0.125rem;

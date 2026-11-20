@@ -9,6 +9,7 @@ import { PLAYBACK_TUNING } from '../src/core/playback/scheduler.ts'
 import type { ClickSpec, NoteOnSpec, TimerApi, VoiceHandle } from '../src/core/playback/scheduler.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { notesOf } from '../src/core/score/model.ts'
+import { frac } from '../src/core/score/rational.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { dyn, n, scoreOf, scoreXml, wedge } from './playbackHelpers.ts'
 
@@ -122,6 +123,8 @@ function ticking(options: { gateSounds?: boolean } = {}) {
   const timer: TimerApi = { set: (fn) => ((tick = fn), 1), clear: () => (tick = undefined) }
   const notes: NoteOnSpec[] = []
   const clicks: ClickSpec[] = []
+  /** The clicks that were taken back before they sounded. */
+  const cancelled = new Set<ClickSpec>()
   const sounds: string[] = []
   const pitchReferences: number[] = []
   const gates: { sound: string; open: () => void; fail: (e: Error) => void }[] = []
@@ -135,7 +138,10 @@ function ticking(options: { gateSounds?: boolean } = {}) {
         notes.push(spec)
         return { release() {}, cancel() {} }
       },
-      click: (spec) => void clicks.push(spec),
+      click: (spec) => {
+        clicks.push(spec)
+        return { cancel: () => void cancelled.add(spec) }
+      },
     },
     useSound(sound) {
       sounds.push(sound)
@@ -159,7 +165,9 @@ function ticking(options: { gateSounds?: boolean } = {}) {
       bpm: 120,
       ...extra,
     })
-  return { clock, notes, clicks, sounds, pitchReferences, gates, made, audio, run, player }
+  /** The clicks that have sounded: their time has come and they were not taken back. */
+  const heardClicks = (): ClickSpec[] => clicks.filter((c) => !cancelled.has(c) && c.when <= clock.currentTime + 1e-9)
+  return { clock, notes, clicks, cancelled, heardClicks, sounds, pitchReferences, gates, made, audio, run, player, timerRunning: () => tick !== undefined }
 }
 
 const melody = (): Score => scoreOf([{ body: ['C', 'D', 'E', 'F'].map((step) => n({ step })).join('') }, { body: ['G', 'A', 'B', 'C'].map((step) => n({ step, octave: step === 'C' ? 5 : 4 })).join('') }])
@@ -517,4 +525,268 @@ test('player: switching instrument while stopped changes the next Play only', as
   assert.equal(t.notes[0]!.midi[0], 60)
   await player.setInstrument(PIANO) // the same instrument: nothing to do
   assert.deepEqual(t.sounds, ['piano'])
+})
+
+// --- the metronome on its own (change steady-notes-and-free-metronome, task 1.2) ---
+
+/** Seconds from START, to the millisecond, for reading click times. */
+const at = (c: ClickSpec): number => Math.round((c.when - START) * 1000) / 1000
+
+/** Bar 1 in 4/4, bar 2 in 3/4 (its first note is `b2`), bar 3 in 3/4 again. */
+const changingMeter = (): Score =>
+  parseMusicXml(
+    scoreXml([
+      { body: ['C', 'D', 'E', 'F'].map((step, k) => n({ step, id: `a${k}` })).join('') },
+      { body: '<attributes><time><beats>3</beats><beat-type>4</beat-type></time></attributes>' + n({ step: 'G', id: 'b2' }) + n({ step: 'A' }) + n({ step: 'B' }) },
+      { body: ['C', 'D', 'E'].map((step) => n({ step })).join('') },
+    ]),
+  )
+
+test('player: the metronome switched on while stopped clicks on its own at the tempo, every fourth accented in 4/4, and plays no notes (spec "Metronome without the music")', async () => {
+  const t = ticking()
+  const sounding: boolean[] = []
+  const states: string[] = []
+  const player = t.player(TENOR_SAX, melody(), { bpm: 80, onMetronomeAlone: (on) => sounding.push(on), onState: (s) => states.push(s) })
+  const switched = player.setMetronome(true)
+  assert.equal(t.made.length, 1, 'the backend is asked for in the press itself (it can be the first gesture)')
+  await switched
+  assert.equal(player.metronomeAlone, true)
+  assert.deepEqual(sounding, [true])
+  assert.equal(player.state, 'stopped', 'not a state of its own: the Play button stays Play')
+  t.run(6)
+  const heard = t.heardClicks()
+  assert.equal(heard.length, 8, '80 bpm: a click every 0.75 s')
+  heard.forEach((c, k) => close(c.when, START + k * 0.75, `click ${k}`))
+  assert.deepEqual(
+    heard.map((c) => c.accent),
+    [true, false, false, false, true, false, false, false],
+  )
+  assert.equal(t.notes.length, 0, 'no notes')
+  assert.deepEqual(t.sounds, [], 'and no instrument sound is asked for')
+
+  await player.setMetronome(false)
+  assert.equal(player.metronomeAlone, false)
+  assert.deepEqual(sounding, [true, false])
+  const handed = t.clicks.length
+  t.run(3)
+  assert.equal(t.clicks.length, handed, 'off: no more clicks')
+  assert.equal(t.timerRunning(), false, 'and its timer is gone')
+  assert.deepEqual(states, [], 'the state never changed: no loading, no playing')
+})
+
+test('player: a player made with the metronome on stays silent until it is switched on, and does not make a backend (spec "Reopen with the metronome on")', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melody(), { metronome: true })
+  assert.equal(player.metronome, true)
+  t.run(3)
+  assert.equal(player.metronomeAlone, false)
+  assert.deepEqual(t.clicks, [])
+  assert.deepEqual(t.made, [], 'nothing is made before a gesture')
+  await player.setMetronome(true) // on again (the switch was already on): it sounds now
+  t.run(1)
+  assert.equal(player.metronomeAlone, true)
+  assert.ok(t.heardClicks().length > 0)
+  await player.setMetronome(true)
+  t.run(1)
+  const times = t.heardClicks().map(at)
+  assert.deepEqual(times, [...new Set(times)], 'switched on twice: one metronome, not two on top of each other')
+})
+
+test('player: the beats of the bar on its own come from the bar Play would start from: the tapped note, else the loop, else the first bar', async () => {
+  const accents = async (setup: (player: Player) => void): Promise<boolean[]> => {
+    const t = ticking()
+    const player = t.player(TENOR_SAX, changingMeter(), { bpm: 120 })
+    setup(player)
+    await player.setMetronome(true)
+    t.run(3)
+    return t.heardClicks().map((c) => c.accent)
+  }
+  assert.deepEqual(await accents(() => undefined), [true, false, false, false, true, false], 'bar 1: 4/4')
+  assert.deepEqual(await accents((p) => p.seek('b2')), [true, false, false, true, false, false], 'the tapped note is in bar 2: 3/4')
+  assert.deepEqual(await accents((p) => p.setLoop({ start: 2, end: 2 })), [true, false, false, true, false, false], 'the loop starts in bar 3: 3/4')
+})
+
+test('player: a tempo change reaches the metronome on its own at once (spec "Change the tempo of the metronome on its own")', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melody(), { bpm: 80 })
+  await player.setMetronome(true)
+  t.run(1.7) // clicks at 0, 0.75, 1.5
+  player.setTempo(100)
+  t.run(3)
+  const heard = t.heardClicks()
+  const gaps = heard.slice(1).map((c, k) => Math.round((c.when - heard[k]!.when) * 1000) / 1000)
+  assert.deepEqual(gaps.slice(0, 2), [0.75, 0.75])
+  assert.ok(gaps.slice(2).every((g) => g === 0.6), `then 100 bpm: ${gaps.join(', ')}`)
+
+  // A new beat unit counts the beat (and the bar) in it: 4/4 in half notes is two clicks a bar.
+  player.setBeatUnit(frac(2))
+  t.run(0.1)
+  const from = t.heardClicks().length
+  t.run(5)
+  const halves = t.heardClicks().slice(from)
+  halves.slice(1).forEach((c, k) => close(c.when - halves[k]!.when, 0.6, `100 half notes a minute: ${k}`))
+  assert.deepEqual(
+    halves.map((c) => c.accent).slice(0, 4),
+    [true, false, true, false],
+  )
+})
+
+test('player: Play takes over from the metronome on its own, and no click sounds off the grid of the count-in (spec "Play takes over")', async () => {
+  const t = ticking()
+  const sounding: boolean[] = []
+  const player = t.player(TENOR_SAX, melody(), { bpm: 120, countIn: true, onMetronomeAlone: (on) => sounding.push(on) })
+  await player.setMetronome(true)
+  // Clicks at 0.06, 0.56, 1.06; at 0.975 the one at 1.06 has been handed to the output and has not sounded.
+  t.run(0.975)
+  const waiting = t.clicks.filter((c) => c.when > t.clock.currentTime)
+  assert.equal(waiting.length, 1, 'one click is waiting in the output')
+  const pressed = t.clock.currentTime
+  await player.play()
+  assert.equal(player.metronomeAlone, false)
+  assert.deepEqual(sounding, [true, false])
+  assert.equal(t.cancelled.has(waiting[0]!), true, 'the waiting click is taken back')
+  t.run(4)
+  const after = t.heardClicks().filter((c) => c.when >= pressed)
+  // A count-in bar (4 clicks), then the metronome with the music: all on one grid, 0.5 s apart.
+  const anchor = after[0]!.when
+  close(anchor, pressed + START, 'the first click after Play is the count-in, one start delay after the press')
+  after.forEach((c, k) => close(c.when, anchor + k * 0.5, `click ${k} on the grid`))
+  close(t.notes[0]!.when, anchor + 4 * 0.5, 'the music starts after one bar of count-in')
+  assert.deepEqual(
+    after.map((c) => c.accent).slice(0, 8),
+    [true, false, false, false, true, false, false, false],
+  )
+})
+
+test('player: pause, stop and the end of the piece stay silent; switched on while paused it sounds, and Play resumes the music', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melody(), { metronome: true })
+  await player.play()
+  t.run(1.2)
+  player.pause()
+  assert.equal(player.metronomeAlone, false, 'pausing does not start it')
+  let handed = t.clicks.length
+  t.run(2)
+  assert.equal(t.clicks.length, handed, 'paused: silent')
+
+  await player.setMetronome(true)
+  assert.equal(player.state, 'paused')
+  assert.equal(player.metronomeAlone, true)
+  t.run(1)
+  assert.ok(t.clicks.length > handed, 'switched on while paused: it clicks')
+  t.notes.length = 0
+  await player.play()
+  assert.equal(player.metronomeAlone, false)
+  t.run(0.2)
+  assert.equal(t.notes[0]!.midi[0], 64 - 14, 'the music resumes at the note heard when paused (E)')
+
+  t.run(5)
+  assert.equal(player.state, 'stopped', 'the end of the piece')
+  assert.equal(player.metronomeAlone, false)
+  handed = t.clicks.length
+  t.run(2)
+  assert.equal(t.clicks.length, handed, 'the end is silent')
+
+  // Stop silences the metronome on its own too.
+  await player.setMetronome(false)
+  await player.setMetronome(true)
+  player.stop()
+  assert.equal(player.metronomeAlone, false)
+  assert.equal(player.metronome, true, 'the switch stays on')
+})
+
+test('player: a backend that cannot be made rejects the switch as a failed Play does; nothing is stuck and the next press tries again', async () => {
+  const t = ticking()
+  let attempts = 0
+  const player = t.player(TENOR_SAX, melody(), {
+    backend: async () => {
+      attempts++
+      if (attempts === 1) throw new Error('no audio')
+      return t.audio
+    },
+  })
+  await assert.rejects(player.setMetronome(true), /no audio/)
+  assert.equal(player.state, 'stopped')
+  assert.equal(player.metronomeAlone, false)
+  assert.equal(player.metronome, true, 'the switch stays on; nothing sounds')
+  t.run(1)
+  assert.deepEqual(t.clicks, [])
+
+  // The next gesture makes a backend again: here Play, which then plays with the metronome.
+  await player.play()
+  assert.equal(attempts, 2)
+  assert.equal(player.state, 'playing')
+  t.run(0.3)
+  assert.equal(t.clicks.length, 1)
+})
+
+test('player: while the backend loads, switching off or pressing Play wins over the switch on', async () => {
+  const gated = () => {
+    const t = ticking()
+    let arrive: (audio: AudioBackend) => void = () => undefined
+    let fail: (e: Error) => void = () => undefined
+    const player = t.player(TENOR_SAX, melody(), {
+      backend: () =>
+        new Promise<AudioBackend>((resolve, reject) => {
+          arrive = resolve
+          fail = reject
+        }),
+    })
+    return { t, player, arrive: () => arrive(t.audio), fail: (e: Error) => fail(e) }
+  }
+
+  // Off before it arrived: nothing sounds when it arrives.
+  const off = gated()
+  const on = off.player.setMetronome(true)
+  await off.player.setMetronome(false)
+  off.arrive()
+  await on
+  off.t.run(2)
+  assert.deepEqual(off.t.clicks, [])
+  assert.equal(off.player.metronomeAlone, false)
+
+  // Play while it loads: the music starts (with its metronome), the metronome on its own never does.
+  const play = ticking()
+  const sounding: boolean[] = []
+  const p = play.player(TENOR_SAX, melody(), {
+    onMetronomeAlone: (s) => sounding.push(s),
+    backend: () => new Promise<AudioBackend>((resolve) => setTimeout(() => resolve(play.audio), 0)),
+  })
+  const switched = p.setMetronome(true)
+  const playing = p.play()
+  assert.equal(p.state, 'loading')
+  await Promise.all([switched, playing])
+  assert.equal(p.state, 'playing')
+  assert.deepEqual(sounding, [], 'never on its own')
+  play.run(2)
+  const heard = play.heardClicks()
+  heard.forEach((c, k) => close(c.when, START + k * 0.5, `click ${k}: with the music`))
+  assert.equal(heard.length, 4)
+
+  // A load that fails after the switch was turned off rejects nobody.
+  const late = gated()
+  const pending = late.player.setMetronome(true)
+  await late.player.setMetronome(false)
+  late.fail(new Error('no audio'))
+  await pending
+  assert.equal(late.player.state, 'stopped')
+})
+
+test('player: a beat unit made shorter while the metronome sounds on its own gives no stray click, and the next click starts a bar', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melody(), { bpm: 100, beatUnit: frac(2) }) // 100 half notes a minute: 0.6 s, two a bar
+  await player.setMetronome(true)
+  t.run(1.5) // clicks at 0, 0.6, 1.2 (beats 0, 1, 2: accented, not, accented)
+  t.run(0.35) // 0.35 s after the last click: more than half of a quarter at 100
+  const from = t.clicks.length
+  player.setBeatUnit(frac(1)) // 100 quarters a minute: 0.6 s again, four a bar
+  t.run(3)
+  const next = t.heardClicks().filter((c) => t.clicks.indexOf(c) >= from)
+  close(next[0]!.when, START + 1.2 + 0.6, 'the next click one new beat after the last one, no click in between')
+  next.slice(1).forEach((c, k) => close(c.when - next[k]!.when, 0.6, `gap ${k}`))
+  assert.deepEqual(
+    next.map((c) => c.accent).slice(0, 5),
+    [true, false, false, false, true],
+    'a new bar: four quarters, the first accented',
+  )
 })

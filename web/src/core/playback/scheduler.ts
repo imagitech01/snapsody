@@ -82,10 +82,20 @@ export interface ClickSpec {
   accent: boolean
 }
 
+/** A click handed to the output. */
+export interface ClickHandle {
+  /** Drops the click when it has not started yet (a click that is sounding is left to finish). */
+  cancel(): void
+}
+
 export interface NoteOutput {
   noteOn(spec: NoteOnSpec): VoiceHandle
-  /** A count-in or metronome click (optional: an output without it plays them silently). */
-  click?(spec: ClickSpec): void
+  /**
+   * A count-in or metronome click (optional: an output without it plays them silently). It may return
+   * a handle to cancel it, which the metronome on its own uses when Play takes over (freeMetronome.ts);
+   * an output that returns nothing cannot take a click back.
+   */
+  click?(spec: ClickSpec): ClickHandle | void
 }
 
 /** A count-in: `clicks` clicks, `spacing` beats apart, ending where the first note starts. */

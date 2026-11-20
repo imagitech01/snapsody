@@ -114,6 +114,7 @@ function Practising({ opened }: { opened: Opened }) {
   const tempo = session.tempo.value
   const loop = session.loop.value
   const metronome = session.metronome.value
+  const alone = session.metronomeAlone.value
   const counting = session.counting.value
 
   const toggle = (): void => {
@@ -123,6 +124,13 @@ function Practising({ opened }: { opened: Opened }) {
     }
     soundProblem.value = false
     void session.play().catch(() => (soundProblem.value = true))
+  }
+
+  // Switched on while nothing plays, the metronome clicks on its own: it can be the first press that
+  // needs the sound, so a failure is told as a failed Play is.
+  const toggleMetronome = (): void => {
+    soundProblem.value = false
+    void session.toggleMetronome().catch(() => (soundProblem.value = true))
   }
 
   return (
@@ -195,7 +203,14 @@ function Practising({ opened }: { opened: Opened }) {
             onIncrement={() => session.setTempo(tempo + 1)}
             repeat
           />
-          <button type="button" class="metronome-toggle" aria-pressed={metronome} aria-label={t('practice.metronome')} onClick={() => session.toggleMetronome()}>
+          {/* aria-pressed is the switch; the class says it is clicking on its own, without the music (a fuller tint). */}
+          <button
+            type="button"
+            class={`metronome-toggle${alone ? ' metronome-toggle--alone' : ''}`}
+            aria-pressed={metronome}
+            aria-label={t('practice.metronome')}
+            onClick={toggleMetronome}
+          >
             <Icon name="metronome" />
             <span class="metronome-text">
               <span class="metronome-name">{t('practice.metronome')}</span>

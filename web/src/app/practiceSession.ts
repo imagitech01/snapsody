@@ -53,14 +53,20 @@ import type { Settings } from './settings.ts'
  * `save()` rejects for a caller that wants to know. `lastPracticed` of the piece is written once per
  * session, when playback first starts.
  *
- * Keep awake is on exactly while the player is playing, and follows the player's state, so a Play that
- * fails to load its sound never holds the screen on or counts as practising.
+ * Keep awake is on exactly while the player is playing or the metronome clicks on its own, and follows the
+ * player, so a Play that fails to load its sound never holds the screen on or counts as practising.
  *
  * "Show a bar" (`showBar`, when the user scrolls the score away) and "Return to playing"
  * (`returnToPlaying`) only move the view: they never call the player. `following` is what the score
  * view reads: it is true while the view should scroll along with the playing bar, which is always,
  * except while the user looks at another bar (design D17: following is not a setting). `goToBar` and `goToNote` are the ones that move the player (Restart, a
  * tap on a note): where Play starts, or where playback carries on.
+ *
+ * The metronome on its own (change steady-notes-and-free-metronome, design D1). Switching the metronome
+ * on while nothing plays starts the clicks at once (the player's `metronomeAlone`); `metronomeAlone` says
+ * when they sound. A remembered `metronome: true` only sets the switch: nothing sounds until Play, or
+ * until the user switches it off and on. Leaving the piece (`close`) and the app going to the background
+ * silence it and keep the setting; it does not start again by itself.
  *
  * The count-in. While the count-in clicks sound, `counting` says which click ({ n, of }); it is null
  * otherwise. It is read from the heard position by the same poll as the bar.
@@ -131,6 +137,8 @@ export class PracticeSession {
   /** The general count-in setting (`Settings.countIn`). */
   readonly countIn: ReadonlySignal<boolean>
   readonly metronome: ReadonlySignal<boolean>
+  /** True while the metronome sounds on its own, with no music playing. */
+  readonly metronomeAlone: ReadonlySignal<boolean>
   /** The bar the user asked to see while the music plays elsewhere ("Showing bar N"), or null. */
   readonly shownBar: ReadonlySignal<number | null>
   /** True while the view scrolls along with the playing bar: no other bar is being shown. */
@@ -157,6 +165,7 @@ export class PracticeSession {
   private readonly loopSignal: Signal<LoopBars | null>
   private readonly restSignal: Signal<LoopRest>
   private readonly metronomeSignal: Signal<boolean>
+  private readonly aloneSignal: Signal<boolean>
   private readonly shownSignal: Signal<number | null>
   private readonly settings: PracticeSessionDeps['settings']
   private readonly restingSignal: Signal<boolean>
@@ -207,6 +216,7 @@ export class PracticeSession {
     this.loopSignal = signal(loop)
     this.restSignal = signal(saved.loopRest)
     this.metronomeSignal = signal(saved.metronome)
+    this.aloneSignal = signal(false)
     this.shownSignal = signal<number | null>(null)
     this.restingSignal = signal(false)
     this.countingSignal = signal(null)
@@ -217,6 +227,7 @@ export class PracticeSession {
     this.loopRest = this.restSignal
     this.countIn = deps.settings.countIn
     this.metronome = this.metronomeSignal
+    this.metronomeAlone = this.aloneSignal
     this.shownBar = this.shownSignal
     this.following = computed(() => this.shownSignal.value === null)
     this.instrument = instrument
@@ -237,8 +248,14 @@ export class PracticeSession {
       countIn: deps.settings.countIn.value,
       ...(loop ? { loop: loopRange(loop) } : {}),
       loopRest: saved.loopRest,
+      // Only the switch: a player made with the metronome on stays silent until Play or the user switches it on.
       metronome: saved.metronome,
       onState: (state) => this.onState(state),
+      onMetronomeAlone: (sounding) => {
+        this.aloneSignal.value = sounding
+        // The screen stays on while it clicks: a screen that times out sends the app to the background, which silences it.
+        this.setAwake(sounding || this.stateSignal.value === 'playing')
+      },
     })
     // Play starts where the user was: tapping a bar is how the player is told.
     const id = this.noteOfBar(bar)
@@ -383,16 +400,21 @@ export class PracticeSession {
     return set
   }
 
-  /** The metronome, also while playing (it starts with the next beat). */
-  setMetronome(on: boolean): void {
-    if (this.closed) return
-    this.player.setMetronome(on)
+  /**
+   * The metronome, also while playing (it starts with the next beat). Switched on while nothing plays,
+   * it clicks on its own at once. The switch is set (and saved) at once; the promise rejects, as Play
+   * does, when the sound cannot be loaded, and the switch then stays on with nothing sounding.
+   */
+  setMetronome(on: boolean): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    const started = this.player.setMetronome(on)
     this.metronomeSignal.value = on
     this.change()
+    return started
   }
 
-  toggleMetronome(): void {
-    this.setMetronome(!this.metronomeSignal.value)
+  toggleMetronome(): Promise<void> {
+    return this.setMetronome(!this.metronomeSignal.value)
   }
 
   /** The view looks at a bar (held to the piece) while the music plays on: following is paused. Never touches the player. */
@@ -447,6 +469,7 @@ export class PracticeSession {
   async close(): Promise<void> {
     if (this.closed) return
     this.closing = true
+    this.player.stopMetronomeAlone()
     const state = this.player.state
     if (state === 'playing') this.player.pause()
     else if (state === 'loading') this.player.stop()
@@ -469,7 +492,7 @@ export class PracticeSession {
     const before = this.previous
     this.previous = state
     this.stateSignal.value = state
-    if (state !== 'loading') this.setAwake(state === 'playing')
+    if (state !== 'loading') this.setAwake(state === 'playing' || this.aloneSignal.value)
     if (state === 'playing') {
       this.startPoll()
       this.markPracticed()
@@ -490,9 +513,10 @@ export class PracticeSession {
     }
   }
 
-  /** The app goes to the background: pause (which saves), or save what is unsaved. */
+  /** The app goes to the background: silence the metronome on its own, pause (which saves), or save what is unsaved. */
   private background(): void {
     if (this.closed) return
+    this.player.stopMetronomeAlone()
     const state = this.player.state
     if (state === 'playing' || state === 'loading') this.player.pause()
     this.saveQuietly()

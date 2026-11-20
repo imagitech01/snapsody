@@ -812,3 +812,127 @@ test('closing while the sound is still loading closes the audio when it arrives'
   assert.deepEqual(s.device.keepAwakeLog, [])
   assert.equal(s.log.updates.length, 0, 'not practising')
 })
+
+// ---- The metronome on its own (change steady-notes-and-free-metronome, task 1.3) ----------------------------------------
+
+test('the metronome switched on while stopped clicks on its own at once, with no notes; switched off it stops (spec "Metronome without the music")', async () => {
+  const made: Instrument[] = []
+  const s = await setup({ practice: { tempo: 80 }, backend: async (i) => (made.push(i), rig.audio) })
+  const { rig: r, session } = s
+  assert.equal(session.metronomeAlone.value, false)
+  const switched = session.toggleMetronome()
+  assert.equal(made.length, 1, 'the toggle can be the first gesture: the audio is asked for in the press')
+  assert.equal(session.metronome.value, true)
+  await switched
+  assert.equal(session.metronomeAlone.value, true)
+  assert.equal(session.state.value, 'stopped', 'the Play button stays Play')
+  assert.deepEqual(s.device.keepAwakeLog, [true], 'the screen stays on while it clicks')
+  r.advance(6_000)
+  const heard = r.clicks.filter((c) => c.when <= r.seconds)
+  assert.equal(heard.length, 8, '80 bpm in 4/4')
+  heard.forEach((c, k) => close(c.when, START + k * 0.75, `click ${k}`))
+  assert.deepEqual(
+    heard.map((c) => c.accent),
+    [true, false, false, false, true, false, false, false],
+  )
+  assert.deepEqual(r.notes, [], 'no notes')
+
+  session.setTempo(100)
+  r.advance(3_000)
+  const later = r.clicks.filter((c) => c.when <= r.seconds).slice(-3)
+  close(later[2]!.when - later[1]!.when, 0.6, 'the tempo reaches it at once (spec "Change the tempo of the metronome on its own")')
+
+  await session.toggleMetronome()
+  assert.equal(session.metronomeAlone.value, false)
+  const handed = r.clicks.length
+  r.advance(3_000)
+  assert.equal(r.clicks.length, handed)
+  await session.save()
+  assert.equal((await stored(s))!.metronome, false)
+})
+
+test('a piece left with the metronome on opens silent; Play brings the clicks with the music (spec "Reopen with the metronome on")', async () => {
+  const made: Instrument[] = []
+  const { rig: r, session } = await setup({ practice: { metronome: true }, backend: async (i) => (made.push(i), rig.audio) })
+  assert.equal(session.metronome.value, true, 'it shows as on')
+  r.advance(5_000)
+  assert.deepEqual(r.clicks, [], 'and nothing sounds')
+  assert.deepEqual(made, [], 'no audio is made before a gesture')
+  assert.equal(session.metronomeAlone.value, false)
+  const pressed = r.seconds
+  await session.play()
+  r.advance(1_100)
+  assert.deepEqual(
+    r.clicks.filter((c) => c.when <= r.seconds).map((c) => Math.round((c.when - pressed - START) * 1000) / 1000 + 0),
+    [0, 0.5, 1],
+    'Play: the metronome with the music (120 bpm)',
+  )
+  assert.equal(session.metronomeAlone.value, false)
+})
+
+test('Play takes over from the metronome on its own: its clicks stop and the music starts with its count-in, on one grid (spec "Play takes over")', async () => {
+  const { rig: r, session } = await setup({ countIn: true })
+  await session.setMetronome(true)
+  r.advance(1_234)
+  const pressed = r.seconds
+  await session.play()
+  assert.equal(session.metronomeAlone.value, false)
+  assert.equal(session.state.value, 'playing')
+  r.advance(4_000)
+  const after = r.clicks.filter((c) => c.when > pressed && c.when <= r.seconds)
+  close(after[0]!.when, pressed + START, 'the count-in starts one start delay after Play')
+  after.forEach((c, k) => close(c.when, pressed + START + k * 0.5, `click ${k} on the grid of the music`))
+  close(r.notes[0]!.spec.when, pressed + START + 2, 'the music after one bar of count-in')
+})
+
+test('a sound that cannot be loaded for the metronome on its own is told as a failed Play; nothing is stuck', async () => {
+  const s = await setup({ backend: async () => Promise.reject(new Error('no audio')) })
+  await assert.rejects(s.session.toggleMetronome(), /no audio/)
+  assert.equal(s.session.state.value, 'stopped')
+  assert.equal(s.session.metronomeAlone.value, false)
+  assert.equal(s.session.metronome.value, true, 'the switch stays on')
+  assert.deepEqual(s.device.keepAwakeLog, [])
+  await assert.rejects(s.session.play(), /no audio/) // the next press tries again
+})
+
+test('leaving the piece, or the app going to the background, silences the metronome on its own and keeps it switched on', async () => {
+  const away = await setup()
+  await away.session.setMetronome(true)
+  away.rig.advance(1_000)
+  away.device.pause()
+  assert.equal(away.session.metronomeAlone.value, false)
+  assert.equal(away.session.metronome.value, true)
+  const handed = away.rig.clicks.length
+  away.rig.advance(3_000)
+  away.device.resume()
+  away.rig.advance(3_000)
+  assert.equal(away.rig.clicks.length, handed, 'silent, also after coming back')
+  await settle()
+  assert.equal((await stored(away))!.metronome, true, 'the switch is saved as on')
+
+  const left = await setup()
+  await left.session.setMetronome(true)
+  left.rig.advance(1_000)
+  await left.session.close()
+  assert.equal(left.session.metronomeAlone.value, false)
+  const sounded = left.rig.clicks.length
+  left.rig.advance(3_000)
+  assert.equal(left.rig.clicks.length, sounded, 'no click after the screen is left')
+  await settle()
+  assert.equal(left.rig.closed, 1, 'and the audio is closed')
+  assert.equal((await stored(left))!.metronome, true)
+})
+
+test('leaving the piece while the audio for the metronome is still loading: nothing clicks when it arrives', async () => {
+  let arrive: (audio: AudioBackend) => void = () => undefined
+  const s = await setup({ backend: () => new Promise<AudioBackend>((resolve) => (arrive = resolve)) })
+  const switched = s.session.toggleMetronome()
+  await s.session.close()
+  arrive(s.rig.audio)
+  await switched
+  await settle()
+  s.rig.advance(3_000)
+  assert.deepEqual(s.rig.clicks, [])
+  assert.equal(s.session.metronomeAlone.value, false)
+  assert.equal(s.rig.closed, 1, 'the audio is closed when it comes')
+})

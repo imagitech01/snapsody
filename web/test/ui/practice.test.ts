@@ -136,8 +136,10 @@ test('practice home: it is in Dutch on a Dutch phone', async () => {
 
 /** Freezes the page's clock where it is: from here on time moves only with `page.clock.runFor`, so the music is exactly where a test puts it. */
 async function freeze(page: Page): Promise<void> {
+  // The margin has to outlast the round trip between the two calls, also while the page is busy decoding
+  // samples (the metronome switched on just before): pausing at a time already past is an error.
   const now = await page.evaluate(() => Date.now())
-  await page.clock.pauseAt(new Date(now + 10))
+  await page.clock.pauseAt(new Date(now + 250))
 }
 
 /** Runs the clock on in steps until [done] holds (the sound loads in real time, the music in fake time). */
@@ -301,6 +303,85 @@ test('practise: the tempo and the metronome are set at once and remembered; Rest
     const card = page.getByRole('region', { name: 'Continue practising' })
     await card.getByRole('heading', { name: 'Ode to Joy' }).waitFor()
     await page.waitForFunction(() => /Bar 1 of 12 · 30 BPM/.test(document.querySelector('[aria-label="Continue practising"]')?.textContent ?? ''))
+  })
+})
+
+/** Counts the clicks the app makes (each one is an oscillator, webaudio.ts) from now on, in the page. */
+const countClicks = (page: Page) =>
+  page.evaluate(() => {
+    const proto = BaseAudioContext.prototype
+    const real = proto.createOscillator
+    const w = window as unknown as { clickCount: number }
+    w.clickCount = 0
+    proto.createOscillator = function (this: BaseAudioContext) {
+      w.clickCount++
+      return real.call(this)
+    }
+  })
+const clicks = (page: Page) => page.evaluate(() => (window as unknown as { clickCount: number }).clickCount)
+/** The metronome toggle says it clicks on its own. */
+const alone = async (page: Page) => /metronome-toggle--alone/.test((await page.getByRole('button', { name: 'Metronome' }).getAttribute('class')) ?? '')
+
+test('practise: the metronome on its own: silent when the piece opens with it on, clicking when switched on while stopped, handing over to Play, and silenced by pause, the background and leaving (change steady-notes-and-free-metronome)', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await countClicks(page)
+    // Ode to Joy was left with the metronome on: it shows as on and nothing sounds (spec "Reopen with the metronome on").
+    await page.getByRole('button', { name: 'Continue practising' }).last().click()
+    await scoreDrawn(page)
+    const metronome = page.getByRole('button', { name: 'Metronome' })
+    assert.equal(await metronome.getAttribute('aria-pressed'), 'true')
+    await page.clock.runFor(3000)
+    assert.equal(await clicks(page), 0, 'nothing sounds until a press')
+    assert.equal(await alone(page), false)
+
+    // Off and on again while stopped: it clicks on its own (the first gesture makes the sound), the Play button stays Play.
+    await metronome.click()
+    await metronome.click()
+    await until(page, () => alone(page), 'the metronome clicks on its own')
+    assert.equal(await metronome.getAttribute('aria-pressed'), 'true')
+    await page.getByRole('button', { name: 'Play', exact: true }).waitFor()
+    const before = await clicks(page)
+    await page.clock.runFor(3000)
+    assert.ok((await clicks(page)) >= before + 2, '60 BPM: about a click a second')
+    assert.equal(await highlighted(page), null, 'and no music plays')
+
+    // Play takes over: the music starts, and the toggle no longer says it clicks on its own; paused it is silent.
+    await page.getByRole('button', { name: 'Play', exact: true }).click()
+    await page.getByRole('button', { name: 'Pause', exact: true }).waitFor()
+    assert.equal(await alone(page), false)
+    await until(page, async () => (await highlighted(page)) !== null, 'a note is highlighted')
+    await page.getByRole('button', { name: 'Pause', exact: true }).click()
+    await page.getByRole('button', { name: 'Play', exact: true }).waitFor()
+    await page.clock.runFor(200)
+    const paused = await clicks(page)
+    await page.clock.runFor(3000)
+    assert.equal(await clicks(page), paused, 'paused: silent')
+    assert.equal(await alone(page), false)
+
+    // On its own again, then the app goes to the background: it stops, and does not come back with the app.
+    await metronome.click()
+    await metronome.click()
+    await until(page, () => alone(page), 'the metronome clicks on its own again')
+    await app.pause()
+    await page.clock.runFor(200)
+    assert.equal(await alone(page), false)
+    const backgrounded = await clicks(page)
+    await app.resume()
+    await page.clock.runFor(3000)
+    assert.equal(await clicks(page), backgrounded, 'silent in the background and after coming back')
+    assert.equal(await metronome.getAttribute('aria-pressed'), 'true', 'still switched on')
+
+    // On its own, then leaving the piece stops it.
+    await metronome.click()
+    await metronome.click()
+    await until(page, () => alone(page), 'the metronome clicks on its own once more')
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
+    await page.getByRole('region', { name: 'Continue practising' }).waitFor()
+    await page.clock.runFor(200)
+    const left = await clicks(page)
+    await page.clock.runFor(3000)
+    assert.equal(await clicks(page), left, 'no click after the practice screen is left')
   })
 })
 
@@ -655,6 +736,13 @@ test('practise: a piece that is not there, or whose sound will not load, is said
     await page.route('**/samples/tenor-sax/map.json', (route) => route.fulfill({ status: 404, body: 'Not Found' }))
     await page.getByRole('button', { name: 'Continue practising' }).last().click()
     await scoreDrawn(page)
+    // The metronome switched on while stopped is the first press that needs the sound: it is told the same way.
+    const metronome = page.getByRole('button', { name: 'Metronome' })
+    await metronome.click()
+    await metronome.click()
+    await page.getByRole('alert').filter({ hasText: 'The sound of this instrument could not be loaded.' }).waitFor()
+    assert.equal(await alone(page), false)
+    assert.equal(await metronome.getAttribute('aria-pressed'), 'true', 'the switch stays on')
     await page.getByRole('button', { name: 'Play', exact: true }).click()
     await page.getByRole('alert').filter({ hasText: 'The sound of this instrument could not be loaded.' }).waitFor()
     await page.getByRole('button', { name: 'Play', exact: true }).waitFor()

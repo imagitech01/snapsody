@@ -525,3 +525,57 @@ test('sampler: an accent that is not above the level is a plain note', async () 
   const calls = ctx.gains[1]!.gain.calls
   assert.deepEqual(calls, [['set', 0, 0], ['ramp', 0.5, 0.005]])
 })
+
+// --- the click and taking it back (change steady-notes-and-free-metronome, task 1.2) ---
+
+class FakeOscillator {
+  type = ''
+  frequency = new FakeParam()
+  starts: (number | undefined)[] = []
+  stops: (number | undefined)[] = []
+  onended: (() => void) | null = null
+  connect(): void {}
+  disconnect(): void {}
+  start(when?: number): void {
+    this.starts.push(when)
+  }
+  stop(when?: number): void {
+    this.stops.push(when)
+  }
+}
+class ClickContext extends FakeContext {
+  oscillators: FakeOscillator[] = []
+  createOscillator(): FakeOscillator {
+    const o = new FakeOscillator()
+    this.oscillators.push(o)
+    return o
+  }
+}
+
+test('sampler click: on its own gain node; a click taken back before it starts never sounds, one that has started is left to finish', () => {
+  const ctx = new ClickContext()
+  const bank: SampleBank = { map: parseSampleMap({ format: 1, notes: { 60: { file: 'a.wav', sustainStart: 0.1, sustainEnd: 0.5 } } }), buffers: new Map() }
+  const sampler = new Sampler(ctx, bank)
+  const master = ctx.gains[0]!
+
+  const early = sampler.click({ when: 1, accent: true })
+  const gain = ctx.gains.at(-1)!
+  assert.notEqual(gain, master, 'a gain node of its own')
+  assert.equal(gain.connected, master)
+  ctx.currentTime = 0.95
+  early!.cancel()
+  assert.equal(gain.gain.value, 0)
+  assert.deepEqual(gain.gain.calls.at(-1), ['cancel', 0], 'its envelope is dropped')
+  assert.equal(ctx.oscillators[0]!.stops.at(-1), 0, 'and its oscillator is stopped before its start')
+
+  const sounding = sampler.click({ when: 1, accent: false })
+  const playing = ctx.gains.at(-1)!
+  const calls = playing.gain.calls.length
+  ctx.currentTime = 1.01
+  sounding!.cancel()
+  assert.equal(playing.gain.calls.length, calls, 'a click that has started is not cut short')
+  assert.equal(ctx.oscillators[1]!.stops.length, 1, 'only its own stop at the end')
+
+  // The scheduler ignores what click returns: an output without a handle still works (the fakes return nothing).
+  assert.equal(new Sampler(new FakeContext(), bank).click({ when: 0, accent: true }), undefined, 'no oscillator: no click and no handle')
+})
