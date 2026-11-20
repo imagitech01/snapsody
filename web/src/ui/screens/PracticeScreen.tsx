@@ -2,6 +2,7 @@ import { computed } from '@preact/signals'
 import type { ReadonlySignal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
 import { LibraryError } from '../../app/library.ts'
+import { partsHintText } from '../../app/parts.ts'
 import { PracticeSession } from '../../app/practiceSession.ts'
 import type { Screen } from '../../app/router.ts'
 import { TEMPO_MAX, TEMPO_MIN } from '../../core/playback/tempo.ts'
@@ -10,6 +11,7 @@ import { Button, Icon, IconButton, Stepper } from '../components/index.ts'
 import { ScoreIsland } from '../ScoreIsland.tsx'
 import { useShell } from '../ShellContext.ts'
 import { activePractice, soundProblem } from './activePractice.ts'
+import { cardName, cardShort, choiceOf } from './partNames.ts'
 
 /*
  * Practising a piece (frames 02.1 portrait and 02.2 landscape; specs `practice-controls`,
@@ -116,6 +118,12 @@ function Practising({ opened }: { opened: Opened }) {
   const metronome = session.metronome.value
   const alone = session.metronomeAlone.value
   const counting = session.counting.value
+  // A piece with several parts or a two-staff part: the card next to the metronome, and the hint the first time.
+  const hasParts = session.hasPartsRow
+  const hint = session.hint.value
+  const yours = session.part.value
+  const ownLine = session.ownLine.value
+  const card = hasParts ? choiceOf(session.score, yours, session.score.parts.length === 1) : undefined
 
   const toggle = (): void => {
     if (going) {
@@ -143,6 +151,7 @@ function Practising({ opened }: { opened: Opened }) {
           bar={session.bar}
           following={session.following}
           shownBar={session.shownBar}
+          part={session.part}
           playing={playing}
           heard={() => session.heard()}
           onScrollAway={(bar) => session.showBar(bar)}
@@ -153,6 +162,23 @@ function Practising({ opened }: { opened: Opened }) {
             <span aria-hidden="true">{counting.n}</span>
           </div>
         ) : null}
+        {hint ? (
+          <div class="practice-hint" role="status">
+            <span>{partsHintText(t, hint)}</span>
+            <button
+              type="button"
+              onClick={() => {
+                session.dismissHint()
+                router.openSheet('part')
+              }}
+            >
+              {t('practice.hint.change')}
+            </button>
+            <button type="button" class="practice-hint-close" aria-label={t('practice.hint.close')} onClick={() => session.dismissHint()}>
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        ) : null}
         {session.following.value ? null : (
           <div class="practice-return">
             <Button size="small" onPress={() => session.returnToPlaying()}>
@@ -160,7 +186,7 @@ function Practising({ opened }: { opened: Opened }) {
             </Button>
           </div>
         )}
-        {soundProblem.value ? (
+        {soundProblem.value || session.instrumentProblem.value ? (
           <p class="practice-problem practice-problem--over" role="alert">
             {t('practice.error.sound')}
           </p>
@@ -191,7 +217,7 @@ function Practising({ opened }: { opened: Opened }) {
             <span class="loop-label">{loop ? t('practice.loopOn', { from: loop.start, to: loop.end }) : t('practice.loopOff')}</span>
           </button>
         </div>
-        <div class="practice-row practice-row--tune">
+        <div class={`practice-row practice-row--tune${hasParts ? ' practice-row--parts' : ''}`}>
           <Stepper
             label={t('practice.tempo')}
             value={String(tempo)}
@@ -218,6 +244,24 @@ function Practising({ opened }: { opened: Opened }) {
               <span class="metronome-state">{metronome ? t('common.on') : t('common.off')}</span>
             </span>
           </button>
+          {card ? (
+            // Your own line on or off, also while playing. No icon: in portrait the words, in landscape the short form (the tint is the switch, as the metronome's).
+            <button
+              type="button"
+              class="metronome-toggle part-toggle"
+              aria-pressed={ownLine}
+              aria-label={t('practice.part.card', { name: cardName(t, card) })}
+              onClick={() => session.toggleOwnLine()}
+            >
+              <span class="metronome-text">
+                <span class="metronome-name">{cardName(t, card)}</span>
+                <span class="metronome-state">{ownLine ? t('common.on') : t('common.off')}</span>
+              </span>
+              <span class="part-short" aria-hidden="true">
+                {cardShort(t, card)}
+              </span>
+            </button>
+          ) : null}
         </div>
       </div>
     </>

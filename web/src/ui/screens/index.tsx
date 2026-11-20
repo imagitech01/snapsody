@@ -9,6 +9,7 @@ import { HomeScreen } from './HomeScreen.tsx'
 import { LibraryScreen } from './LibraryScreen.tsx'
 import { LicenceScreen } from './LicenceScreen.tsx'
 import { LoopSheet } from './LoopSheet.tsx'
+import { PartSheet, PieceInstrumentSheet } from './PartSheets.tsx'
 import { PracticeScreen } from './PracticeScreen.tsx'
 import { SettingsScreen } from './SettingsScreen.tsx'
 import { InstrumentSheet } from './SettingsSheets.tsx'
@@ -53,4 +54,6 @@ export const SHEETS: { readonly [N in SheetName]?: ComponentType } = {
   tools: ToolsSheet,
   loop: LoopSheet,
   instrument: InstrumentSheet,
+  part: PartSheet,
+  pieceInstrument: PieceInstrumentSheet,
 }

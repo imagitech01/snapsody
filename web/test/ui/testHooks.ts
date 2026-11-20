@@ -11,6 +11,15 @@ export interface TestHooks {
   shell: Shell
   /** Where the open practice session is (the header no longer shows it, design D19), or null when no piece is open. */
   practice(): { bar: number; bars: number; shownBar: number | null; following: boolean } | null
+  /** The parts of the open practice session (change parts-and-accompaniment): your part, what plays along, and the voices of the scheduled notes. Null when no piece is open. */
+  practiceParts(): {
+    part: { id: string; hand?: 'right' | 'left' }
+    silent: readonly string[]
+    ownLine: boolean
+    instrument: string
+    /** The distinct "part/staff" of the events the player has scheduled (after Play), with `*` after the ones of your line: ["P1/0*", "P2/0", "P2/1"]. */
+    scheduled: string[]
+  } | null
   /** Writes the fake files to sessionStorage, so that a reload of the page finds them (a phone keeps its files). */
   snapshot(): void
 }

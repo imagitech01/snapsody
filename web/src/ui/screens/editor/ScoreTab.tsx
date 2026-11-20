@@ -1,5 +1,6 @@
 import { clampTempo, tempoSetup } from '../../../core/playback/tempo.ts'
-import { firstTempoMarking, setKey, setTempoMarking, setTime } from '../../../core/score/edit.ts'
+import { firstTempoMarking, ownerOf, setKey, setTempoMarking, setTime } from '../../../core/score/edit.ts'
+import { voiceView } from '../../../core/score/model.ts'
 import { Button, Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
 import { SelectField } from './controls.tsx'
@@ -28,11 +29,12 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
   const { i18n } = useShell()
   const { t } = i18n
   const score = session.score.value
-  const first = score.measures[0]
+  const line = voiceView(score, session.voice)
+  const first = line.measures[0]
   const fifths = first?.key?.fifths ?? 0
   const time = first?.time ? `${first.time.beats}/${first.time.beatType}` : ''
   const times = time === '' || TIMES.includes(time) ? TIMES : [...TIMES, time]
-  const marking = firstTempoMarking(score)
+  const marking = firstTempoMarking(line)
   const written = marking?.perMinute
 
   const keyLabel = (n: number): string => (n === 0 ? t('key.none') : n > 0 ? t('key.sharps', { count: n }) : t('key.flats', { count: -n }))
@@ -42,7 +44,7 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
    * The steps of a held button (`repeated`) are one undo step with the first.
    */
   const step = (direction: 1 | -1, repeated: boolean): void => {
-    const setup = tempoSetup(score)
+    const setup = tempoSetup(line)
     const base = written ?? Math.round((setup.defaultBpm * setup.unit.n) / setup.unit.d)
     const perMinute = clampTempo(base + direction * TEMPO_STEP)
     run((s) =>
@@ -65,7 +67,7 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
         value={String(fifths)}
         disabled={!first}
         options={FIFTHS.map((n) => ({ value: String(n), label: keyLabel(n) }))}
-        onChange={(value) => run((s) => setKey(s, Number(value)))}
+        onChange={(value) => run((s) => setKey(ownerOf(s).score, ownerOf(s).ref, Number(value)))}
       />
 
       <span class="editor-field-label">{t('score.time')}</span>
@@ -79,7 +81,7 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
         ]}
         onChange={(value) => {
           const [beats, beatType] = value.split('/').map(Number)
-          if (beats && beatType) run((s) => setTime(s, beats, beatType))
+          if (beats && beatType) run((s) => setTime(ownerOf(s).score, beats, beatType))
         }}
       />
 
@@ -102,7 +104,7 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
         <Button variant="secondary" block onPress={onAddPages}>
           {t('editor.addPages')}
         </Button>
-        <p class="editor-hint">{t('editor.addPages.hint', { bar: score.measures.length })}</p>
+        <p class="editor-hint">{t('editor.addPages.hint', { bar: score.bars.length })}</p>
       </div>
     </div>
   )

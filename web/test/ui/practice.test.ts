@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Page } from 'playwright'
-import { withApp } from './app.ts'
+import { PHONE_LANDSCAPE, withApp } from './app.ts'
 import { highlighted, noteIdsByBar, tab, tabBar, tapNote, textOf } from './journey.ts'
 import { ID } from './pieces.ts'
-import { HOMR_MARKS_FIXTURE, read } from '../helpers.ts'
+import { voiceView, voices } from '../../src/core/score/model.ts'
+import { parseMusicXml } from '../../src/core/score/musicxml.ts'
+import { indexScore } from '../../src/core/score/noteMap.ts'
+import { HOMR_MARKS_FIXTURE, MELODY_PIANO_FIXTURE, read } from '../helpers.ts'
 import { barsScore } from './scores.ts'
 
 // The practice journey (practice-app design D15, "practise: home, continue, play, loop with rest, metronome,
@@ -610,7 +613,7 @@ test('practise: the count-in is switched on in Settings, for every piece, and co
   })
 })
 
-test('practise: the tools sheet has Edit and Favorite only; it stars the piece, opens the editor, and back closes the sheet before the screen (spec "Back with the tools sheet open")', async () => {
+test('practise: the tools sheet of a one-line piece has its instrument, Edit and Favorite; it stars the piece, opens the editor, and back closes the sheet before the screen (spec "Back with the tools sheet open")', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await page.getByRole('button', { name: 'Continue practising' }).last().click()
@@ -620,9 +623,10 @@ test('practise: the tools sheet has Edit and Favorite only; it stars the piece, 
     const tools = sheet(page, 'Practice tools')
     await tools.getByText('Everything else, only when you need it.').waitFor()
     await tools.getByText('Your score stays open while you adjust these.').waitFor()
-    // Design D17: no Go to bar, no instrument, no Follow playback, no count-in.
+    // Design D17: no Go to bar, no Follow playback, no count-in. Since parts-and-accompaniment (spec "Instrument for
+    // this piece"), a piece with a one-staff part has its own instrument row; a one-line piece has no Your part row.
     const rows = await tools.locator('.sheet-rows > *').evaluateAll((elements) => elements.map((e) => e.querySelector('.list-row-title')?.textContent ?? ''))
-    assert.deepEqual(rows, ['Edit score', 'Favorite'])
+    assert.deepEqual(rows, ['Instrument for this piece', 'Edit score', 'Favorite'])
 
     // The star: "Ode to Joy" is not a favorite; the switch makes it one, in the file and everywhere that shows it.
     const favorite = tools.getByRole('switch', { name: 'Favorite' })
@@ -805,5 +809,241 @@ test('practise: a tap on the multi-measure rest starts at its first bar, and the
     await page.clock.runFor(4000) // 9 s in: bar 12
     assert.equal(await highlighted(page), noteIdsByBar(read(HOMR_MARKS_FIXTURE))[11]![0], 'the note after the run is highlighted on time')
     assert.equal(await page.locator('.score-view svg g.multiRest.hl').count(), 0)
+  })
+})
+
+// ---- A piece with parts (change parts-and-accompaniment, tasks 6.2 to 6.5; specs `practice-controls`, `score-playback`) ----------
+
+/** The melody-and-piano fixture: 8 bars, a melody (P1) and a piano part (P2, two staves). Practised at 120 BPM. */
+async function makePartsPiece(page: Page, practice: Record<string, unknown> = {}): Promise<string> {
+  const xml = read(MELODY_PIANO_FIXTURE)
+  return page.evaluate(
+    async ({ xml, practice }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({ name: 'Melody and piano', musicxml: xml, bars: 8, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 8 }] })
+      await shell.library.writePractice(info.id, { bar: 1, tempo: 120, loop: null, loopRest: 0, metronome: false, ...practice })
+      await shell.router.push({ name: 'practice', pieceId: info.id })
+      return info.id
+    },
+    { xml, practice },
+  )
+}
+
+/** The ids of the notes of one part of the fixture, as the app's parser gives them. */
+function idsOfPart(part: string): Set<string> {
+  const score = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  return new Set(voices(score).filter((r) => r.part === part).flatMap((r) => [...indexScore(voiceView(score, r)).keys()]))
+}
+
+const practiceParts = (page: Page) => page.evaluate(() => window.__test!.practiceParts())
+/** The ids of every note drawn. */
+const drawnNoteIds = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.score-view svg g.note')].map((g) => g.id))
+/** How many staves the first drawn measure has. */
+const stavesPerMeasure = (page: Page) => page.evaluate(() => document.querySelector('.score-view svg g.measure')?.querySelectorAll(':scope > g.staff').length ?? 0)
+/** The piece's practice.json once [done] holds: leaving the screen saves, but the list shows before the write is done. */
+async function savedPractice(app: { page: Page; file(path: string): Promise<string | undefined> }, id: string, done: (saved: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
+  for (let i = 0; i < 100; i++) {
+    const text = await app.file(`pieces/${id}/practice.json`)
+    const saved = text ? (JSON.parse(text) as Record<string, unknown>) : undefined
+    if (saved && done(saved)) return saved
+    await app.page.waitForTimeout(20)
+  }
+  throw new Error('practice.json never said it')
+}
+const partCard = (page: Page, name: string) => page.getByRole('button', { name: `Your part: ${name}` })
+
+test('practise (parts): with the left hand chosen both staves are drawn and the right-hand staff is faded (spec "Left hand only")', async () => {
+  await withApp({ seed: 'library' }, async ({ page }) => {
+    await makePartsPiece(page, { part: { id: 'P2', hand: 'left' }, partsHintSeen: true })
+    await scoreDrawn(page)
+    const result = await page.evaluate(() => {
+      const measures = [...document.querySelectorAll('.score-view svg g.measure')]
+      return {
+        measures: measures.length,
+        staves: measures.map((m) => [...m.querySelectorAll(':scope > g.staff')].map((s) => ({ faded: s.classList.contains('staff-faded'), opacity: getComputedStyle(s).opacity }))),
+        brace: document.querySelectorAll('.score-view svg .grpSym').length,
+      }
+    })
+    assert.ok(result.measures > 0)
+    for (const staves of result.staves) {
+      assert.equal(staves.length, 2, 'both staves of the piano part')
+      assert.deepEqual(staves.map((s) => s.faded), [true, false], 'the right hand (the first staff) is faded, the left is not')
+      assert.equal(staves[0]!.opacity, '0.28')
+      assert.equal(staves[1]!.opacity, '1')
+    }
+    assert.ok(result.brace > 0, 'joined by a brace')
+    const drawn = new Set(await drawnNoteIds(page))
+    for (const id of idsOfPart('P1')) assert.ok(!drawn.has(id), 'no melody note is drawn')
+
+    // Both hands: nothing is faded; the right hand: the second staff is.
+    await page.evaluate(() => window.__test!.shell.router.openSheet('part'))
+    const part = sheet(page, 'Your part')
+    await part.getByRole('radio', { name: /^Piano, both hands/ }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.score-view svg g.staff.staff-faded').length === 0)
+    await part.getByRole('radio', { name: /^Piano, right hand/ }).click()
+    await page.waitForFunction(() => {
+      const staves = [...document.querySelectorAll('.score-view svg g.measure')].map((m) => [...m.querySelectorAll(':scope > g.staff')].map((s) => s.classList.contains('staff-faded')))
+      return staves.length > 0 && staves.every((f) => f.length === 2 && !f[0] && f[1])
+    })
+  })
+})
+
+test('practise (parts): the hint, the card, the Your part sheet, Plays along and the cursor following the piano (specs "Your part", "Your line on or off", "Parts hint")', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    const id = await makePartsPiece(page)
+    await scoreDrawn(page)
+    const melody = idsOfPart('P1')
+    const piano = idsOfPart('P2')
+
+    // The first time: the hint, and the melody alone drawn on one staff.
+    const hint = page.locator('.practice-hint')
+    assert.equal(await textOf(hint), 'Melody with a piano accompaniment. Try ⋯ › Your part. Change ×')
+    assert.equal(await stavesPerMeasure(page), 1)
+    assert.ok((await drawnNoteIds(page)).every((n) => melody.has(n)), 'only melody notes')
+    const card = partCard(page, 'Melody')
+    assert.equal(await card.getAttribute('aria-pressed'), 'true')
+    assert.equal(await textOf(card), 'Melody On')
+    const cardBox = (await card.boundingBox())!
+    assert.ok(cardBox.width >= 43.5 && cardBox.height >= 43.5, `a touch box: ${cardBox.width} x ${cardBox.height}`)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, 'no sideways scroll at 360 wide')
+    assert.equal(await page.getByRole('button', { name: 'Metronome' }).locator('.icon').isVisible(), false, 'the metronome card has no icon next to the part card')
+
+    // Change opens Your part, and the hint goes.
+    await hint.getByRole('button', { name: 'Change' }).click()
+    const part = sheet(page, 'Your part')
+    await part.waitFor()
+    assert.equal(await hint.count(), 0)
+    assert.deepEqual(
+      (await part.getByRole('radio').allTextContents()).map((t) => t.trim()),
+      ['MelodyOne staff', 'Piano, both handsBoth staves', 'Piano, right handThe app plays the left hand', 'Piano, left handThe app plays the right hand'],
+    )
+    assert.equal(await part.getByRole('radio', { name: /^Melody/ }).getAttribute('aria-checked'), 'true')
+    assert.equal(await part.getByRole('switch', { name: 'Piano' }).getAttribute('aria-checked'), 'true', 'the piano plays along by default')
+
+    // The piano, both hands: drawn on two staves, the melody listed under Plays along, and the card says so.
+    await part.getByRole('radio', { name: /^Piano, both hands/ }).click()
+    await page.waitForFunction(() => document.querySelector('.score-view svg g.measure')?.querySelectorAll(':scope > g.staff').length === 2)
+    assert.ok((await drawnNoteIds(page)).every((n) => piano.has(n)), 'only piano notes')
+    await part.getByRole('switch', { name: 'Melody' }).waitFor()
+    assert.deepEqual((await practiceParts(page))!.part, { id: 'P2' })
+    await partCard(page, 'Both hands').waitFor()
+    // Melody off under Plays along; back to the melody clears it (as the mock does) and turns the line on.
+    await part.getByRole('switch', { name: 'Melody' }).click()
+    assert.deepEqual((await practiceParts(page))!.silent, ['P1'])
+    await part.getByRole('radio', { name: /^Melody/ }).click()
+    assert.deepEqual(await practiceParts(page), { part: { id: 'P1' }, silent: [], ownLine: true, instrument: 'tenor-sax', scheduled: [] })
+
+    // Practise without the accompaniment: only the melody is in the scheduled notes.
+    await part.getByRole('switch', { name: 'Piano' }).click()
+    assert.equal(await part.getByRole('switch', { name: 'Piano' }).getAttribute('aria-checked'), 'false')
+    await part.getByRole('button', { name: 'Close' }).click()
+    await part.waitFor({ state: 'detached' })
+    await page.getByRole('button', { name: 'Play', exact: true }).click()
+    await until(page, async () => ((await practiceParts(page))?.scheduled.length ?? 0) > 0, 'the notes are scheduled')
+    assert.deepEqual((await practiceParts(page))!.scheduled, ['P1/0*'], 'only the user\'s line')
+    await until(page, async () => (await highlighted(page)) !== null, 'a note is highlighted')
+    assert.ok(melody.has((await highlighted(page))!), 'the cursor is on the melody')
+
+    // Your line on and off from the card, while playing: the cursor goes on.
+    await card.click()
+    assert.equal(await card.getAttribute('aria-pressed'), 'false')
+    assert.equal(await textOf(card), 'Melody Off')
+    assert.equal((await practiceParts(page))!.ownLine, false)
+    await until(page, async () => (await highlighted(page)) !== null, 'the cursor still follows')
+    await card.click()
+    assert.equal(await card.getAttribute('aria-pressed'), 'true')
+    assert.equal((await practiceParts(page))!.ownLine, true)
+
+    // Switch to the piano from Practice tools while it plays: redrawn, the melody plays along, and the cursor is on the piano.
+    await page.getByRole('button', { name: 'Practice tools' }).click()
+    const tools = sheet(page, 'Practice tools')
+    assert.match(await textOf(tools.getByRole('button', { name: /^Your part/ })), /Your part Melody$/, 'the piano is off, so nothing plays along')
+    await tools.getByRole('button', { name: /^Your part/ }).click()
+    await part.waitFor()
+    await part.getByRole('radio', { name: /^Piano, both hands/ }).click()
+    await page.waitForFunction(() => document.querySelector('.score-view svg g.measure')?.querySelectorAll(':scope > g.staff').length === 2)
+    await part.getByRole('button', { name: 'Close' }).click()
+    await until(page, async () => (await practiceParts(page))!.scheduled.includes('P2/0*'), 'the piano is the user\'s line')
+    await until(page, async () => piano.has((await highlighted(page)) ?? ''), 'the cursor follows the piano')
+    assert.deepEqual((await practiceParts(page))!.scheduled, ['P1/0', 'P2/0*', 'P2/1*'], 'the piano is yours, and the melody plays along (what was switched off is cleared)')
+    await page.getByRole('button', { name: 'Pause', exact: true }).click()
+
+    // Leaving saves it all, and the piece opens as it was left.
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
+    await page.getByRole('heading', { name: 'Let’s practise' }).waitFor()
+    const saved = await savedPractice(app, id, (p) => p.part !== undefined)
+    assert.deepEqual(saved.part, { id: 'P2' })
+    assert.equal(saved.partsHintSeen, true)
+    await page.evaluate((pieceId) => window.__test!.shell.router.push({ name: 'practice', pieceId }), id)
+    await scoreDrawn(page)
+    assert.equal(await stavesPerMeasure(page), 2, 'opens on the piano')
+    assert.equal(await page.locator('.practice-hint').count(), 0, 'and with no hint')
+    await partCard(page, 'Both hands').waitFor()
+  })
+})
+
+test('practise (parts): Instrument for this piece: "Your default" first, a choice is the piece\'s own and comes back (specs "Instrument for this piece")', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    const id = await makePartsPiece(page, { partsHintSeen: true })
+    await scoreDrawn(page)
+    await page.getByRole('button', { name: 'Practice tools' }).click()
+    const tools = sheet(page, 'Practice tools')
+    const row = tools.getByRole('button', { name: /^Instrument for this piece/ })
+    assert.equal(await textOf(row), 'Instrument for this piece Tenor saxophone · your default')
+    await row.click()
+    const list = sheet(page, 'Instrument for this piece')
+    const radios = list.getByRole('radio')
+    assert.match((await radios.first().textContent())!, /^Your default\s*Tenor saxophone/)
+    assert.equal(await radios.first().getAttribute('aria-checked'), 'true')
+    await list.getByRole('radio', { name: /^B♭ clarinet/ }).click()
+    await list.waitFor({ state: 'detached' })
+    assert.equal((await practiceParts(page))!.instrument, 'clarinet')
+    await page.getByRole('button', { name: 'Practice tools' }).click()
+    assert.equal(await textOf(tools.getByRole('button', { name: /^Instrument for this piece/ })), 'Instrument for this piece B♭ clarinet')
+    await tools.getByRole('button', { name: 'Close' }).click()
+
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
+    await page.getByRole('heading', { name: 'Let’s practise' }).waitFor()
+    assert.equal((await savedPractice(app, id, (p) => p.instrument !== undefined)).instrument, 'clarinet')
+    // The default in Settings is untouched, and the piece keeps its own.
+    assert.equal(await page.evaluate(() => window.__test!.shell.settings.defaultInstrument.value), 'tenor-sax')
+    await page.evaluate((pieceId) => window.__test!.shell.router.push({ name: 'practice', pieceId }), id)
+    await scoreDrawn(page)
+    assert.equal((await practiceParts(page))!.instrument, 'clarinet')
+  })
+})
+
+test('practise (parts): a piano-only piece has no Instrument row, and a one-line piece has neither the card, the Your part row nor the hint', async () => {
+  await withApp({ seed: 'library' }, async ({ page }) => {
+    // A one-line piece, as before: the metronome keeps its icon, and Practice tools has the instrument row only.
+    await page.evaluate((pieceId) => window.__test!.shell.router.push({ name: 'practice', pieceId }), ID.ode)
+    await scoreDrawn(page)
+    assert.equal(await page.getByRole('button', { name: /^Your part/ }).count(), 0, 'no card')
+    assert.equal(await page.locator('.practice-hint').count(), 0, 'no hint')
+    assert.equal(await page.getByRole('button', { name: 'Metronome' }).locator('.icon').isVisible(), true, 'the metronome card keeps its icon')
+    await page.getByRole('button', { name: 'Practice tools' }).click()
+    const tools = sheet(page, 'Practice tools')
+    await tools.waitFor()
+    assert.equal(await tools.getByRole('button', { name: /^Your part/ }).count(), 0, 'no Your part row')
+    assert.equal(await tools.getByRole('button', { name: /^Instrument for this piece/ }).count(), 1)
+  })
+})
+
+test('practise (parts): in landscape the card is a square with the short name, tinted while your line is on', async () => {
+  await withApp({ seed: 'library', viewport: PHONE_LANDSCAPE }, async ({ page }) => {
+    await makePartsPiece(page, { partsHintSeen: true })
+    await scoreDrawn(page)
+    const card = partCard(page, 'Melody')
+    const box = (await card.boundingBox())!
+    assert.ok(box.width >= 43.5 && box.height >= 43.5, `a touch box: ${box.width} x ${box.height}`)
+    assert.equal(await textOf(card.locator('.part-short')), 'M')
+    assert.equal(await page.getByRole('button', { name: 'Metronome' }).locator('.icon').isVisible(), true, 'the metronome has its icon again')
+    await card.click()
+    assert.equal(await card.getAttribute('aria-pressed'), 'false')
+    assert.equal((await practiceParts(page))!.ownLine, false)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, 'no sideways scroll')
   })
 })

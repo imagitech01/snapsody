@@ -1,0 +1,50 @@
+{
+  "format": 2,
+  "id": "00000000-0000-4000-8000-000000000006",
+  "name": "Melody and piano study",
+  "created": "2026-11-21T09:30:00.000Z",
+  "lastPracticed": null,
+  "favorite": false,
+  "score": "score-1.musicxml",
+  "pages": [
+    {
+      "n": 1,
+      "firstBar": 1,
+      "lastBar": 8,
+      "staves": [
+        {
+          "box": {
+            "x": 0.034,
+            "y": 0.16,
+            "width": 0.933,
+            "height": 0.3
+          },
+          "firstBar": 1,
+          "lastBar": 4
+        },
+        {
+          "box": {
+            "x": 0.034,
+            "y": 0.593,
+            "width": 0.933,
+            "height": 0.253
+          },
+          "firstBar": 5,
+          "lastBar": 8
+        }
+      ]
+    }
+  ],
+  "repairs": [],
+  "bars": 8,
+  "partsRead": [
+    {
+      "staves": 1,
+      "kept": true
+    },
+    {
+      "staves": 2,
+      "kept": true
+    }
+  ]
+}

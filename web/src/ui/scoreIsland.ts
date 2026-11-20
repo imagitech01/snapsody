@@ -8,7 +8,7 @@ import type { ElementRef } from '../core/score/elements.ts'
 import type { LineBars } from '../core/score/lines.ts'
 import type { MultiRests, NoteInfo } from '../core/score/noteMap.ts'
 import { createScoreView } from './scoreView.ts'
-import type { ScoreView } from './scoreView.ts'
+import type { DrawnPart, ScoreView } from './scoreView.ts'
 
 /*
  * The score island (practice-app task 11.3, design D3): the engraved score and everything that moves on it
@@ -63,6 +63,11 @@ export interface ScoreIslandOptions {
   /** Notes to show as flagged (the editor's warnings about a note), by id, and the notes of the bars that are flagged. */
   flagged?: ReadonlySignal<readonly string[]>
   flaggedBars?: ReadonlySignal<readonly string[]>
+  /**
+   * The part to draw (practice: your part, `PracticeSession.part`): only that part is drawn, a two-staff part as a grand staff
+   * with the staff of the other hand faded. When it changes the score is drawn again. Without it, the first part (the editor).
+   */
+  part?: ReadonlySignal<DrawnPart | undefined>
   /** The user moved the score while it followed: the bar now at the top, from 1. */
   onScrollAway: (bar: number) => void
   /** The user tapped a note or rest. */
@@ -101,7 +106,7 @@ const REPORT_DELAY_MS = 120
 /** The bar box reaches this far past the drawing of the bar, above and below. */
 const BAR_PAD_PX = 4
 
-const NOT_PLAYING: Position = { beat: 0, event: undefined, finished: false }
+const NOT_PLAYING: Position = { beat: 0, event: undefined, events: [], finished: false }
 
 /** The events that tell the island the user is moving the score (a tap does not: a tap is a seek). */
 const SCROLL_INPUT = ['touchmove', 'wheel', 'keydown'] as const
@@ -202,12 +207,15 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
     cursorLine.style.height = `${Math.round(rect.height)}px`
   }
 
+  /** The first of these notes the view draws (the cursor line goes at it); the view highlights all of them that it does. */
+  const drawnNote = (noteIds: readonly string[]): string | undefined => noteIds.find((id) => view.barOf(id) !== undefined)
+
   /** Draws what the island should show now: the sounding note while playing, else the bar the user is at. */
   const applyHighlight = (): void => {
     if (disposed) return
     if (options.playing.value && shown) {
       view.highlight(shown.noteIds)
-      showAt(shown.barIndex, shown.noteIds[0])
+      showAt(shown.barIndex, drawnNote(shown.noteIds))
     } else {
       view.clearHighlight()
       const barIndex = options.bar.value - 1
@@ -248,6 +256,7 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
 
   const view: ScoreView = createScoreView(host, score, {
     ...(options.multiRests ? { multiRests: options.multiRests } : {}),
+    ...(options.part?.peek() ? { part: options.part.peek()! } : {}),
     onTap: (info) => options.onTapNote(info.note.id, info),
     ...(options.onTapElement ? { onTapElement: (ref: ElementRef | undefined) => options.onTapElement?.(ref) } : {}),
     // The old drawing is still there: remember what to bring back into view once the new one is.
@@ -277,8 +286,9 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
       const rect = barIndex === undefined ? undefined : barRect(barIndex)
       return rect ? [{ getBoundingClientRect: () => rect }] : []
     },
-    highlight: (noteIds) => {
-      const barIndex = view.barOf(noteIds[0] ?? '')
+    highlight: (noteIds, playedBar) => {
+      // The bar comes from the bar spans; without it, from the first note that is drawn (a hidden rest is not).
+      const barIndex = playedBar ?? view.barOf(drawnNote(noteIds) ?? '')
       shown = barIndex === undefined ? undefined : { noteIds: [...noteIds], barIndex }
       applyHighlight()
     },
@@ -308,6 +318,21 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
       else driver.stop()
     }),
   )
+  // Another part (practice): the score is drawn again, and the old drawing stays until the new one is in place.
+  if (options.part) {
+    const wanted = options.part
+    let first = true
+    stops.push(
+      effect(() => {
+        const next = wanted.value
+        if (first) {
+          first = false
+          return
+        }
+        void view.setPart(next)
+      }),
+    )
+  }
   // The bar the user is at is shown while the music does not play (and when playing has nothing to show).
   stops.push(
     effect(() => {

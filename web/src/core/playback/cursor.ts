@@ -2,7 +2,8 @@ import type { Position } from './scheduler.ts'
 import type { PlaybackEvent } from './timeline.ts'
 
 /*
- * The cursor (task 10.4, design D8): which event the listener hears now, and
+ * The cursor (task 10.4, design D8; change parts-and-accompaniment, design D6.7): which events of your line the
+ * listener hears now (every one sounding at that time, the right hand and the left hand each), and
  * when the view must scroll. The pure parts live here and are unit-tested; the
  * DOM driver at the bottom is verified on the phone.
  */
@@ -13,15 +14,23 @@ export function heardTime(clock: { currentTime: number }, latency: number): numb
 }
 
 export interface CursorUpdate {
-  /** The event to highlight changed (or playback ended: `event` undefined). */
+  /** The events to highlight changed (or playback ended: `event` undefined). */
   changed: boolean
+  /** The main event: where the view scrolls to, and the bar. */
   event: PlaybackEvent | undefined
+  /** Every event of your line sounding now, the one that began last first; `event` is the first. Empty when `event` is undefined. */
+  events: PlaybackEvent[]
+  /** The bar being played, by the bar spans. */
+  barIndex?: number
   finished: boolean
 }
 
-/** Remembers the highlighted event so the view is touched only when it changes. */
+const sameEvents = (a: readonly PlaybackEvent[], b: readonly PlaybackEvent[]): boolean => a.length === b.length && a.every((e, i) => e === b[i])
+
+/** Remembers the highlighted events so the view is touched only when they change. */
 export class CursorTracker {
   private shown: PlaybackEvent | undefined
+  private shownEvents: readonly PlaybackEvent[] = []
   private readonly where: (audioTime: number) => Position
   private readonly now: () => number
 
@@ -35,14 +44,17 @@ export class CursorTracker {
     const p = this.where(this.now())
     // Between a restart (tempo change, tap) and its first note the heard position lags the new run by the
     // output latency: keep the note that is shown instead of blinking it off.
-    if (!p.event && !p.finished && this.shown) return { changed: false, event: this.shown, finished: false }
-    const changed = p.event !== this.shown
+    if (!p.event && !p.finished && this.shown) return { changed: false, event: this.shown, events: [...this.shownEvents], finished: false }
+    const events = p.events ?? (p.event ? [p.event] : [])
+    const changed = p.event !== this.shown || !sameEvents(events, this.shownEvents)
     this.shown = p.event
-    return { changed, event: p.event, finished: p.finished }
+    this.shownEvents = events
+    return { changed, event: p.event, events, ...(p.barIndex === undefined ? {} : { barIndex: p.barIndex }), finished: p.finished }
   }
 
   reset(): void {
     this.shown = undefined
+    this.shownEvents = []
   }
 }
 
@@ -72,7 +84,8 @@ export function scrollDelta(input: ScrollInput): number {
 /** The score view as the cursor needs it. */
 export interface HighlightTarget {
   elementsFor(noteId: string): { getBoundingClientRect(): { top: number; bottom: number } }[]
-  highlight(noteIds: string[]): void
+  /** Highlights these notes (those of every event sounding); `barIndex` is the bar being played, by the bar spans. */
+  highlight(noteIds: string[], barIndex?: number): void
   clearHighlight(): void
 }
 
@@ -114,8 +127,15 @@ export class CursorDriver {
       this.o.view.clearHighlight()
       return
     }
-    this.o.view.highlight(update.event.noteIds)
-    const el = this.o.view.elementsFor(update.event.noteIds[0]!)[0]
+    const noteIds = update.events.length > 0 ? update.events.flatMap((e) => e.noteIds) : update.event.noteIds
+    if (update.barIndex === undefined) this.o.view.highlight(noteIds)
+    else this.o.view.highlight(noteIds, update.barIndex)
+    // The first of the notes that the view has (a note that is not drawn has no element).
+    let el: ReturnType<HighlightTarget['elementsFor']>[number] | undefined
+    for (const id of noteIds) {
+      el = this.o.view.elementsFor(id)[0]
+      if (el) break
+    }
     if (!el) return
     const rect = el.getBoundingClientRect()
     const height = this.o.viewportHeight?.() ?? globalThis.innerHeight

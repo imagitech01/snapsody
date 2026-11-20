@@ -8,6 +8,7 @@ import { isDirection, isNote } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
 import type { FakeFiles } from '../src/platform/fake/index.ts'
+import { firstLine } from './helpers.ts'
 
 // Stored pieces stay readable (practice-app task 8.3, spec `test-suite` "Stored exercises stay
 // readable"). `fixtures/stores/<version>/` is a committed copy of the app's data folder in each
@@ -63,7 +64,7 @@ for (const version of versions) {
       assert.ok(info.name.trim() !== '', `${where}: a name`)
 
       // the corrected score is a score with as many bars as piece.json says
-      assert.equal(parseMusicXml(musicxml).measures.length, info.bars, `${where}: bars`)
+      assert.equal(parseMusicXml(musicxml).bars.length, info.bars, `${where}: bars`)
 
       // the pages cover the bars one after the other, and each has its photo and its raw reading
       assert.deepEqual(info.pages.map((p) => p.n), info.pages.map((_, i) => i + 1), `${where}: pages are numbered 1, 2, ...`)
@@ -75,7 +76,7 @@ for (const version of versions) {
         assert.ok(photo && photo[0] === 0xff && photo[1] === 0xd8, `${where}: page ${page.n} photo is a JPEG`)
         assert.match(await library.pageImageUrl(info.id, page.n), /source\.jpg$/, `${where}: page ${page.n} photo has a URL`)
         const reading = files.text(`pieces/${info.id}/pages/${page.n}/recognised.musicxml`)
-        assert.ok(reading !== undefined && parseMusicXml(reading).measures.length > 0, `${where}: page ${page.n} raw reading`)
+        assert.ok(reading !== undefined && parseMusicXml(reading).bars.length > 0, `${where}: page ${page.n} raw reading`)
         // the staves, when there are any, cover exactly the bars of the page, in order
         if (page.staves.length > 0) {
           let bar = page.firstBar
@@ -141,7 +142,7 @@ test('stored formats: v2 holds the piece the app wrote, with every field read ba
     },
   )
   assert.deepEqual(info.pages[1]!.staves[1]!.box, { x: 0.034, y: 0.593, width: 0.179, height: 0.253 })
-  assert.equal(parseMusicXml(musicxml).measures[0]!.time?.beats, 3)
+  assert.equal(firstLine(parseMusicXml(musicxml)).measures[0]!.time?.beats, 3)
   // The fixture's practice.json still has countIn and follow, from before they left it (design D17): they are ignored.
   assert.deepEqual(await library.readPractice(info.id), { bar: 10, tempo: 72, loop: { start: 9, end: 12 }, loopRest: 1, metronome: true })
   const settings = await loadSettings(files)
@@ -155,7 +156,7 @@ test('stored formats: a piece saved before dynamics, tempo marks and words had i
   const { musicxml } = await library.load('00000000-0000-4000-8000-000000000003')
   assert.ok(!/<direction id=/.test(musicxml), 'the stored file is from before the ids')
   const score = parseMusicXml(musicxml)
-  const items = score.measures.flatMap((m) => m.items.filter(isDirection))
+  const items = firstLine(score).measures.flatMap((m) => m.items.filter(isDirection))
   assert.deepEqual(
     items.map((i) => i.kind),
     ['tempo', 'dynamic', 'dynamic', 'dynamic', 'words', 'dynamic'],
@@ -166,7 +167,7 @@ test('stored formats: a piece saved before dynamics, tempo marks and words had i
   // The next save writes them, and they read back the same.
   const saved = serializeMusicXml(score)
   assert.equal([...saved.matchAll(/<direction id="/g)].length, items.length)
-  assert.deepEqual(parseMusicXml(saved).measures.flatMap((m) => m.items.filter(isDirection).map((i) => i.id)), ids)
+  assert.deepEqual(firstLine(parseMusicXml(saved)).measures.flatMap((m) => m.items.filter(isDirection).map((i) => i.id)), ids)
 })
 
 test('stored formats: a piece saved before change more-marks loads unchanged, with the marks it had (task 1.4)', async () => {
@@ -174,13 +175,53 @@ test('stored formats: a piece saved before change more-marks loads unchanged, wi
   const library = createLibrary(files)
   const { musicxml } = await library.load('00000000-0000-4000-8000-000000000004')
   const score = parseMusicXml(musicxml)
-  const notes = score.measures.flatMap((m) => m.items.filter(isNote))
+  const notes = firstLine(score).measures.flatMap((m) => m.items.filter(isNote))
   assert.equal(notes.filter((n) => n.accent).length, 1, 'one accent')
   assert.equal(notes.filter((n) => n.tenuto).length, 1, 'one tenuto')
   assert.equal(notes.filter((n) => n.breath).length, 1, 'one breath mark')
   assert.equal(notes.filter((n) => n.fermata).length, 1, 'one fermata')
   assert.equal(notes.filter((n) => n.grace).length, 1, 'one grace note')
-  assert.equal(score.measures.filter((m) => m.multiRest !== undefined).length, 0, 'no multi-measure rest')
+  assert.equal(firstLine(score).measures.filter((m) => m.multiRest !== undefined).length, 0, 'no multi-measure rest')
   // Saving it again with the current code writes the same file: nothing is added, nothing is lost.
   assert.equal(serializeMusicXml(score), musicxml)
+})
+
+test('stored formats: a piece saved before parts loads as one part, one staff and one voice (change parts-and-accompaniment, task 3.5)', async () => {
+  const files = openStore('v2-before-parts')
+  const library = createLibrary(files)
+  const { info, musicxml } = await library.load('00000000-0000-4000-8000-000000000005')
+  assert.equal(info.partsRead, undefined, 'a piece from before parts has no partsRead: added pages keep only its first part')
+  const score = parseMusicXml(musicxml)
+  assert.equal(score.parts.length, 1)
+  assert.equal(score.parts[0]!.staves, 1)
+  assert.equal(score.bars.length, info.bars)
+  assert.ok(score.bars.every((b) => b.parts.length === 1 && b.parts[0]!.staves.length === 1 && b.parts[0]!.staves[0]!.voices.length === 1), 'one staff and one voice in every bar')
+  // Saving it again with the current code writes the same file.
+  assert.equal(serializeMusicXml(score), musicxml)
+})
+
+test('stored formats: a melody-and-piano piece saved by this change loads with two parts and what its first reading found', async () => {
+  const files = openStore('v2-with-parts')
+  const library = createLibrary(files)
+  const { info, musicxml } = await library.load('00000000-0000-4000-8000-000000000006')
+  assert.deepEqual(info.partsRead, [{ staves: 1, kept: true }, { staves: 2, kept: true }])
+  const score = parseMusicXml(musicxml)
+  assert.deepEqual(score.parts, [{ id: 'P1', name: 'Melody', staves: 1 }, { id: 'P2', name: 'Piano', staves: 2 }])
+  assert.equal(score.bars.length, info.bars)
+  assert.equal(score.bars[0]!.parts[1]!.staves.length, 2)
+  assert.equal(score.bars[2]!.parts[1]!.staves[1]!.voices.length, 2, 'two voices in the left hand')
+  // the raw reading of the page has both parts too, and the stored score is what the writer makes of it
+  assert.equal(parseMusicXml(files.text(`pieces/${info.id}/pages/1/recognised.musicxml`)!).parts.length, 2)
+  assert.equal(serializeMusicXml(score), musicxml, 'saving it again writes the same file')
+  // the practice state this change writes (spec "Reopen a piano piece"): the left hand, the melody off, your line off, the clarinet
+  assert.deepEqual(await library.readPractice(info.id), {
+    ...DEFAULT_PRACTICE,
+    bar: 3,
+    tempo: 80,
+    part: { id: 'P2', hand: 'left' },
+    silent: ['P1'],
+    ownLine: false,
+    instrument: 'clarinet',
+    partsHintSeen: true,
+  })
 })

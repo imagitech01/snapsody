@@ -10,12 +10,13 @@ import { loadSettings } from '../src/app/settings.ts'
 import { preparePages } from '../src/core/pages/pages.ts'
 import type { AudioBackend } from '../src/core/playback/player.ts'
 import type { NoteOnSpec, TimerApi } from '../src/core/playback/scheduler.ts'
-import { addSlur, deleteElement, deleteNote, insertNote, setBarEnd, setBarStart, setDuration, setRepeatTimes, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
-import { notesOf } from '../src/core/score/model.ts'
+import { addSlur, deleteElement, deleteNote, insertNote, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
+import { notesOf, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
 import type { Score } from '../src/core/score/model.ts'
-import { parseMusicXml } from '../src/core/score/musicxml.ts'
+import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
-import { note, quarters, score } from './helpers.ts'
+import { MELODY_PIANO_FIXTURE, note, quarters, read, score } from './helpers.ts'
+import { firstLine, setAttr } from './helpers.ts'
 
 // The editor session (practice-app task 9.6, spec `score-editing`): selection, edits with undo and
 // redo, live warnings and stepping through them, the bar preview, the title and asking for the name
@@ -66,7 +67,7 @@ async function setup(options: { practiceTempo?: number; isNew?: boolean } = {}) 
 }
 
 /** The ids of the notes of bar [bar] (1-based) of the working score. */
-const idsOf = (editor: EditorSession, bar: number): string[] => notesOf(editor.score.value.measures[bar - 1]!).map((n) => n.id)
+const idsOf = (editor: EditorSession, bar: number): string[] => notesOf(firstLine(editor.score.value).measures[bar - 1]!).map((n) => n.id)
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 // ---- selection -----------------------------------------------------------------------------
@@ -134,9 +135,9 @@ test('edits: the selected bar\'s bar lines follow the selection, every edit, und
   assert.equal(editor.selectedBarLines.value, undefined, 'no bar selected')
   editor.selectBar(2)
   assert.deepEqual(editor.selectedBarLines.value, { start: 'normal', end: 'normal', times: 2 }, 'a bar without a note')
-  editor.apply((s) => setBarStart(s, 1, 'repeat'))
-  editor.apply((s) => setBarEnd(s, 1, 'repeat'))
-  editor.apply((s) => setRepeatTimes(s, 1, 3))
+  editor.apply((s) => setBarStart(ownerOf(s).score, 1, 'repeat'))
+  editor.apply((s) => setBarEnd(ownerOf(s).score, 1, 'repeat'))
+  editor.apply((s) => setRepeatTimes(ownerOf(s).score, 1, 3))
   assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 3 })
   editor.undo()
   assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 2 })
@@ -168,7 +169,7 @@ test('selection: an element other than a note is selected with its bar, follows 
   // An edit elsewhere keeps it; deleting it leaves its bar selected; undo selects it again.
   editor.apply((s) => toggleStaccato(s, idsOf(editor, 1)[0]!))
   assert.deepEqual(editor.selectedElement.value?.ref, slur)
-  editor.apply((s) => deleteElement(s, slur))
+  editor.apply((s) => deleteElement(ownerOf(s).score, ownerOf(s).ref, slur))
   assert.equal(editor.selectedElement.value, undefined, 'gone with the slur')
   assert.deepEqual(editor.selection.value, { bar: 2, noteId: null })
   editor.undo()
@@ -329,7 +330,7 @@ test('save & practice: writes the corrected score, keeps the raw readings, opens
   const saved = await library.load('piece-1')
   assert.equal(saved.info.score, 'score-2.musicxml')
   assert.equal(result.ok && result.info.score, 'score-2.musicxml')
-  const note = notesOf(parseMusicXml(saved.musicxml).measures[0]!).find((n) => n.id === c5)!
+  const note = notesOf(firstLine(parseMusicXml(saved.musicxml)).measures[0]!).find((n) => n.id === c5)!
   assert.deepEqual(note.pitch, { step: 'B', octave: 4 }, 'the piece opens with the correction')
   assert.deepEqual([platform.files.text('pieces/piece-1/pages/1/recognised.musicxml'), platform.files.text('pieces/piece-1/pages/2/recognised.musicxml')], readings)
   assert.equal(saved.info.name, '18 Nov, 14:05')
@@ -452,10 +453,10 @@ test('preview: only the selected bar plays, with the correction, at the practice
   assert.equal(preview.bar, 3)
   assert.equal(preview.bpm, 66, 'the tempo the user practises at')
   assert.equal(preview.instrument.id, 'tenor-sax')
-  assert.equal(preview.score.measures.length, 1)
-  assert.deepEqual(preview.score.measures[0]!.time, { beats: 3, beatType: 4 }, 'the time in force at bar 3')
-  assert.equal(preview.score.measures[0]!.clef?.sign, 'G')
-  assert.deepEqual(notesOf(preview.score.measures[0]!).map((n) => n.pitch!.step), ['D', 'E'])
+  assert.equal(firstLine(preview.score).measures.length, 1)
+  assert.deepEqual(firstLine(preview.score).measures[0]!.time, { beats: 3, beatType: 4 }, 'the time in force at bar 3')
+  assert.equal(firstLine(preview.score).measures[0]!.clef?.sign, 'G')
+  assert.deepEqual(notesOf(firstLine(preview.score).measures[0]!).map((n) => n.pitch!.step), ['D', 'E'])
 
   assert.equal(editor.previewing.value, false)
   await editor.previewBar()
@@ -473,11 +474,90 @@ test('preview: without a practice tempo the score decides; the excerpt drops rep
   editor.selectBar(1)
   assert.equal(editor.barPreview()!.bpm, 80, 'no tempo marking: the default')
   const s = parseMusicXml(PAGE_1)
-  s.measures[1]!.rightBarline = { repeat: 'backward' }
+  setAttr(s, 1, 'rightBarline', { repeat: 'backward' })
   const before = structuredClone(s)
   const excerpt = barExcerpt(s, 1)
-  assert.equal(excerpt.measures[0]!.rightBarline, undefined)
-  assert.deepEqual(excerpt.measures[0]!.time, { beats: 3, beatType: 4 })
+  assert.equal(firstLine(excerpt).measures[0]!.rightBarline, undefined)
+  assert.deepEqual(firstLine(excerpt).measures[0]!.time, { beats: 3, beatType: 4 })
   assert.deepEqual(s, before)
-  assert.deepEqual(barExcerpt(s, 9), { measures: [] })
+  assert.deepEqual(barExcerpt(s, 9), singleVoiceScore([]))
+})
+
+// ---- your part (change parts-and-accompaniment, task 7.1) -------------------------------------
+
+/** A melody-and-piano piece in the library, with what practice.json remembers of your part, opened in the editor. */
+async function setupMelodyPiano(part?: { id: string; hand?: 'right' | 'left' }) {
+  const platform = createFakePlatform()
+  const library = createLibrary(platform.files, { newId: () => 'piece-1' })
+  const settings = await loadSettings(platform.files)
+  const router = createRouter('library')
+  platform.files.seed('scans/1/page-1.jpg', Uint8Array.of(1))
+  const page = read(MELODY_PIANO_FIXTURE)
+  const prepared = preparePages([page])
+  await library.create({
+    name: 'Melody and piano',
+    musicxml: prepared.musicxml,
+    bars: prepared.bars,
+    repairs: prepared.repairs,
+    pages: [{ source: 'scans/1/page-1.jpg', recognised: page, ...prepared.pages[0]! }],
+  })
+  if (part) await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, part })
+  router.push({ name: 'editor', pieceId: 'piece-1' })
+  const deps: EditorDeps = { library, settings, router, i18n: createI18n() }
+  const editor = await openEditor(deps, 'piece-1')
+  const stored = async (): Promise<string> => (await library.load('piece-1')).musicxml
+  return { editor, stored }
+}
+
+const partXml = (xml: string, id: string): string => new RegExp(`<part id="${id}">[\\s\\S]*?</part>`).exec(xml)![0]
+
+test('your part: editing a note of the melody and saving leaves the piano part as it was in the stored MusicXML', async () => {
+  const { editor, stored } = await setupMelodyPiano()
+  assert.deepEqual(editor.voice, { part: 'P1', staff: 0, voice: 0 })
+  const before = partXml(serializeMusicXml(parseMusicXml(await stored())), 'P2')
+  const [first] = voiceView(editor.score.value, editor.voice).measures[0]!.items.filter((i) => 'pitch' in i)
+  editor.select((first as { id: string }).id)
+  editor.apply((s) => stepPitch(s, (first as { id: string }).id, 1))
+  assert.equal((await editor.save()).ok, true)
+  const after = await stored()
+  assert.equal(partXml(after, 'P2'), before, 'the piano part is byte-identical')
+  assert.notEqual(partXml(after, 'P1'), partXml(serializeMusicXml(parseMusicXml(read(MELODY_PIANO_FIXTURE))), 'P1'))
+  assert.match(partXml(after, 'P1'), /<step>A<\/step>\s*<octave>4<\/octave>[\s\S]*?<step>A<\/step>\s*<octave>4<\/octave>/, 'the melody changed: the first G4 is A4 now')
+  editor.close()
+})
+
+test('your part: P2 with the left hand opens staff 1 voice 0 of P2, offers only its items, and a key change goes on P2 only', async () => {
+  const { editor } = await setupMelodyPiano({ id: 'P2', hand: 'left' })
+  assert.deepEqual(editor.voice, { part: 'P2', staff: 1, voice: 0 })
+  assert.deepEqual(editor.drawn.value, { id: 'P2', voice: { staff: 1, voice: 0 } })
+  const ids = (bar: number): string[] => notesOf(voiceView(editor.score.value, editor.voice).measures[bar - 1]!).map((n) => n.id)
+  const right = voiceView(editor.score.value, { part: 'P2', staff: 0, voice: 0 }).measures[0]!.items.filter((i) => 'id' in i).map((i) => (i as { id: string }).id)
+  assert.equal(editor.select(right[0]!), false, 'a note of the right hand is not selectable')
+  assert.equal(editor.select(ids(1)[0]!), true)
+  editor.apply((s) => setKey(ownerOf(s).score, ownerOf(s).ref, 2))
+  const score = editor.score.value
+  assert.equal(score.bars[0]!.parts[1]!.key?.fifths, 2, 'the key is on P2')
+  assert.equal(score.bars[0]!.parts[0]!.key?.fifths, 0, 'the melody keeps its key')
+  editor.apply((s) => setClef(ownerOf(s).score, ownerOf(s).ref, 0, { sign: 'G', line: 2 }))
+  assert.equal(editor.score.value.bars[0]!.parts[1]!.staves[1]!.clef?.sign, 'G', 'the clef is on the left-hand staff')
+  assert.equal(editor.score.value.bars[0]!.parts[1]!.staves[0]!.clef?.sign, 'G')
+  assert.equal(editor.score.value.bars[0]!.parts[0]!.staves[0]!.clef?.sign, 'G')
+  editor.close()
+})
+
+test('your part: an unknown part is the first part', async () => {
+  const { editor } = await setupMelodyPiano({ id: 'P9' })
+  assert.deepEqual(editor.voice, { part: 'P1', staff: 0, voice: 0 })
+  editor.close()
+})
+
+test('preview: a left-hand bar is heard and drawn with its own staff\'s clef and its part\'s name', () => {
+  const s = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  const left = { part: 'P2', staff: 1, voice: 0 }
+  const excerpt = barExcerpt(s, 2, left)
+  const bar = firstLine(excerpt).measures[0]!
+  assert.deepEqual(bar.clef, { sign: 'F', line: 4 }, 'the bass clef of the left hand, not the melody\'s treble clef')
+  assert.deepEqual(bar.time, { beats: 4, beatType: 4 })
+  assert.deepEqual(notesOf(bar).map((n) => n.pitch?.step), notesOf(voiceView(s, left).measures[2]!).map((n) => n.pitch?.step))
+  assert.equal(firstLine(excerpt).partName, 'Piano')
 })

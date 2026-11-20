@@ -1,8 +1,7 @@
 import { computed, signal } from '@preact/signals'
 import type { ReadonlySignal, Signal } from '@preact/signals'
-import { instrumentOrDefault } from '../core/instruments/instruments.ts'
+import { instrumentById, instrumentOrDefault } from '../core/instruments/instruments.ts'
 import type { Instrument } from '../core/instruments/instruments.ts'
-import { inForceAtEnd } from '../core/pages/pages.ts'
 import { Player } from '../core/playback/player.ts'
 import type { AudioBackend } from '../core/playback/player.ts'
 import type { TimerApi } from '../core/playback/scheduler.ts'
@@ -14,9 +13,10 @@ import { EditSession } from '../core/score/editSession.ts'
 import { describeElement } from '../core/score/elements.ts'
 import type { ElementInfo, ElementRef } from '../core/score/elements.ts'
 import { isNote, isWedge } from '../core/score/model.ts'
-import type { Note, Score } from '../core/score/model.ts'
+import type { Clef, KeySignature, Note, Score, TimeSignature, VoiceRef, VoiceScore } from '../core/score/model.ts'
+import { firstVoice, singleVoiceScore, voiceView } from '../core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../core/score/musicxml.ts'
-import { computeWarnings } from '../core/score/warnings.ts'
+import { computeScoreWarnings } from '../core/score/warnings.ts'
 import type { ScoreWarning } from '../core/score/warnings.ts'
 import type { I18n } from './i18n/index.ts'
 import { LibraryError } from './library.ts'
@@ -115,11 +115,26 @@ interface NotePlace {
   order: number
 }
 
-function findNote(score: Score, id: string): NotePlace | undefined {
-  for (const [barIndex, m] of score.measures.entries()) {
+/**
+ * The voice the editor edits (change parts-and-accompaniment, task 7.1, D2): the first voice of your part
+ * (practice.json), the first part when none is chosen or the score does not have it; for a hand chosen on a
+ * two-staff part, the first voice of that hand's staff (right = staff 0, left = staff 1).
+ */
+export function editedVoice(score: Score, chosen: ChosenInPractice = {}): VoiceRef {
+  const part = score.parts.find((p) => p.id === chosen.part) ?? score.parts[0]
+  if (!part) return firstVoice(score)
+  const staff = part.staves === 2 && chosen.hand === 'left' ? 1 : 0
+  return { part: part.id, staff, voice: 0 }
+}
+
+/** The view of the edited voice of a score, made fresh from the score each time it is needed. */
+const lineOf = (score: Score, ref: VoiceRef): VoiceScore => voiceView(score, ref)
+
+function findNote(score: Score, ref: VoiceRef, id: string): NotePlace | undefined {
+  for (const [barIndex, m] of lineOf(score, ref).measures.entries()) {
     let order = 0
     for (const item of m.items) {
-      if (!isNote(item)) continue
+      if (!isNote(item) || item.hidden) continue
       if (item.id === id) return { note: item, barIndex, order }
       order++
     }
@@ -151,7 +166,7 @@ export class EditorSession {
   readonly title: ReadonlySignal<string>
   /** Unsaved edits, or a title that differs from the name. */
   readonly dirty: ReadonlySignal<boolean>
-  /** The instrument warnings and the preview use: the default instrument in the settings. */
+  /** The instrument warnings and the preview use: the piece's own (practice.json) once chosen, else the default instrument in the settings. */
   readonly instrument: ReadonlySignal<Instrument>
   /** What to check, in score order (time signature first). */
   readonly warnings: ReadonlySignal<readonly ScoreWarning[]>
@@ -180,14 +195,19 @@ export class EditorSession {
   private readonly askName: Signal<boolean>
   /** Beats per minute the user practises the piece at (practice.json), or null. */
   private readonly practiceTempo: number | null
+  /** The voice being edited (your part's first voice) and what draws it: the editor draws that part only. */
+  readonly voice: VoiceRef
+  readonly drawn: ReadonlySignal<{ id: string; voice: { staff: number; voice: number } }>
   private player: Player | undefined
   private dropGuard: (() => void) | undefined
 
-  constructor(deps: EditorDeps, info: PieceInfo, score: Score, practiceTempo: number | null, options: OpenOptions = {}) {
+  constructor(deps: EditorDeps, info: PieceInfo, score: Score, practiceTempo: number | null, options: OpenOptions = {}, chosen: ChosenInPractice = {}) {
     this.deps = deps
     this.pieceId = info.id
     this.practiceTempo = practiceTempo
-    this.session = new EditSession(score)
+    this.voice = editedVoice(score, chosen)
+    this.drawn = signal({ id: this.voice.part, voice: { staff: this.voice.staff, voice: this.voice.voice } })
+    this.session = new EditSession(score, this.voice)
     this.version = signal(0)
     this.saved = signal(this.session.score)
     this.saveInfo = signal(info)
@@ -219,21 +239,27 @@ export class EditorSession {
     })
     this.selectedNote = computed(() => {
       const id = this.chosen.value?.noteId
-      return id ? findNote(this.score.value, id)?.note : undefined
+      return id ? findNote(this.score.value, this.voice, id)?.note : undefined
     })
     this.selectedElement = computed(() => {
       const ref = this.chosenElement.value
-      const info = ref ? describeElement(this.score.value, ref) : undefined
+      const info = ref ? describeElement(lineOf(this.score.value, this.voice), ref) : undefined
       return ref && info ? { ref, info } : undefined
     })
     this.selectedBarLines = computed(() => {
       const bar = this.chosen.value?.bar
       const score = this.score.value
-      return bar !== undefined && bar <= score.measures.length ? barLinesOf(score, bar - 1) : undefined
+      return bar !== undefined && bar <= score.bars.length ? barLinesOf(score, bar - 1) : undefined
     })
     this.dirty = computed(() => this.score.value !== this.saved.value || this.typed.value.trim() !== this.saveInfo.value.name)
-    this.instrument = computed(() => instrumentOrDefault(deps.settings.defaultInstrument.value))
-    this.warnings = computed(() => computeWarnings(this.score.value, this.instrument.value))
+    // The piece's own instrument when the user chose one in Practice tools, else the default, which it follows (change parts-and-accompaniment, D5).
+    const own = chosen.instrument ? instrumentById(chosen.instrument) : undefined
+    this.instrument = computed(() => own ?? instrumentOrDefault(deps.settings.defaultInstrument.value))
+    // Range warnings are for your part (practice.json) with that instrument; a part the score does not have is the first part.
+    this.warnings = computed(() => {
+      const score = this.score.value
+      return computeScoreWarnings(score, this.voice.part, this.instrument.value)
+    })
     this.warningCount = computed(() => this.warnings.value.length)
     this.currentWarning = computed(() => {
       const focused = this.focused.value
@@ -245,7 +271,7 @@ export class EditorSession {
 
   /** Selects a note (tapped on the score). False, changing nothing, for an id that is not in the score. */
   select(noteId: string): boolean {
-    const place = findNote(this.session.score, noteId)
+    const place = findNote(this.session.score, this.voice, noteId)
     if (!place) return false
     this.chosenElement.value = null
     this.chosen.value = { bar: place.barIndex + 1, noteId }
@@ -254,7 +280,7 @@ export class EditorSession {
 
   /** Selects a bar (1-based position) without a note: "Go to bar". False for a bar that is not there. */
   selectBar(bar: number): boolean {
-    if (!Number.isInteger(bar) || bar < 1 || bar > this.session.score.measures.length) return false
+    if (!Number.isInteger(bar) || bar < 1 || bar > this.session.score.bars.length) return false
     this.chosenElement.value = null
     this.chosen.value = { bar, noteId: null }
     return true
@@ -265,7 +291,7 @@ export class EditorSession {
    * (`selectBar`). False, changing nothing, for an element that is not in the score.
    */
   selectElement(ref: ElementRef): boolean {
-    const info = describeElement(this.session.score, ref)
+    const info = describeElement(lineOf(this.session.score, this.voice), ref)
     if (!info) return false
     if (ref.kind === 'barline') return this.selectBar(info.bar + 1)
     this.chosenElement.value = ref
@@ -288,14 +314,14 @@ export class EditorSession {
    *
    *   session.apply((s) => stepPitch(s, id, -1))
    */
-  apply<T>(edit: (score: Score) => T, options: { amend?: boolean } = {}): T {
+  apply<T>(edit: (view: VoiceScore) => T, options: { amend?: boolean } = {}): T {
     // An element that was already gone is forgotten by the next edit; one this edit deletes is kept for undo.
     const element = this.chosenElement.peek()
-    const wasGone = element !== null && !describeElement(this.session.score, element)
+    const wasGone = element !== null && !describeElement(lineOf(this.session.score, this.voice), element)
     const result = this.session.apply(edit, options)
     if (wasGone) this.chosenElement.value = null
     this.changed()
-    if (typeof result === 'string' && findNote(this.session.score, result)) this.select(result)
+    if (typeof result === 'string' && findNote(this.session.score, this.voice, result)) this.select(result)
     return result
   }
 
@@ -337,10 +363,10 @@ export class EditorSession {
     const bar = this.chosen.value?.bar
     if (bar === undefined) return undefined
     const score = this.session.score
-    const setup = tempoSetup(score)
+    const setup = tempoSetup(lineOf(score, this.voice))
     return {
       bar,
-      score: barExcerpt(score, bar - 1),
+      score: barExcerpt(score, bar - 1, this.voice),
       bpm: startingTempo(this.practiceTempo, setup),
       beatUnit: setup.unit,
       instrument: this.instrument.value,
@@ -359,7 +385,7 @@ export class EditorSession {
     if (!this.player) {
       this.player = new Player({
         instrument: preview.instrument,
-        loadScore: () => this.barPreview()?.score ?? { measures: [] },
+        loadScore: () => this.barPreview()?.score ?? singleVoiceScore([]),
         backend,
         onState: (state) => {
           this.previewState.value = state === 'loading' || state === 'playing'
@@ -482,25 +508,25 @@ export class EditorSession {
     if (!selected) return
     const score = this.session.score
     const element = this.chosenElement.value
-    const info = element ? describeElement(score, element) : undefined
+    const info = element ? describeElement(lineOf(score, this.voice), element) : undefined
     if (info) {
       this.chosen.value = { bar: info.bar + 1, noteId: null }
       return
     }
-    const place = selected.noteId ? findNote(score, selected.noteId) : undefined
+    const place = selected.noteId ? findNote(score, this.voice, selected.noteId) : undefined
     if (place) this.chosen.value = { bar: place.barIndex + 1, noteId: selected.noteId }
-    else if (selected.bar <= score.measures.length) this.chosen.value = { bar: selected.bar, noteId: null }
+    else if (selected.bar <= score.bars.length) this.chosen.value = { bar: selected.bar, noteId: null }
     else this.chosen.value = null
   }
 
   private keyOf(warning: ScoreWarning): Key {
     const score = this.session.score
     if (warning.noteId) {
-      const place = findNote(score, warning.noteId)
+      const place = findNote(score, this.voice, warning.noteId)
       if (place) return [place.barIndex, place.order]
     }
     if (warning.bar !== undefined) {
-      const index = score.measures.findIndex((m) => m.number === warning.bar)
+      const index = score.bars.findIndex((m) => m.number === warning.bar)
       if (index >= 0) return [index, -1]
     }
     return [-1, -1]
@@ -521,7 +547,7 @@ export class EditorSession {
     } else {
       const selected = this.chosen.value
       if (selected) {
-        const place = selected.noteId ? findNote(this.session.score, selected.noteId) : undefined
+        const place = selected.noteId ? findNote(this.session.score, this.voice, selected.noteId) : undefined
         // A selected note counts as just before itself, so its own warning is the next one.
         at = { key: place ? [place.barIndex, place.order - 0.5] : [selected.bar - 1, -1.5], index: dir > 0 ? -1 : warnings.length }
       }
@@ -547,22 +573,37 @@ function sameWarning(a: ScoreWarning, b: ScoreWarning): boolean {
  * there, without repeat barlines or endings (it plays once), and without hairpins that reach
  * outside it. The score is not changed.
  */
-export function barExcerpt(score: Score, index: number): Score {
-  const source = score.measures[index]
-  if (!source) return { measures: [] }
+export function barExcerpt(score: Score, index: number, ref: VoiceRef = firstVoice(score)): Score {
+  const source = lineOf(score, ref).measures[index]
+  if (!source) return singleVoiceScore([])
   const m = structuredClone(source)
-  const inForce = inForceAtEnd({ measures: score.measures.slice(0, index + 1) })
-  if (inForce.clef) m.clef = { ...inForce.clef }
-  if (inForce.key) m.key = { ...inForce.key }
-  if (inForce.time) m.time = { ...inForce.time }
+  // The clef, key and time in force in the edited voice: its own staff's clef and its own part's key.
+  let clef: Clef | undefined
+  let key: KeySignature | undefined
+  let time: TimeSignature | undefined
+  for (const b of lineOf(score, ref).measures.slice(0, index + 1)) {
+    clef = b.clef ?? clef
+    key = b.key ?? key
+    time = b.time ?? time
+  }
+  if (clef) m.clef = { ...clef }
+  if (key) m.key = { ...key }
+  if (time) m.time = { ...time }
   delete m.leftBarline
   delete m.rightBarline
   const ids = new Set(m.items.filter(isNote).map((n) => n.id))
   m.items = m.items.filter((item) => !isWedge(item) || (ids.has(item.start) && ids.has(item.stop)))
   m.number = '1'
-  const excerpt: Score = { measures: [m] }
-  if (score.partName !== undefined) excerpt.partName = score.partName
-  return excerpt
+  const name = score.parts.find((p) => p.id === ref.part)?.name
+  return singleVoiceScore([m], name ? { partName: name } : {})
+}
+
+/** What Practice tools remember for the piece (practice.json) that the editor needs: your part, and the piece's own instrument. */
+export interface ChosenInPractice {
+  part?: string
+  /** The hand chosen on a two-staff part. */
+  hand?: 'right' | 'left'
+  instrument?: string | null
 }
 
 /** How the editor opens a piece. `isNew`: adding music has just made it, so the editor asks for its name. */
@@ -578,7 +619,10 @@ export interface OpenOptions {
 export async function openEditor(deps: EditorDeps, pieceId: string, options: OpenOptions = {}): Promise<EditorSession> {
   const piece = await deps.library.load(pieceId)
   const practice = await deps.library.readPractice(pieceId).catch(() => null)
-  const session = new EditorSession(deps, piece.info, parseMusicXml(piece.musicxml), practice?.tempo ?? null, options)
+  const session = new EditorSession(deps, piece.info, parseMusicXml(piece.musicxml), practice?.tempo ?? null, options, {
+    ...(practice?.part ? { part: practice.part.id, ...(practice.part.hand ? { hand: practice.part.hand } : {}) } : {}),
+    ...(practice?.instrument !== undefined ? { instrument: practice.instrument } : {}),
+  })
   session.guardLeaving()
   return session
 }

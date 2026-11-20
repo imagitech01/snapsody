@@ -191,7 +191,10 @@ class SampleVoice implements VoiceHandle {
 
 export class Sampler implements NoteOutput {
   private readonly ctx: AudioContextLike
+  /** The set notes play from when they name no sound, or a sound that was not added. */
   private bank: SampleBank
+  /** The sample sets by sound (`Instrument.sound`), for notes that name theirs (`NoteOnSpec.sound`): several instruments at once. */
+  private readonly banks = new Map<string, SampleBank>()
   private readonly master: GainLike
   private reference = PITCH_REFERENCE_DEFAULT
 
@@ -212,9 +215,18 @@ export class Sampler implements NoteOutput {
     this.reference = clampPitchReference(hz)
   }
 
-  /** Plays the next notes from another sample set (another instrument); notes already sounding keep their own buffers. */
-  useBank(bank: SampleBank): void {
+  /**
+   * Plays the next notes that name no sound from another sample set (another instrument); notes already sounding
+   * keep their own buffers. With `sound` the set is also the one notes naming that sound play from.
+   */
+  useBank(bank: SampleBank, sound?: string): void {
     this.bank = bank
+    if (sound !== undefined) this.banks.set(sound, bank)
+  }
+
+  /** Makes a sample set available to the notes that name its sound, without changing the default one. */
+  addBank(sound: string, bank: SampleBank): void {
+    this.banks.set(sound, bank)
   }
 
   /**
@@ -256,9 +268,10 @@ export class Sampler implements NoteOutput {
 
   noteOn(spec: NoteOnSpec): VoiceHandle {
     const voices: Voice[] = []
+    const bank = (spec.sound === undefined ? undefined : this.banks.get(spec.sound)) ?? this.bank
     for (const midi of spec.midi) {
-      const { entry, rate } = pickSample(this.bank.map, midi, this.reference)
-      const buffer = this.bank.buffers.get(entry.midi)
+      const { entry, rate } = pickSample(bank.map, midi, this.reference)
+      const buffer = bank.buffers.get(entry.midi)
       if (buffer === undefined) continue
       const source = this.ctx.createBufferSource()
       source.buffer = buffer
@@ -274,7 +287,7 @@ export class Sampler implements NoteOutput {
       const gain = this.ctx.createGain()
       // A set of a decaying instrument (`attack: 'always'`, see samples.ts) strikes every note, a slurred one
       // too, and fades it in as quickly as a fresh attack: the 40 ms of a crossfade would bury the strike.
-      const always = this.bank.map.attack === 'always'
+      const always = bank.map.attack === 'always'
       const fadeIn = Math.max(always && !spec.attack ? Math.min(spec.fade, PLAYBACK_TUNING.attackFade) : spec.fade, 0.001)
       // An accent comes in above its level and falls back to it.
       const peak = spec.accent ? Math.max(level, spec.accent.gain * entry.gain) : level

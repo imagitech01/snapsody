@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as ed from '../src/core/score/edit.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
-import { isNote, isWedge, notesOf } from '../src/core/score/model.ts'
-import type { Note, Score } from '../src/core/score/model.ts'
+import { firstVoice, isNote, isWedge, notesOf } from '../src/core/score/model.ts'
+import type { Note, Score, VoiceScore } from '../src/core/score/model.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import { EditSession } from '../src/core/score/editSession.ts'
 import { computeWarnings } from '../src/core/score/warnings.ts'
@@ -16,6 +16,7 @@ import type { ElementRef } from '../src/core/score/elements.ts'
 import { buildTimeline } from '../src/core/playback/timeline.ts'
 import { renderScore } from '../src/core/score/render.ts'
 import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, read } from './helpers.ts'
+import { firstLine, setAttr } from './helpers.ts'
 
 const TICKS: Record<string, number> = { whole: 48, half: 24, quarter: 12, eighth: 6, '16th': 3 }
 interface S { id: string; step?: string; octave?: number; alter?: number; acc?: string; type?: string; rest?: boolean }
@@ -34,38 +35,38 @@ function score(bars: S[][], opts: { fifths?: number; beats?: number; beatType?: 
   return parseMusicXml(`<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name></part-name></score-part></part-list><part id="P1">${ms}</part></score-partwise>`)
 }
 /** The warnings of a score for the tenor saxophone (what the editor shows after every edit). */
-const recheck = (s: Score) => computeWarnings(s, TENOR_SAX)
-const notes = (s: Score): Note[] => s.measures.flatMap((m) => m.items.filter(isNote))
+const recheck = (s: Score) => computeWarnings(firstLine(s), TENOR_SAX)
+const notes = (s: Score): Note[] => firstLine(s).measures.flatMap((m) => m.items.filter(isNote))
 const byId = (s: Score, id: string): Note => notes(s).find((n) => n.id === id)!
 const name = (n: Note): string => `${n.pitch!.step}${n.pitch!.alter === 1 ? '#' : n.pitch!.alter === -1 ? 'b' : ''}${n.pitch!.octave}`
 const three = (): Score => score([[{ id: 'a', step: 'C', octave: 5 }, { id: 'b', step: 'F', octave: 4 }, { id: 'c', step: 'G' }], [{ id: 'd', step: 'F', octave: 4 }, { id: 'e', step: 'F', octave: 5 }, { id: 'f', rest: true }]])
 
 test('C5 stepped down is B4; stepping up wraps to the next octave', () => {
   const s = three()
-  ed.stepPitch(s, 'a', -1)
+  ed.stepPitch(firstLine(s), 'a', -1)
   assert.equal(name(byId(s, 'a')), 'B4')
-  ed.stepPitch(s, 'a', 1)
-  ed.stepPitch(s, 'a', 1)
+  ed.stepPitch(firstLine(s), 'a', 1)
+  ed.stepPitch(firstLine(s), 'a', 1)
   assert.equal(name(byId(s, 'a')), 'D5')
-  assert.throws(() => ed.stepPitch(s, 'f', 1), ed.EditError)
+  assert.throws(() => ed.stepPitch(firstLine(s), 'f', 1), ed.EditError)
 })
 
 test('accidentals: sharp, flat, natural, none', () => {
   const s = three()
-  ed.setAccidental(s, 'c', 'sharp')
+  ed.setAccidental(firstLine(s), 'c', 'sharp')
   assert.equal(name(byId(s, 'c')), 'G#4')
   assert.equal(byId(s, 'c').accidental, 'sharp')
-  ed.setAccidental(s, 'c', 'flat')
+  ed.setAccidental(firstLine(s), 'c', 'flat')
   assert.equal(name(byId(s, 'c')), 'Gb4')
-  ed.setAccidental(s, 'c', 'natural')
+  ed.setAccidental(firstLine(s), 'c', 'natural')
   assert.equal(name(byId(s, 'c')), 'G4')
-  ed.setAccidental(s, 'c', 'none')
+  ed.setAccidental(firstLine(s), 'c', 'none')
   assert.equal(byId(s, 'c').accidental, undefined)
 })
 
 test('an accidental carries through the bar for the same step and octave only', () => {
   const s = score([[{ id: 'a', step: 'F' }, { id: 'b', step: 'F' }, { id: 'c', step: 'F', octave: 5 }], [{ id: 'd', step: 'F' }]])
-  ed.setAccidental(s, 'a', 'sharp')
+  ed.setAccidental(firstLine(s), 'a', 'sharp')
   assert.equal(name(byId(s, 'b')), 'F#4')
   assert.equal(name(byId(s, 'c')), 'F5')
   assert.equal(name(byId(s, 'd')), 'F4')
@@ -73,48 +74,48 @@ test('an accidental carries through the bar for the same step and octave only', 
 
 test('duration: whole to 16th, dotted, triplet', () => {
   const s = three()
-  ed.setDuration(s, 'a', { type: 'half', dots: 0, triplet: false })
+  ed.setDuration(firstLine(s), 'a', { type: 'half', dots: 0, triplet: false })
   assert.equal(byId(s, 'a').duration.n / byId(s, 'a').duration.d, 0.5)
-  ed.setDuration(s, 'a', { type: 'quarter', dots: 1, triplet: false })
+  ed.setDuration(firstLine(s), 'a', { type: 'quarter', dots: 1, triplet: false })
   assert.equal(byId(s, 'a').duration.n / byId(s, 'a').duration.d, 3 / 8)
-  ed.setDuration(s, 'a', { type: '16th', dots: 0, triplet: false })
+  ed.setDuration(firstLine(s), 'a', { type: '16th', dots: 0, triplet: false })
   assert.deepEqual([byId(s, 'a').duration.n, byId(s, 'a').duration.d], [1, 16])
-  for (const id of ['a', 'b', 'c']) ed.setDuration(s, id, { type: 'eighth', dots: 0, triplet: true })
+  for (const id of ['a', 'b', 'c']) ed.setDuration(firstLine(s), id, { type: 'eighth', dots: 0, triplet: true })
   assert.deepEqual([byId(s, 'a').duration.n, byId(s, 'a').duration.d], [1, 12])
   assert.deepEqual(byId(s, 'a').tuplets, [{ type: 'start', number: 1 }])
   assert.deepEqual(byId(s, 'c').tuplets, [{ type: 'stop', number: 1 }])
-  ed.setDuration(s, 'b', { type: 'quarter', dots: 0, triplet: false })
+  ed.setDuration(firstLine(s), 'b', { type: 'quarter', dots: 0, triplet: false })
   assert.equal(byId(s, 'a').tuplets.length, 0)
 })
 
 test('toggles: staccato, slur, tie', () => {
   const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c', step: 'A' }]])
-  ed.toggleStaccato(s, 'a')
+  ed.toggleStaccato(firstLine(s), 'a')
   assert.equal(byId(s, 'a').staccato, true)
-  ed.toggleStaccato(s, 'a')
+  ed.toggleStaccato(firstLine(s), 'a')
   assert.equal(byId(s, 'a').staccato, undefined)
-  ed.toggleSlur(s, 'a')
+  ed.toggleSlur(firstLine(s), 'a')
   assert.equal(byId(s, 'a').slurs[0]?.type, 'start')
   assert.equal(byId(s, 'b').slurs[0]?.type, 'stop')
-  ed.toggleSlur(s, 'b')
+  ed.toggleSlur(firstLine(s), 'b')
   assert.equal(byId(s, 'a').slurs.length + byId(s, 'b').slurs.length, 0)
-  ed.toggleTie(s, 'a')
+  ed.toggleTie(firstLine(s), 'a')
   assert.equal(byId(s, 'a').tieStart, true)
   assert.equal(byId(s, 'b').tieStop, true)
-  ed.toggleTie(s, 'a')
+  ed.toggleTie(firstLine(s), 'a')
   assert.equal(byId(s, 'b').tieStop, undefined)
-  assert.throws(() => ed.toggleTie(s, 'b'), ed.EditError) // next note is another pitch
+  assert.throws(() => ed.toggleTie(firstLine(s), 'b'), ed.EditError) // next note is another pitch
 })
 
 test('delete removes the note and its slur partner; insert makes fresh unique ids', () => {
   const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c' }]])
-  ed.toggleSlur(s, 'a')
-  const next = ed.deleteNote(s, 'a')
+  ed.toggleSlur(firstLine(s), 'a')
+  const next = ed.deleteNote(firstLine(s), 'a')
   assert.equal(next, 'b')
   assert.deepEqual(notes(s).map((n) => n.id), ['b', 'c'])
   assert.equal(byId(s, 'b').slurs.length, 0)
-  const before = ed.insertNote(s, 'b', 'before', 'note')
-  const after = ed.insertNote(s, 'b', 'after', 'rest')
+  const before = ed.insertNote(firstLine(s), 'b', 'before', 'note')
+  const after = ed.insertNote(firstLine(s), 'b', 'after', 'rest')
   assert.equal(new Set([before, after, 'b', 'c']).size, 4)
   assert.deepEqual(notes(s).map((n) => n.id), [before, 'b', after, 'c'])
   assert.equal(byId(s, after).rest, true)
@@ -125,22 +126,22 @@ test('key change to one sharp makes un-marked F sound F#; a printed natural stay
   const s = score(
     [[{ id: 'a', step: 'F' }, { id: 'b', step: 'F', acc: 'natural' }, { id: 'c', step: 'F' }], [{ id: 'd', step: 'F', octave: 5 }, { id: 'e', step: 'G' }, { id: 'f', step: 'F', octave: 5 }]],
   )
-  ed.setKey(s, 1)
+  ed.setKey(s, firstVoice(s), 1)
   assert.deepEqual(['a', 'b', 'c', 'd', 'e', 'f'].map((id) => name(byId(s, id))), ['F#4', 'F4', 'F4', 'F#5', 'G4', 'F#5']) // c inherits b's natural in the bar
-  ed.setKey(s, 0)
+  ed.setKey(s, firstVoice(s), 0)
   assert.equal(name(byId(s, 'a')), 'F4')
-  ed.setKey(s, -1)
+  ed.setKey(s, firstVoice(s), -1)
   const flat = score([[{ id: 'a', step: 'B' }, { id: 'b', step: 'B', acc: 'natural' }]])
-  ed.setKey(flat, -1)
+  ed.setKey(flat, firstVoice(flat), -1)
   assert.deepEqual([name(byId(flat, 'a')), name(byId(flat, 'b'))], ['Bb4', 'B4'])
-  assert.throws(() => ed.setKey(s, 8), ed.EditError)
+  assert.throws(() => ed.setKey(s, firstVoice(s), 8), ed.EditError)
 })
 
 test('key change survives serialisation and parsing', () => {
   const s = score([[{ id: 'a', step: 'F' }, { id: 'b', step: 'F', acc: 'natural' }, { id: 'c' }]])
-  ed.setKey(s, 1)
+  ed.setKey(s, firstVoice(s), 1)
   const back = parseMusicXml(serializeMusicXml(s))
-  assert.equal(back.measures[0]!.key?.fifths, 1)
+  assert.equal(firstLine(back).measures[0]!.key?.fifths, 1)
   assert.deepEqual(notes(back).map((n) => [n.id, name(n), n.accidental]), [['a', 'F#4', undefined], ['b', 'F4', 'natural'], ['c', 'G4', undefined]])
   assert.equal(serializeMusicXml(back), serializeMusicXml(s))
 })
@@ -167,26 +168,26 @@ test('inferred time signature warning goes away once the user sets one', () => {
 
 test('"Moderato" sets the default tempo 108 when no tempo was chosen', () => {
   const s = three()
-  assert.equal(tempoSetup(s).defaultBpm, 80)
-  ed.setTempoMarking(s, { words: 'Moderato' })
+  assert.equal(tempoSetup(firstLine(s)).defaultBpm, 80)
+  ed.setTempoMarking(firstLine(s), { words: 'Moderato' })
   const back = parseMusicXml(serializeMusicXml(s))
-  assert.equal(ed.firstTempoMarking(back)?.words, 'Moderato')
-  assert.equal(startingTempo(null, tempoSetup(back)), 108)
-  assert.equal(startingTempo(70, tempoSetup(back)), 70) // a chosen tempo still wins
-  ed.setTempoMarking(back, { words: 'Allegro', perMinute: 120 })
-  assert.equal(tempoSetup(back).defaultBpm, 120)
-  ed.setTempoMarking(back, {})
-  assert.equal(ed.firstTempoMarking(back), undefined)
+  assert.equal(ed.firstTempoMarking(firstLine(back))?.words, 'Moderato')
+  assert.equal(startingTempo(null, tempoSetup(firstLine(back))), 108)
+  assert.equal(startingTempo(70, tempoSetup(firstLine(back))), 70) // a chosen tempo still wins
+  ed.setTempoMarking(firstLine(back), { words: 'Allegro', perMinute: 120 })
+  assert.equal(tempoSetup(firstLine(back)).defaultBpm, 120)
+  ed.setTempoMarking(firstLine(back), {})
+  assert.equal(ed.firstTempoMarking(firstLine(back)), undefined)
 })
 
 test('lengthening a quarter to a half in a full 3/4 bar flags the bar and editing continues', () => {
   const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c' }], [{ id: 'd' }, { id: 'e' }, { id: 'f' }]])
-  ed.setDuration(s, 'b', { type: 'half', dots: 0, triplet: false })
+  ed.setDuration(firstLine(s), 'b', { type: 'half', dots: 0, triplet: false })
   const flags = recheck(s)
   assert.deepEqual(flags.map((f) => [f.kind, f.bar]), [['bar-length', '1']])
-  ed.stepPitch(s, 'e', 1) // not blocked
+  ed.stepPitch(firstLine(s), 'e', 1) // not blocked
   assert.equal(name(byId(s, 'e')), 'A4')
-  ed.setDuration(s, 'b', { type: 'quarter', dots: 0, triplet: false })
+  ed.setDuration(firstLine(s), 'b', { type: 'quarter', dots: 0, triplet: false })
   assert.equal(recheck(s).length, 0)
 })
 
@@ -199,8 +200,8 @@ test('user edits are never auto-repaired as triplets, only flagged', () => {
 test('out-of-range is re-checked too', () => {
   const s = three()
   assert.equal(recheck(s).length, 0)
-  for (let i = 0; i < 6; i++) ed.stepPitch(s, 'a', 1) // C5 to B5... then beyond
-  for (let i = 0; i < 6; i++) ed.stepPitch(s, 'a', 1)
+  for (let i = 0; i < 6; i++) ed.stepPitch(firstLine(s), 'a', 1) // C5 to B5... then beyond
+  for (let i = 0; i < 6; i++) ed.stepPitch(firstLine(s), 'a', 1)
   assert.equal(recheck(s).some((f) => f.kind === 'out-of-range' && f.noteId === 'a'), true)
 })
 
@@ -250,10 +251,10 @@ test('session: a failed edit changes nothing and is not an undo step', () => {
 
 test('edited scores round trip and untouched notes keep their ids', () => {
   const s = three()
-  ed.stepPitch(s, 'a', -1)
-  ed.setDuration(s, 'c', { type: 'eighth', dots: 1, triplet: false })
-  ed.toggleStaccato(s, 'd')
-  const inserted = ed.insertNote(s, 'e', 'after', 'note')
+  ed.stepPitch(firstLine(s), 'a', -1)
+  ed.setDuration(firstLine(s), 'c', { type: 'eighth', dots: 1, triplet: false })
+  ed.toggleStaccato(firstLine(s), 'd')
+  const inserted = ed.insertNote(firstLine(s), 'e', 'after', 'note')
   const xml = serializeMusicXml(s)
   const back = parseMusicXml(xml)
   assert.deepEqual(notes(back).map((n) => n.id), ['a', 'b', 'c', 'd', 'e', inserted, 'f'])
@@ -264,7 +265,7 @@ test('editing a parsed copy leaves the recognised XML string untouched', () => {
   const recognised = serializeMusicXml(three())
   const copy = recognised.slice()
   const s = parseMusicXml(recognised)
-  ed.deleteNote(s, 'a')
+  ed.deleteNote(firstLine(s), 'a')
   assert.notEqual(serializeMusicXml(s), recognised)
   assert.equal(recognised, copy)
 })
@@ -277,7 +278,7 @@ test('editing a parsed copy leaves the recognised XML string untouched', () => {
 const barCheck = (s: Score): string[] => recheck(s).map((w) => `${w.kind}@${w.bar ?? '-'}`)
 
 /** Applies `edit` in a session, then undoes and redoes it; returns the score before and after, and the bar check of each. */
-function throughSession(start: Score, edit: (s: Score) => unknown) {
+function throughSession(start: Score, edit: (s: VoiceScore) => unknown) {
   const session = new EditSession(start)
   const beforeXml = serializeMusicXml(session.score)
   const before = structuredClone(session.score)
@@ -305,8 +306,8 @@ const six = (): Score =>
     [{ id: 'd', step: 'F', octave: 5 }, { id: 'e', step: 'G', octave: 5 }, { id: 'f', step: 'A', octave: 5 }],
   ])
 const wedges = (s: Score): [string, string, string][] =>
-  s.measures.flatMap((m) => m.items.filter(isWedge).map((w): [string, string, string] => [w.type, w.start, w.stop]))
-const failsWithoutUndoStep = (s: Score, edit: (s: Score) => unknown): void => {
+  firstLine(s).measures.flatMap((m) => m.items.filter(isWedge).map((w): [string, string, string] => [w.type, w.start, w.stop]))
+const failsWithoutUndoStep = (s: Score, edit: (s: VoiceScore) => unknown): void => {
   const session = new EditSession(s)
   const before = serializeMusicXml(session.score)
   assert.throws(() => session.apply(edit), ed.EditError)
@@ -327,10 +328,10 @@ test('edit: toggle tenuto, accent and fermata on a note, and tap the active mark
   }
   // The marks are independent of each other and of staccato.
   const s = six()
-  ed.toggleStaccato(s, 'a')
-  ed.toggleTenuto(s, 'a')
-  ed.toggleAccent(s, 'a')
-  ed.toggleFermata(s, 'a')
+  ed.toggleStaccato(firstLine(s), 'a')
+  ed.toggleTenuto(firstLine(s), 'a')
+  ed.toggleAccent(firstLine(s), 'a')
+  ed.toggleFermata(firstLine(s), 'a')
   assert.deepEqual([byId(s, 'a').staccato, byId(s, 'a').tenuto, byId(s, 'a').accent, byId(s, 'a').fermata], [true, true, true, true])
 })
 
@@ -338,17 +339,17 @@ test('edit: a rest takes a fermata but not a tenuto or an accent', () => {
   const s = score([[{ id: 'a' }, { id: 'r', rest: true }, { id: 'c' }]])
   failsWithoutUndoStep(s, (sc) => ed.toggleTenuto(sc, 'r'))
   failsWithoutUndoStep(s, (sc) => ed.toggleAccent(sc, 'r'))
-  assert.equal(throughSession(s, (sc) => ed.toggleFermata(sc, 'r')).after.measures[0]!.items.filter(isNote).find((n) => n.id === 'r')!.fermata, true)
+  assert.equal(firstLine(throughSession(s, (sc) => ed.toggleFermata(sc, 'r')).after).measures[0]!.items.filter(isNote).find((n) => n.id === 'r')!.fermata, true)
   failsWithoutUndoStep(s, (sc) => ed.toggleTenuto(sc, 'nope'))
 })
 
 test('edit: marks and hairpins survive saving and reloading', () => {
   const s = six()
-  ed.toggleTenuto(s, 'a')
-  ed.toggleAccent(s, 'b')
-  ed.toggleFermata(s, 'f')
-  ed.addWedge(s, 'crescendo', 'a', 'd')
-  ed.addWedge(s, 'diminuendo', 'e', 'f')
+  ed.toggleTenuto(firstLine(s), 'a')
+  ed.toggleAccent(firstLine(s), 'b')
+  ed.toggleFermata(firstLine(s), 'f')
+  ed.addWedge(firstLine(s), 'crescendo', 'a', 'd')
+  ed.addWedge(firstLine(s), 'diminuendo', 'e', 'f')
   const xml = serializeMusicXml(s)
   const back = parseMusicXml(xml)
   assert.deepEqual(wedges(back), [['crescendo', 'a', 'd'], ['diminuendo', 'e', 'f']])
@@ -362,11 +363,11 @@ test('edit: add a crescendo or a diminuendo from one note to another, also over 
   assert.deepEqual(wedges(bar.after), [['crescendo', 'a', 'c']])
   assert.deepEqual(wedges(bar.before), [])
   assert.deepEqual([bar.checkBefore, bar.checkAfter], [[], []])
-  assert.deepEqual(bar.after.measures[0]!.items.map((i) => (isWedge(i) ? 'wedge' : i.kind === 'note' ? i.id : i.kind)), ['wedge', 'a', 'b', 'c'], 'kept right before its first note')
+  assert.deepEqual(firstLine(bar.after).measures[0]!.items.map((i) => (isWedge(i) ? 'wedge' : i.kind === 'note' ? i.id : i.kind)), ['wedge', 'a', 'b', 'c'], 'kept right before its first note')
 
   const across = throughSession(six(), (s) => ed.addWedge(s, 'diminuendo', 'c', 'e'))
   assert.deepEqual(wedges(across.after), [['diminuendo', 'c', 'e']])
-  assert.deepEqual(across.after.measures[1]!.items.some(isWedge), false, 'kept in the measure of its first note')
+  assert.deepEqual(firstLine(across.after).measures[1]!.items.some(isWedge), false, 'kept in the measure of its first note')
 
   // Remove: from any note under the hairpin, not only its ends.
   for (const under of ['c', 'd', 'e']) {
@@ -378,13 +379,13 @@ test('edit: add a crescendo or a diminuendo from one note to another, also over 
   failsWithoutUndoStep(across.after, (s) => ed.removeWedge(s, 'f'))
 
   // wedgeAt tells which hairpin a note is under, for showing the mark as active.
-  assert.deepEqual([ 'a', 'b', 'c', 'd', 'e', 'f'].map((id) => ed.wedgeAt(across.after, id)?.type), [undefined, undefined, 'diminuendo', 'diminuendo', 'diminuendo', undefined])
+  assert.deepEqual([ 'a', 'b', 'c', 'd', 'e', 'f'].map((id) => ed.wedgeAt(firstLine(across.after), id)?.type), [undefined, undefined, 'diminuendo', 'diminuendo', 'diminuendo', undefined])
 })
 
 test('edit: a hairpin over one note, and its limits', () => {
   assert.deepEqual(wedges(throughSession(six(), (s) => ed.addWedge(s, 'crescendo', 'b', 'b')).after), [['crescendo', 'b', 'b']])
   const s = six()
-  ed.addWedge(s, 'crescendo', 'b', 'd')
+  ed.addWedge(firstLine(s), 'crescendo', 'b', 'd')
   failsWithoutUndoStep(s, (sc) => ed.addWedge(sc, 'diminuendo', 'e', 'd')) // reversed
   failsWithoutUndoStep(s, (sc) => ed.addWedge(sc, 'diminuendo', 'd', 'e')) // overlaps at d
   failsWithoutUndoStep(s, (sc) => ed.addWedge(sc, 'diminuendo', 'a', 'b')) // overlaps at b
@@ -403,24 +404,24 @@ test('edit: a hairpin over one note, and its limits', () => {
 
 test('edit: deleting a note takes a hairpin that ends on it away, and keeps one that only passes it', () => {
   const s = six()
-  ed.addWedge(s, 'crescendo', 'b', 'e')
+  ed.addWedge(firstLine(s), 'crescendo', 'b', 'e')
   assert.deepEqual(wedges(throughSession(s, (sc) => ed.deleteNote(sc, 'c')).after), [['crescendo', 'b', 'e']])
   assert.deepEqual(wedges(throughSession(s, (sc) => ed.deleteNote(sc, 'b')).after), [])
   assert.deepEqual(wedges(throughSession(s, (sc) => ed.deleteNote(sc, 'e')).after), [])
   const afterStartDeleted = throughSession(s, (sc) => ed.deleteNote(sc, 'b')).after
-  assert.equal(afterStartDeleted.measures.flatMap((m) => m.items).some(isWedge), false, 'no item is left behind')
+  assert.equal(firstLine(afterStartDeleted).measures.flatMap((m) => m.items).some(isWedge), false, 'no item is left behind')
   assert.deepEqual(wedges(throughSession(six(), (sc) => ed.deleteNote(sc, 'a')).after), [])
 })
 
 test('edit: a note becomes a rest of the same length; the id and the bar stay, pitch and marks go', () => {
   const s = score([[{ id: 'a', step: 'F' }, { id: 'b', step: 'F' }, { id: 'c', step: 'G' }], [{ id: 'd', step: 'G' }, { id: 'e' }, { id: 'f' }]])
-  ed.setAccidental(s, 'a', 'sharp')
-  ed.toggleStaccato(s, 'b')
-  ed.toggleTenuto(s, 'b')
-  ed.toggleAccent(s, 'b')
-  ed.toggleFermata(s, 'b')
-  ed.toggleSlur(s, 'b') // b-c
-  ed.toggleTie(s, 'c') // c-d (both G4)
+  ed.setAccidental(firstLine(s), 'a', 'sharp')
+  ed.toggleStaccato(firstLine(s), 'b')
+  ed.toggleTenuto(firstLine(s), 'b')
+  ed.toggleAccent(firstLine(s), 'b')
+  ed.toggleFermata(firstLine(s), 'b')
+  ed.toggleSlur(firstLine(s), 'b') // b-c
+  ed.toggleTie(firstLine(s), 'c') // c-d (both G4)
   assert.equal(name(byId(s, 'b')), 'F#4', 'b inherits the sharp printed on a')
   const r = throughSession(s, (sc) => ed.noteToRest(sc, 'b'))
   const b = byId(r.after, 'b')
@@ -435,7 +436,7 @@ test('edit: a note becomes a rest of the same length; the id and the bar stay, p
   assert.deepEqual([byId(t.after, 'c').tieStart, byId(t.after, 'd').tieStop], [undefined, undefined])
   // A later note in the bar loses what it took from the rest's printed accidental.
   const sharp = score([[{ id: 'a', step: 'F' }, { id: 'b', step: 'F' }, { id: 'c', step: 'G' }]])
-  ed.setAccidental(sharp, 'a', 'sharp')
+  ed.setAccidental(firstLine(sharp), 'a', 'sharp')
   assert.equal(name(byId(sharp, 'b')), 'F#4')
   assert.equal(name(byId(throughSession(sharp, (sc) => ed.noteToRest(sc, 'a')).after, 'b')), 'F4')
   // It cannot be done twice, or to a grace note or a chord member.
@@ -449,13 +450,13 @@ test('edit: a note becomes a rest of the same length; the id and the bar stay, p
 
 test('edit: a hairpin that ends on a note keeps ending there when the note becomes a rest', () => {
   const s = six()
-  ed.addWedge(s, 'crescendo', 'a', 'c')
+  ed.addWedge(firstLine(s), 'crescendo', 'a', 'c')
   assert.deepEqual(wedges(throughSession(s, (sc) => ed.noteToRest(sc, 'c')).after), [['crescendo', 'a', 'c']])
 })
 
 test('edit: a rest becomes a note on the pitch of the nearest note, with its id, length and fermata', () => {
   const s = score([[{ id: 'a', step: 'D', octave: 5 }, { id: 'r', rest: true }, { id: 'c', step: 'A', octave: 4 }]])
-  ed.toggleFermata(s, 'r')
+  ed.toggleFermata(firstLine(s), 'r')
   const r = throughSession(s, (sc) => ed.restToNote(sc, 'r'))
   const n = byId(r.after, 'r')
   assert.deepEqual([n.rest, name(n), n.type, n.fermata, n.accidental], [undefined, 'A4', 'quarter', true, undefined], 'the following note wins when both neighbours are as near')
@@ -502,21 +503,21 @@ test('edit: insert a note or a rest before or after a note; the bar check then f
   }
   // Next to a hairpin's ends, the new note is outside it.
   const s = six()
-  ed.addWedge(s, 'crescendo', 'b', 'c')
+  ed.addWedge(firstLine(s), 'crescendo', 'b', 'c')
   const before = throughSession(s, (sc) => ed.insertNote(sc, 'b', 'before', 'note')).after
   assert.deepEqual(wedges(before), [['crescendo', 'b', 'c']])
-  assert.deepEqual(before.measures[0]!.items.map((i) => (isWedge(i) ? 'wedge' : i.kind === 'note' ? i.id : i.kind)).filter((x) => x !== 'a'), [before.measures[0]!.items.filter(isNote)[1]!.id, 'wedge', 'b', 'c'], 'the hairpin item stays right before its first note')
+  assert.deepEqual(firstLine(before).measures[0]!.items.map((i) => (isWedge(i) ? 'wedge' : i.kind === 'note' ? i.id : i.kind)).filter((x) => x !== 'a'), [firstLine(before).measures[0]!.items.filter(isNote)[1]!.id, 'wedge', 'b', 'c'], 'the hairpin item stays right before its first note')
   assert.deepEqual(parseMusicXml(serializeMusicXml(before)), before, 'and the reloaded model equals the edited one')
   const after = throughSession(s, (sc) => ed.insertNote(sc, 'c', 'after', 'note')).after
   assert.deepEqual(wedges(after), [['crescendo', 'b', 'c']])
   assert.deepEqual(parseMusicXml(serializeMusicXml(after)), after)
-  assert.equal(ed.wedgeAt(before, notes(before)[1]!.id), undefined, 'the inserted note, second in the bar, is outside it')
+  assert.equal(ed.wedgeAt(firstLine(before), notes(before)[1]!.id), undefined, 'the inserted note, second in the bar, is outside it')
 })
 
 test('edit: every new operation, one after another, undoes step by step to the start', () => {
   const session = new EditSession(six())
   const start = serializeMusicXml(session.score)
-  const steps: ((s: Score) => unknown)[] = [
+  const steps: ((s: VoiceScore) => unknown)[] = [
     (s) => ed.toggleTenuto(s, 'a'),
     (s) => ed.toggleAccent(s, 'b'),
     (s) => ed.toggleFermata(s, 'c'),
@@ -559,14 +560,14 @@ test('edit: a slur is added from the first to the last note of a phrase, over ba
 
 test('edit: a slur that sits inside or next to another one gets its own number', () => {
   const s = six()
-  ed.addSlur(s, 'a', 'f')
-  ed.addSlur(s, 'b', 'c') // inside the first
-  ed.addSlur(s, 'c', 'e') // overlaps the second at c and sits inside the first
+  ed.addSlur(firstLine(s), 'a', 'f')
+  ed.addSlur(firstLine(s), 'b', 'c') // inside the first
+  ed.addSlur(firstLine(s), 'c', 'e') // overlaps the second at c and sits inside the first
   assert.deepEqual(slurs(s), [['a', 'start', 1], ['b', 'start', 2], ['c', 'stop', 2], ['c', 'start', 3], ['e', 'stop', 3], ['f', 'stop', 1]])
   // Two slurs one after the other may share a number.
   const t = six()
-  ed.addSlur(t, 'a', 'c')
-  ed.addSlur(t, 'd', 'f')
+  ed.addSlur(firstLine(t), 'a', 'c')
+  ed.addSlur(firstLine(t), 'd', 'f')
   assert.deepEqual(slurs(t).map(([, , n]) => n), [1, 1, 1, 1])
 })
 
@@ -644,7 +645,7 @@ test('bar lines: the end of a bar owns the double bar line, so one on the next b
   for (const end of ['normal', 'double', 'repeat'] as const) {
     const s = scoreOf([barOf('C'), barOf('D', { left: '<bar-style>light-light</bar-style>' }), barOf('E')])
     ed.setBarEnd(s, 0, end)
-    assert.equal(s.measures[1]!.leftBarline, undefined, end)
+    assert.equal(firstLine(s).measures[1]!.leftBarline, undefined, end)
     assert.equal(ed.barLinesOf(s, 0).end, end)
   }
   // A start-repeat on the next bar is not a double bar line and stays.
@@ -666,7 +667,7 @@ test('bar lines: an ending stays through every edit', () => {
     barOf('E', { left: '<ending number="2" type="start"/>', right: '<ending number="2" type="discontinue"/>' }),
   ])
   const endings = (sc: Score): string =>
-    sc.measures.map((m) => `${m.leftBarline?.ending?.type ?? '-'}:${m.rightBarline?.ending?.type ?? '-'}`).join(' ')
+    firstLine(sc).measures.map((m) => `${m.leftBarline?.ending?.type ?? '-'}:${m.rightBarline?.ending?.type ?? '-'}`).join(' ')
   const before = endings(s)
   ed.setRepeatTimes(s, 1, 3)
   ed.setBarStart(s, 1, 'repeat')
@@ -680,35 +681,35 @@ test('bar lines: an ending stays through every edit', () => {
   ed.setBarEnd(s, 2, 'normal')
   assert.equal(endings(s), before)
   assert.equal(endings(roundTrip(s)), before)
-  assert.equal(s.measures[1]!.rightBarline!.times, undefined, 'a repeat set back from normal starts at 2 again')
+  assert.equal(firstLine(s).measures[1]!.rightBarline!.times, undefined, 'a repeat set back from normal starts at 2 again')
 })
 
 test('bar lines: a bar out of range, a count outside 2-8 and a count on a bar without an end-repeat fail without an undo step', () => {
   const s = scoreOf([barOf('C', { right: '<repeat direction="backward"/>' }), barOf('D')])
-  failsWithoutUndoStep(s, (sc) => ed.setBarStart(sc, 2, 'repeat'))
-  failsWithoutUndoStep(s, (sc) => ed.setBarEnd(sc, -1, 'double'))
-  failsWithoutUndoStep(s, (sc) => ed.setBarEnd(sc, 0.5, 'double'))
-  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 0, 1))
-  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 0, 9))
-  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 0, 2.5))
-  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 1, 3))
-  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(sc, 5, 3))
+  failsWithoutUndoStep(s, (sc) => ed.setBarStart(ed.ownerOf(sc).score, 2, 'repeat'))
+  failsWithoutUndoStep(s, (sc) => ed.setBarEnd(ed.ownerOf(sc).score, -1, 'double'))
+  failsWithoutUndoStep(s, (sc) => ed.setBarEnd(ed.ownerOf(sc).score, 0.5, 'double'))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(ed.ownerOf(sc).score, 0, 1))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(ed.ownerOf(sc).score, 0, 9))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(ed.ownerOf(sc).score, 0, 2.5))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(ed.ownerOf(sc).score, 1, 3))
+  failsWithoutUndoStep(s, (sc) => ed.setRepeatTimes(ed.ownerOf(sc).score, 5, 3))
 })
 
 test('bar lines: undo and redo in the session restore the bar lines', () => {
   const s = scoreOf([barOf('C'), barOf('D', { right: '<bar-style>light-light</bar-style>' }), barOf('E')])
-  const start = throughSession(s, (sc) => ed.setBarStart(sc, 1, 'repeat'))
+  const start = throughSession(s, (sc) => ed.setBarStart(ed.ownerOf(sc).score, 1, 'repeat'))
   assert.deepEqual([linesOf(start.before, 1), linesOf(start.after, 1)], ['normal/double/2', 'repeat/double/2'])
-  const end = throughSession(start.after, (sc) => ed.setBarEnd(sc, 1, 'repeat'))
+  const end = throughSession(start.after, (sc) => ed.setBarEnd(ed.ownerOf(sc).score, 1, 'repeat'))
   assert.equal(linesOf(end.after, 1), 'repeat/repeat/2')
-  const times = throughSession(end.after, (sc) => ed.setRepeatTimes(sc, 1, 4))
+  const times = throughSession(end.after, (sc) => ed.setRepeatTimes(ed.ownerOf(sc).score, 1, 4))
   assert.deepEqual([linesOf(times.before, 1), linesOf(times.after, 1)], ['repeat/repeat/2', 'repeat/repeat/4'])
 })
 
 // ---------------------------------------------------------------- deleting elements and fixing clefs (change select-and-delete-elements)
 
 const pitches = (s: Score, bar: number): string[] =>
-  s.measures[bar]!.items.filter(isNote).map((n) => (n.pitch ? `${n.pitch.step}${n.pitch.alter === 1 ? '#' : n.pitch.alter === -1 ? 'b' : ''}${n.pitch.octave}` : 'rest'))
+  firstLine(s).measures[bar]!.items.filter(isNote).map((n) => (n.pitch ? `${n.pitch.step}${n.pitch.alter === 1 ? '#' : n.pitch.alter === -1 ? 'b' : ''}${n.pitch.octave}` : 'rest'))
 
 test('deleteElement: each kind is removed alone, undo brings it back, and the bar check still runs', () => {
   const base = parseMusicXml(read(COMMITTED_FIXTURE))
@@ -728,17 +729,17 @@ test('deleteElement: each kind is removed alone, undo brings it back, and the ba
     { kind: 'time', bar: 5 },
   ]
   const xmlBefore = serializeMusicXml(base)
-  const warningsBefore = computeWarnings(base, TENOR_SAX)
+  const warningsBefore = computeWarnings(firstLine(base), TENOR_SAX)
   for (const ref of refs) {
     const session = new EditSession(base)
-    session.apply((s) => ed.deleteElement(s, ref))
+    session.apply((s) => ed.deleteElement(ed.ownerOf(s).score, ed.ownerOf(s).ref, ref))
     const after = session.score
-    assert.equal(describeElement(after, ref), undefined, `${JSON.stringify(ref)} is gone`)
+    assert.equal(describeElement(firstLine(after), ref), undefined, `${JSON.stringify(ref)} is gone`)
     // Only that element: every other element of the fixture is still there.
-    for (const other of refs) if (other !== ref && !(ref.kind === 'tie' && other.kind === 'tie')) assert.ok(describeElement(after, other), `${JSON.stringify(other)} stays when ${JSON.stringify(ref)} goes`)
-    assert.equal(after.measures.flatMap((m) => m.items.filter(isNote)).length, base.measures.flatMap((m) => m.items.filter(isNote)).length, 'no note goes')
+    for (const other of refs) if (other !== ref && !(ref.kind === 'tie' && other.kind === 'tie')) assert.ok(describeElement(firstLine(after), other), `${JSON.stringify(other)} stays when ${JSON.stringify(ref)} goes`)
+    assert.equal(firstLine(after).measures.flatMap((m) => m.items.filter(isNote)).length, firstLine(base).measures.flatMap((m) => m.items.filter(isNote)).length, 'no note goes')
     // The bar check runs on the result (a deleted 2/4 change leaves bar 6 too short for 3/4).
-    const warnings = computeWarnings(after, TENOR_SAX)
+    const warnings = computeWarnings(firstLine(after), TENOR_SAX)
     if (ref.kind === 'time') assert.ok(warnings.some((w) => w.kind === 'bar-length' && w.bar === '6'), 'bar 6 no longer fits')
     else assert.deepEqual(warnings, warningsBefore)
     assert.ok(session.undo())
@@ -748,10 +749,10 @@ test('deleteElement: each kind is removed alone, undo brings it back, and the ba
 
 test('deleteElement: a slur goes with both its ends; a missing element, a bar line, and the first clef, key and time are refused', () => {
   const s = parseMusicXml(read(COMMITTED_FIXTURE))
-  ed.deleteElement(s, { kind: 'slur', noteId: 'n1', number: 1 })
-  assert.ok(s.measures.every((m) => m.items.filter(isNote).every((n) => n.slurs.length === 0)), 'start and stop both gone')
-  ed.deleteElement(s, { kind: 'tie', noteId: 'n7' })
-  assert.ok(s.measures.every((m) => m.items.filter(isNote).every((n) => !n.tieStart && !n.tieStop)), 'both ends of the tie gone')
+  ed.deleteElement(s, firstVoice(s), { kind: 'slur', noteId: 'n1', number: 1 })
+  assert.ok(firstLine(s).measures.every((m) => m.items.filter(isNote).every((n) => n.slurs.length === 0)), 'start and stop both gone')
+  ed.deleteElement(s, firstVoice(s), { kind: 'tie', noteId: 'n7' })
+  assert.ok(firstLine(s).measures.every((m) => m.items.filter(isNote).every((n) => !n.tieStart && !n.tieStop)), 'both ends of the tie gone')
   const refused: ElementRef[] = [
     { kind: 'clef', bar: 0 },
     { kind: 'key', bar: 0 },
@@ -765,7 +766,7 @@ test('deleteElement: a slur goes with both its ends; a missing element, a bar li
   ]
   const refuses = (ref: ElementRef): boolean => {
     try {
-      ed.deleteElement(s, ref)
+      ed.deleteElement(s, firstVoice(s), ref)
       return false
     } catch (error) {
       return error instanceof ed.EditError
@@ -776,36 +777,36 @@ test('deleteElement: a slur goes with both its ends; a missing element, a bar li
 
 test('setClef: treble to bass keeps every note on its line, so the middle line goes from B4 to D3, and back again', () => {
   const s = score([[{ id: 'a', step: 'B', octave: 4 }, { id: 'b', step: 'C', octave: 5 }, { id: 'c', step: 'E', octave: 4 }]])
-  ed.setClef(s, 0, { sign: 'F', line: 4 })
-  assert.deepEqual(s.measures[0]!.clef, { sign: 'F', line: 4 })
+  ed.setClef(s, firstVoice(s), 0, { sign: 'F', line: 4 })
+  assert.deepEqual(firstLine(s).measures[0]!.clef, { sign: 'F', line: 4 })
   assert.deepEqual(pitches(s, 0), ['D3', 'E3', 'G2'])
-  ed.setClef(s, 0, { sign: 'G', line: 2 })
+  ed.setClef(s, firstVoice(s), 0, { sign: 'G', line: 2 })
   assert.deepEqual(pitches(s, 0), ['B4', 'C5', 'E4'])
 })
 
 test('setClef: explicit accidentals stay with their notes, and the key gives the others their alter again', () => {
   // G major: F is sharp. Under treble: an F5 with a printed natural, a G4 with a printed sharp, and a plain D4.
   const s = score([[{ id: 'a', step: 'F', octave: 5, acc: 'natural' }, { id: 'b', step: 'G', octave: 4, alter: 1, acc: 'sharp' }, { id: 'c', step: 'D', octave: 4 }]], { fifths: 1 })
-  ed.setClef(s, 0, { sign: 'F', line: 4 })
+  ed.setClef(s, firstVoice(s), 0, { sign: 'F', line: 4 })
   // Under bass the same places are A3 (natural, printed), B2 (sharp, printed) and F2: F2 has no accidental, so the key makes it F#.
   assert.deepEqual(pitches(s, 0), ['A3', 'B#2', 'F#2'])
-  const notes = s.measures[0]!.items.filter(isNote)
+  const notes = firstLine(s).measures[0]!.items.filter(isNote)
   assert.deepEqual(notes.map((n) => n.accidental), ['natural', 'sharp', undefined])
 })
 
 test('setClef and deleteClef: only the bars up to the next clef change move', () => {
   const s = score([[{ id: 'a', step: 'B', octave: 4 }], [{ id: 'b', step: 'B', octave: 4 }], [{ id: 'c', step: 'D', octave: 3 }], [{ id: 'd', step: 'D', octave: 3 }]], { beats: 1 })
-  ed.setClef(s, 2, { sign: 'F', line: 4 }) // bars 3-4 were read under bass: here set as a change that moves them
+  ed.setClef(s, firstVoice(s), 2, { sign: 'F', line: 4 }) // bars 3-4 were read under bass: here set as a change that moves them
   assert.deepEqual([0, 1, 2, 3].map((b) => pitches(s, b)[0]), ['B4', 'B4', 'F1', 'F1'])
-  ed.setClef(s, 2, { sign: 'G', line: 2 })
-  ed.setClef(s, 1, { sign: 'F', line: 4 }) // bar 2 only: bar 3 has its own clef change
+  ed.setClef(s, firstVoice(s), 2, { sign: 'G', line: 2 })
+  ed.setClef(s, firstVoice(s), 1, { sign: 'F', line: 4 }) // bar 2 only: bar 3 has its own clef change
   assert.deepEqual([0, 1, 2, 3].map((b) => pitches(s, b)[0]), ['B4', 'D3', 'D3', 'D3'])
-  ed.deleteClef(s, 1) // treble again from bar 2, up to bar 3's change
+  ed.deleteClef(s, firstVoice(s), 1) // treble again from bar 2, up to bar 3's change
   assert.deepEqual([0, 1, 2, 3].map((b) => pitches(s, b)[0]), ['B4', 'B4', 'D3', 'D3'])
-  assert.equal(s.measures[1]!.clef, undefined)
-  assert.throws(() => ed.deleteClef(s, 0), ed.EditError)
-  assert.throws(() => ed.deleteClef(s, 1), ed.EditError)
-  assert.throws(() => ed.setClef(s, 0, { sign: 'percussion' }), ed.EditError)
+  assert.equal(firstLine(s).measures[1]!.clef, undefined)
+  assert.throws(() => ed.deleteClef(s, firstVoice(s), 0), ed.EditError)
+  assert.throws(() => ed.deleteClef(s, firstVoice(s), 1), ed.EditError)
+  assert.throws(() => ed.setClef(s, firstVoice(s), 0, { sign: 'percussion' }), ed.EditError)
 })
 
 test('deleteClef: the exercise-91 shape (a bass clef read at bar 11) plays B4 for the middle line once the clef is gone', () => {
@@ -813,10 +814,10 @@ test('deleteClef: the exercise-91 shape (a bass clef read at bar 11) plays B4 fo
   const bars: S[][] = []
   for (let b = 0; b < 14; b++) bars.push([{ id: `m${b}`, step: b < 10 ? 'B' : 'D', octave: b < 10 ? 4 : 3, type: 'half' }, { id: `x${b}`, step: b < 10 ? 'G' : 'B', octave: b < 10 ? 4 : 2, type: 'half' }])
   const s = score(bars, { beats: 4 })
-  s.measures[10]!.clef = { sign: 'F', line: 4 }
-  const written = (sc: Score, bar: number): number[] => buildTimeline(sc, TENOR_SAX).events.filter((e) => e.barIndex === bar && !e.rest).map((e) => e.written[0]!)
+  setAttr(s, 10, 'clef', { sign: 'F', line: 4 })
+  const written = (sc: Score, bar: number): number[] => buildTimeline(firstLine(sc), TENOR_SAX).events.filter((e) => e.barIndex === bar && !e.rest).map((e) => e.written[0]!)
   assert.deepEqual(written(s, 10), [50, 47], 'before: D3 and B2')
-  ed.deleteClef(s, 10)
+  ed.deleteClef(s, firstVoice(s), 10)
   for (const bar of [10, 11, 12, 13]) assert.deepEqual(written(s, bar), [71, 67], `bar ${bar + 1}: B4 on the middle line, G4 below it`)
   assert.deepEqual(written(s, 9), [71, 67], 'bar 10 unchanged')
 })
@@ -825,23 +826,23 @@ test('deleteKey: a key change to one flat misread at bar 9 of a D major piece go
   const bars: S[][] = []
   for (let b = 0; b < 10; b++) bars.push([{ id: `f${b}`, step: 'F', octave: 4 }, { id: `c${b}`, step: 'C', octave: 5 }, { id: `n${b}`, step: 'C', octave: 5, acc: 'natural' }])
   const s = score(bars, { fifths: 2 })
-  s.measures[8]!.key = { fifths: -1 }
-  ed.resolveAlters(s)
+  setAttr(s, 8, 'key', { fifths: -1 })
+  ed.resolveAlters(firstLine(s))
   assert.deepEqual(pitches(s, 8), ['F4', 'C5', 'C5'], 'under one flat')
-  ed.deleteKey(s, 8)
+  ed.deleteKey(s, firstVoice(s), 8)
   for (const bar of [8, 9]) assert.deepEqual(pitches(s, bar), ['F#4', 'C#5', 'C5'], `bar ${bar + 1}: D major again; a printed natural stays`)
-  assert.equal(s.measures[8]!.key, undefined)
-  assert.throws(() => ed.deleteKey(s, 8), ed.EditError)
-  assert.throws(() => ed.deleteKey(s, 0), ed.EditError)
+  assert.equal(firstLine(s).measures[8]!.key, undefined)
+  assert.throws(() => ed.deleteKey(s, firstVoice(s), 8), ed.EditError)
+  assert.throws(() => ed.deleteKey(s, firstVoice(s), 0), ed.EditError)
 })
 
 test('deleteTime: a deleted time change makes the bar check flag the bars that no longer fit', () => {
   // 3/4, then a 2/4 change at bar 3: bars 3-4 hold two beats.
   const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c' }], [{ id: 'd' }, { id: 'e' }, { id: 'f' }], [{ id: 'g' }, { id: 'h' }], [{ id: 'i' }, { id: 'j' }]])
-  s.measures[2]!.time = { beats: 2, beatType: 4 }
-  assert.deepEqual(computeWarnings(s, TENOR_SAX).filter((w) => w.kind === 'bar-length'), [])
+  setAttr(s, 2, 'time', { beats: 2, beatType: 4 })
+  assert.deepEqual(computeWarnings(firstLine(s), TENOR_SAX).filter((w) => w.kind === 'bar-length'), [])
   ed.deleteTime(s, 2)
-  assert.deepEqual(computeWarnings(s, TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar), ['3', '4'])
+  assert.deepEqual(computeWarnings(firstLine(s), TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar), ['3', '4'])
   assert.throws(() => ed.deleteTime(s, 2), ed.EditError)
   assert.throws(() => ed.deleteTime(s, 0), ed.EditError)
 })
@@ -850,7 +851,7 @@ test('deleteTime: a deleted time change makes the bar check flag the bars that n
 
 const marks = (): Score => parseMusicXml(read(HOMR_MARKS_FIXTURE))
 /** One edit through a session: the score before, the score after, and the session to undo with. */
-function edited(source: Score, edit: (s: Score) => unknown) {
+function edited(source: Score, edit: (s: VoiceScore) => unknown) {
   const session = new EditSession(source)
   const before = structuredClone(session.score)
   session.apply(edit)
@@ -873,7 +874,7 @@ test('toggles: strong accent and staccatissimo go on and off, undo restores each
     assert.equal(byId(off.after, key === 'strongAccent' ? 'n4' : 'n5')[key], undefined)
     assert.ok(off.session.undo())
     assert.deepEqual(off.session.score, off.before)
-    assert.throws(() => toggle(s, 'n27'), ed.EditError)
+    assert.throws(() => toggle(firstLine(s), 'n27'), ed.EditError)
   }
 })
 
@@ -894,7 +895,7 @@ test('toggles: trill, turn and mordent replace each other, tapping the active on
   }
   // A plain note takes one; a rest refuses.
   assert.equal(byId(edited(s, (sc) => ed.toggleOrnament(sc, 'n3', 'mordent')).after, 'n3').ornament, 'mordent')
-  assert.throws(() => ed.toggleOrnament(s, 'n27', 'trill'), ed.EditError)
+  assert.throws(() => ed.toggleOrnament(firstLine(s), 'n27', 'trill'), ed.EditError)
 })
 
 test('toggles: a tremolo is a single one of 3 strokes; tapping it removes it, and from a pair it leaves both notes', () => {
@@ -914,14 +915,14 @@ test('toggles: a tremolo is a single one of 3 strokes; tapping it removes it, an
   const single = edited(s, (sc) => ed.toggleTremolo(sc, 'n11'))
   assert.equal(byId(single.after, 'n11').tremolo, undefined)
   assert.equal(byId(single.after, 'n13').tremolo?.kind, 'single', 'the other single tremolos stay')
-  assert.throws(() => ed.toggleTremolo(s, 'n27'), ed.EditError)
+  assert.throws(() => ed.toggleTremolo(firstLine(s), 'n27'), ed.EditError)
 })
 
 test('toggles: an arpeggio is on a chord only, set from any of its notes, and sits on the first note', () => {
   const s = marks()
   // n15 n16 n17 are a chord with the arpeggio (bar 5); n19-n21 a chord without (bar 6); n18 a single note.
-  assert.throws(() => ed.toggleArpeggio(s, 'n18'), ed.EditError)
-  assert.throws(() => ed.toggleArpeggio(s, 'n27'), ed.EditError) // a rest
+  assert.throws(() => ed.toggleArpeggio(firstLine(s), 'n18'), ed.EditError)
+  assert.throws(() => ed.toggleArpeggio(firstLine(s), 'n27'), ed.EditError) // a rest
   const on = edited(s, (sc) => ed.toggleArpeggio(sc, 'n21'))
   assert.equal(byId(on.after, 'n19').arpeggio, true)
   assert.equal(byId(on.after, 'n21').arpeggio, undefined)
@@ -957,13 +958,13 @@ test('deleteElement: every new mark is removed alone, a two-note tremolo from bo
   ]
   const xmlBefore = serializeMusicXml(base)
   for (const ref of refs) {
-    assert.ok(describeElement(base, ref), `${JSON.stringify(ref)} is in the fixture`)
-    const { after, session } = edited(base, (s) => ed.deleteElement(s, ref))
-    assert.equal(describeElement(after, ref), undefined, `${JSON.stringify(ref)} is gone`)
+    assert.ok(describeElement(firstLine(base), ref), `${JSON.stringify(ref)} is in the fixture`)
+    const { after, session } = edited(base, (s) => ed.deleteElement(ed.ownerOf(s).score, ed.ownerOf(s).ref, ref))
+    assert.equal(describeElement(firstLine(after), ref), undefined, `${JSON.stringify(ref)} is gone`)
     for (const other of refs) {
       if (other === ref) continue
       const twin = ref.kind === 'articulation' && other.kind === 'articulation' && ref.mark === 'tremolo' && other.mark === 'tremolo' && other.noteId === 'n9'
-      if (!twin) assert.ok(describeElement(after, other), `${JSON.stringify(other)} stays when ${JSON.stringify(ref)} goes`)
+      if (!twin) assert.ok(describeElement(firstLine(after), other), `${JSON.stringify(other)} stays when ${JSON.stringify(ref)} goes`)
     }
     assert.ok(session.undo())
     assert.equal(serializeMusicXml(session.score), xmlBefore, `undo restores ${JSON.stringify(ref)}`)
@@ -971,25 +972,25 @@ test('deleteElement: every new mark is removed alone, a two-note tremolo from bo
   // The two-note tremolo goes from both notes, whichever note the reference names.
   for (const id of ['n9', 'n10']) {
     const s = marks()
-    ed.deleteElement(s, mark(id, 'tremolo'))
+    ed.deleteElement(s, firstVoice(s), mark(id, 'tremolo'))
     assert.deepEqual([byId(s, 'n9').tremolo, byId(s, 'n10').tremolo], [undefined, undefined])
   }
   // The ornament that goes is the note's own, and the note plays plainly after (the notes stay).
   const s = marks()
-  ed.deleteElement(s, mark('n6', 'ornament'))
+  ed.deleteElement(s, firstVoice(s), mark('n6', 'ornament'))
   assert.equal(byId(s, 'n6').ornament, undefined)
   assert.equal(notes(s).length, notes(base).length)
-  assert.throws(() => ed.deleteElement(s, mark('n6', 'ornament')), ed.EditError) // already gone
+  assert.throws(() => ed.deleteElement(s, firstVoice(s), mark('n6', 'ornament')), ed.EditError) // already gone
 })
 
 test('notes: a note that becomes a rest loses its new marks, and deleting one note of a tremolo pair leaves no half pair', () => {
   const s = marks()
-  ed.noteToRest(s, 'n6')
+  ed.noteToRest(firstLine(s), 'n6')
   assert.equal(byId(s, 'n6').ornament, undefined)
-  ed.noteToRest(s, 'n9')
+  ed.noteToRest(firstLine(s), 'n9')
   assert.deepEqual([byId(s, 'n9').tremolo, byId(s, 'n10').tremolo], [undefined, undefined])
   const t = marks()
-  ed.deleteNote(t, 'n10')
+  ed.deleteNote(firstLine(t), 'n10')
   assert.equal(byId(t, 'n9').tremolo, undefined)
 })
 
@@ -997,25 +998,25 @@ test('grace notes: selected, changed and deleted like notes, and never added', (
   const s = marks()
   const grace = byId(s, 'n2')
   assert.equal(grace.grace, true)
-  ed.stepPitch(s, 'n2', 1)
+  ed.stepPitch(firstLine(s), 'n2', 1)
   assert.equal(name(byId(s, 'n2')), 'E5')
-  ed.setAccidental(s, 'n2', 'sharp')
+  ed.setAccidental(firstLine(s), 'n2', 'sharp')
   assert.equal(name(byId(s, 'n2')), 'E#5')
-  assert.throws(() => ed.insertNote(s, 'n2', 'after', 'note'), ed.EditError) // nothing is inserted next to one
-  assert.throws(() => ed.setDuration(s, 'n2', { type: 'quarter', dots: 0, triplet: false }), ed.EditError)
+  assert.throws(() => ed.insertNote(firstLine(s), 'n2', 'after', 'note'), ed.EditError) // nothing is inserted next to one
+  assert.throws(() => ed.setDuration(firstLine(s), 'n2', { type: 'quarter', dots: 0, triplet: false }), ed.EditError)
   // Inserting next to an ordinary note never makes a grace note.
-  const fresh = ed.insertNote(s, 'n1', 'after', 'note')
+  const fresh = ed.insertNote(firstLine(s), 'n1', 'after', 'note')
   assert.equal(byId(s, fresh).grace, undefined)
   // Deleted as a note; the selection moves on.
-  assert.equal(ed.deleteNote(s, 'n2'), 'n3')
+  assert.equal(ed.deleteNote(firstLine(s), 'n2'), 'n3')
   assert.equal(notes(s).find((n) => n.id === 'n2'), undefined)
 })
 
 test('multi-measure rest: the editor draws every bar, and a note put into the run ends it for practice too', async () => {
   const s = marks()
   const runBars = [7, 8, 9, 10]
-  assert.equal(s.measures[7]!.multiRest, 4)
-  const rests = runBars.map((b) => notesOf(s.measures[b]!)[0]!.id)
+  assert.equal(firstLine(s).measures[7]!.multiRest, 4)
+  const rests = runBars.map((b) => notesOf(firstLine(s).measures[b]!)[0]!.id)
   // Fix a bar inside a long rest: the editor's drawing has the four bars, each with its whole-bar rest.
   const editor = serializeMusicXml(s, { multiRests: 'expand' })
   assert.ok(!editor.includes('<multiple-rest>'))
@@ -1023,10 +1024,10 @@ test('multi-measure rest: the editor draws every bar, and a note put into the ru
   assert.ok(serializeMusicXml(s).includes('<multiple-rest>4</multiple-rest>'), 'practice and the stored file keep the run')
   // An edit elsewhere keeps the run.
   const elsewhere = edited(s, (sc) => ed.stepPitch(sc, 'n3', 1))
-  assert.equal(elsewhere.after.measures[7]!.multiRest, 4)
+  assert.equal(firstLine(elsewhere.after).measures[7]!.multiRest, 4)
   // A note put into the third bar of the run: the run goes, in the session's score and in what is saved.
   const put = edited(s, (sc) => ed.restToNote(sc, rests[2]!))
-  assert.equal(put.after.measures[7]!.multiRest, undefined)
+  assert.equal(firstLine(put.after).measures[7]!.multiRest, undefined)
   const saved = serializeMusicXml(parseMusicXml(serializeMusicXml(put.after)))
   assert.ok(!saved.includes('<multiple-rest>'))
   const [svg] = await renderScore(put.after, { width: 900 })
@@ -1034,13 +1035,13 @@ test('multi-measure rest: the editor draws every bar, and a note put into the ru
   assert.ok(!svg!.includes('class="multiRest"'))
   // Undo gives the run back.
   assert.ok(put.session.undo())
-  assert.equal(put.session.score.measures[7]!.multiRest, 4)
+  assert.equal(firstLine(put.session.score).measures[7]!.multiRest, 4)
   assert.deepEqual(put.session.score, put.before)
   // Anything else in a bar of the run ends it too: a fermata on the first rest, a note added after the last.
-  assert.equal(edited(s, (sc) => ed.toggleFermata(sc, rests[0]!)).after.measures[7]!.multiRest, undefined)
-  assert.equal(edited(s, (sc) => ed.insertNote(sc, rests[3]!, 'after', 'note')).after.measures[7]!.multiRest, undefined)
+  assert.equal(firstLine(edited(s, (sc) => ed.toggleFermata(sc, rests[0]!)).after).measures[7]!.multiRest, undefined)
+  assert.equal(firstLine(edited(s, (sc) => ed.insertNote(sc, rests[3]!, 'after', 'note')).after).measures[7]!.multiRest, undefined)
   // An edit that fails changes nothing, the run included.
   const session = new EditSession(s)
   assert.throws(() => session.apply((sc) => ed.toggleTremolo(sc, rests[1]!)), ed.EditError)
-  assert.equal(session.score.measures[7]!.multiRest, 4)
+  assert.equal(firstLine(session.score).measures[7]!.multiRest, 4)
 })

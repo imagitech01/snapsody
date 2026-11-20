@@ -1,6 +1,6 @@
 import type { ElementRef } from './elements.ts'
-import type { Clef, Measure, MeasureItem, Note, NoteType, Pitch, Score, Step, TempoItem, TimeSignature, WedgeItem } from './model.ts'
-import { freshDirectionId, isDirection, isNote, isWedge } from './model.ts'
+import type { Bar, StaffBar, Barline, Clef, Measure, MeasureItem, Note, NoteType, Pitch, Score, Step, TempoItem, TimeSignature, VoiceRef, VoiceScore, WedgeItem } from './model.ts'
+import { freshDirectionId, isDirection, isNote, isWedge, partIndex, usedIds, voiceView } from './model.ts'
 import { noteDuration } from './musicxml.ts'
 
 /*
@@ -56,7 +56,7 @@ const setAlter = (p: Pitch, alter: number): void => {
  * Recomputes the sounding alter of every note in measures `from..to` (inclusive, default all) from its
  * printed accidental, or, without one, from the key signature and earlier accidentals in the bar.
  */
-export function resolveAlters(score: Score, from = 0, to = score.measures.length - 1): void {
+export function resolveAlters(score: VoiceScore, from = 0, to = score.measures.length - 1): void {
   let fifths = 0
   /** Alter carried by an open tie, by "step+octave", into the next bar. */
   let tieCarry = new Map<string, number>()
@@ -97,7 +97,7 @@ interface Located {
   note: Note
 }
 
-function locate(score: Score, id: string): Located {
+function locate(score: VoiceScore, id: string): Located {
   for (let barIndex = 0; barIndex < score.measures.length; barIndex++) {
     const measure = score.measures[barIndex]!
     const at = measure.items.findIndex((i) => isNote(i) && i.id === id)
@@ -107,7 +107,7 @@ function locate(score: Score, id: string): Located {
 }
 
 /** All notes of the score in order, with where they are. */
-function allNotes(score: Score): Located[] {
+function allNotes(score: VoiceScore): Located[] {
   const out: Located[] = []
   score.measures.forEach((measure, barIndex) =>
     measure.items.forEach((item, at) => {
@@ -118,23 +118,40 @@ function allNotes(score: Score): Located[] {
 }
 
 /** The next (or previous) note of the score that is not a grace note. */
-function neighbour(score: Score, id: string, dir: 1 | -1): Note | undefined {
+function neighbour(score: VoiceScore, id: string, dir: 1 | -1): Note | undefined {
   const notes = allNotes(score).filter((l) => !l.note.grace || l.note.id === id)
   const i = notes.findIndex((l) => l.note.id === id)
   return notes[i + dir]?.note
 }
 
-export function freshId(score: Score): string {
-  const used = new Set(allNotes(score).map((l) => l.note.id))
-  let n = used.size + 1
+export function freshId(score: VoiceScore): string {
+  // Ids are unique across the whole score, every voice included (design D2), so they are taken from `usedIds`.
+  const used = usedIds(score)
+  let n = (score.of ? allNoteCount(score.of.score) : allNotes(score).length) + 1
   while (used.has(`e${n}`)) n++
   return `e${n}`
+}
+
+function allNoteCount(score: Score): number {
+  let count = 0
+  for (const bar of score.bars) for (const pb of bar.parts) for (const sb of pb.staves) for (const v of sb.voices) for (const i of v) if (isNote(i)) count++
+  return count
+}
+
+/**
+ * The score and the voice a view was made from, for the score-level setters below (key, time, clef, bar
+ * lines): a view's bar attributes are read-only copies, so those are set on the score. Throws for a bare
+ * view (one not made by `voiceView`).
+ */
+export function ownerOf(view: VoiceScore): { score: Score; ref: VoiceRef } {
+  if (!view.of) throw new EditError('This edit needs a score made from parts')
+  return view.of
 }
 
 // ---------------------------------------------------------------- pitch
 
 /** Moves a note one diatonic step up (`1`) or down (`-1`); B up is C of the next octave. */
-export function stepPitch(score: Score, id: string, dir: 1 | -1): void {
+export function stepPitch(score: VoiceScore, id: string, dir: 1 | -1): void {
   const { note, barIndex } = locate(score, id)
   if (!note.pitch) throw new EditError('A rest has no pitch')
   const i = STEPS.indexOf(note.pitch.step) + dir
@@ -149,7 +166,7 @@ export function stepPitch(score: Score, id: string, dir: 1 | -1): void {
   resolveAlters(score, barIndex, barIndex)
 }
 
-export function setAccidental(score: Score, id: string, choice: AccidentalChoice): void {
+export function setAccidental(score: VoiceScore, id: string, choice: AccidentalChoice): void {
   const { note, barIndex } = locate(score, id)
   if (!note.pitch) throw new EditError('A rest has no accidental')
   if (choice === 'none') delete note.accidental
@@ -192,7 +209,7 @@ function normaliseTuplets(measure: Measure): void {
   flush()
 }
 
-export function setDuration(score: Score, id: string, choice: DurationChoice): void {
+export function setDuration(score: VoiceScore, id: string, choice: DurationChoice): void {
   const { note, measure } = locate(score, id)
   if (note.grace) throw new EditError('A grace note has no length to edit')
   note.type = choice.type
@@ -206,7 +223,7 @@ export function setDuration(score: Score, id: string, choice: DurationChoice): v
 
 // ---------------------------------------------------------------- slur, tie, staccato
 
-export function toggleStaccato(score: Score, id: string): void {
+export function toggleStaccato(score: VoiceScore, id: string): void {
   const { note } = locate(score, id)
   if (note.rest) throw new EditError('A rest cannot be staccato')
   if (note.staccato) delete note.staccato
@@ -216,26 +233,26 @@ export function toggleStaccato(score: Score, id: string): void {
 const MARK_NAMES = { tenuto: 'a tenuto', accent: 'an accent', strongAccent: 'a strong accent', staccatissimo: 'a staccatissimo' } as const
 
 /** Tenuto, accent, strong accent and staccatissimo belong to notes; tapping the active mark removes it. */
-function toggleArticulation(score: Score, id: string, mark: keyof typeof MARK_NAMES): void {
+function toggleArticulation(score: VoiceScore, id: string, mark: keyof typeof MARK_NAMES): void {
   const { note } = locate(score, id)
   if (note.rest) throw new EditError(`A rest cannot have ${MARK_NAMES[mark]}`)
   if (note[mark]) delete note[mark]
   else note[mark] = true
 }
 
-export function toggleTenuto(score: Score, id: string): void {
+export function toggleTenuto(score: VoiceScore, id: string): void {
   toggleArticulation(score, id, 'tenuto')
 }
 
-export function toggleAccent(score: Score, id: string): void {
+export function toggleAccent(score: VoiceScore, id: string): void {
   toggleArticulation(score, id, 'accent')
 }
 
-export function toggleStrongAccent(score: Score, id: string): void {
+export function toggleStrongAccent(score: VoiceScore, id: string): void {
   toggleArticulation(score, id, 'strongAccent')
 }
 
-export function toggleStaccatissimo(score: Score, id: string): void {
+export function toggleStaccatissimo(score: VoiceScore, id: string): void {
   toggleArticulation(score, id, 'staccatissimo')
 }
 
@@ -243,7 +260,7 @@ export function toggleStaccatissimo(score: Score, id: string): void {
  * Sets the ornament of a note; a note has at most one, so a trill, turn or mordent replaces the others,
  * and choosing the one it has takes it off (change more-marks, D4).
  */
-export function toggleOrnament(score: Score, id: string, ornament: NonNullable<Note['ornament']>): void {
+export function toggleOrnament(score: VoiceScore, id: string, ornament: NonNullable<Note['ornament']>): void {
   const { note } = locate(score, id)
   if (note.rest) throw new EditError(`A rest cannot have a ${ornament}`)
   if (note.ornament === ornament) delete note.ornament
@@ -251,7 +268,7 @@ export function toggleOrnament(score: Score, id: string, ornament: NonNullable<N
 }
 
 /** The other note of a two-note tremolo that `id` belongs to: the stop after a start, the start before a stop. */
-function tremoloPartner(score: Score, id: string): Note | undefined {
+function tremoloPartner(score: VoiceScore, id: string): Note | undefined {
   const notes = allNotes(score).map((l) => l.note)
   const i = notes.findIndex((n) => n.id === id)
   const kind = notes[i]?.tremolo?.kind
@@ -267,14 +284,14 @@ function tremoloPartner(score: Score, id: string): Note | undefined {
 }
 
 /** Takes the tremolo off a note, and off the other note of a two-note tremolo. */
-function removeTremolo(score: Score, id: string): void {
+function removeTremolo(score: VoiceScore, id: string): void {
   const partner = tremoloPartner(score, id)
   if (partner) delete partner.tremolo
   delete locate(score, id).note.tremolo
 }
 
 /** A single tremolo with 3 strokes, on or off. A note of a two-note tremolo takes it off both notes. */
-export function toggleTremolo(score: Score, id: string): void {
+export function toggleTremolo(score: VoiceScore, id: string): void {
   const { note } = locate(score, id)
   if (note.rest) throw new EditError('A rest cannot have a tremolo')
   if (note.tremolo) removeTremolo(score, id)
@@ -282,14 +299,14 @@ export function toggleTremolo(score: Score, id: string): void {
 }
 
 /** The first note of the chord that `id` is in, and whether it is in a chord at all (two or more notes). */
-export function chordOf(score: Score, id: string): { first: Note; inChord: boolean } {
+export function chordOf(score: VoiceScore, id: string): { first: Note; inChord: boolean } {
   const { measure, at } = locate(score, id)
   const [a, b] = chordSpan(measure.items, at)
   return { first: measure.items[a] as Note, inChord: b > a }
 }
 
 /** An arpeggio belongs to a chord and sits on its first note; the selected note may be any of the chord's. */
-export function toggleArpeggio(score: Score, id: string): void {
+export function toggleArpeggio(score: VoiceScore, id: string): void {
   const { first, inChord } = chordOf(score, id)
   if (!inChord || first.rest) throw new EditError('An arpeggio needs a chord')
   if (first.arpeggio) delete first.arpeggio
@@ -297,14 +314,14 @@ export function toggleArpeggio(score: Score, id: string): void {
 }
 
 /** A fermata can sit on a note or on a rest. */
-export function toggleFermata(score: Score, id: string): void {
+export function toggleFermata(score: VoiceScore, id: string): void {
   const { note } = locate(score, id)
   if (note.fermata) delete note.fermata
   else note.fermata = true
 }
 
 /** Removes the slur that `mark` (on the note `id`) belongs to: both its start and its stop. */
-function removeSlur(score: Score, id: string, number: number, type: 'start' | 'stop' | 'continue'): void {
+function removeSlur(score: VoiceScore, id: string, number: number, type: 'start' | 'stop' | 'continue'): void {
   const notes = allNotes(score).map((l) => l.note)
   const i = notes.findIndex((n) => n.id === id)
   const own = notes[i]!
@@ -325,7 +342,7 @@ function removeSlur(score: Score, id: string, number: number, type: 'start' | 's
  * Slur toggle: when the note has a slur mark the whole slur is removed; otherwise a slur is added from
  * the note to the next note.
  */
-export function toggleSlur(score: Score, id: string): void {
+export function toggleSlur(score: VoiceScore, id: string): void {
   const { note } = locate(score, id)
   const own = note.slurs.find((s) => s.type === 'start') ?? note.slurs.find((s) => s.type === 'stop')
   if (own) {
@@ -348,7 +365,7 @@ export function toggleSlur(score: Score, id: string): void {
  * notes, not rests, the first before the last. The slur gets the lowest number that no other slur
  * open anywhere under it is using, so a slur inside another one stays apart from it.
  */
-export function addSlur(score: Score, fromId: string, toId: string): void {
+export function addSlur(score: VoiceScore, fromId: string, toId: string): void {
   locate(score, fromId)
   locate(score, toId)
   const notes = allNotes(score)
@@ -385,7 +402,7 @@ function samePitch(a: Note, b: Note): boolean {
  * Ties the note `fromId` to the note `toId`, chosen as the first and last note of the tie. A tie joins
  * a note to the one right after it, and both must have the same pitch.
  */
-export function addTie(score: Score, fromId: string, toId: string): void {
+export function addTie(score: VoiceScore, fromId: string, toId: string): void {
   const { note } = locate(score, fromId)
   locate(score, toId)
   if (!note.pitch) throw new EditError('A tie needs a note, not a rest')
@@ -398,7 +415,7 @@ export function addTie(score: Score, fromId: string, toId: string): void {
 }
 
 /** Tie toggle: removes the note's tie, or ties the note to the next note when that has the same pitch. */
-export function toggleTie(score: Score, id: string): void {
+export function toggleTie(score: VoiceScore, id: string): void {
   const { note } = locate(score, id)
   if (note.tieStart) {
     delete note.tieStart
@@ -424,14 +441,14 @@ export function toggleTie(score: Score, id: string): void {
 export type WedgeType = WedgeItem['type']
 
 /** Where each melody note stands in the score: hairpins start and stop on these, never on grace notes or chord members. */
-function melodyOrder(score: Score): Map<string, number> {
+function melodyOrder(score: VoiceScore): Map<string, number> {
   const order = new Map<string, number>()
   for (const l of allNotes(score)) if (!l.note.grace && !l.note.chord) order.set(l.note.id, order.size)
   return order
 }
 
 /** Every hairpin of the score with the measure that holds it and the span of melody notes it covers. */
-function hairpins(score: Score): { item: WedgeItem; measure: Measure; from: number; to: number }[] {
+function hairpins(score: VoiceScore): { item: WedgeItem; measure: Measure; from: number; to: number }[] {
   const order = melodyOrder(score)
   const found: { item: WedgeItem; measure: Measure; from: number; to: number }[] = []
   for (const measure of score.measures) {
@@ -446,7 +463,7 @@ function hairpins(score: Score): { item: WedgeItem; measure: Measure; from: numb
 }
 
 /** The hairpin that covers the note (any note from its first to its last, both included), for showing the mark as active. */
-export function wedgeAt(score: Score, id: string): WedgeItem | undefined {
+export function wedgeAt(score: VoiceScore, id: string): WedgeItem | undefined {
   const at = melodyOrder(score).get(id)
   if (at === undefined) return undefined
   return hairpins(score).find((h) => h.from <= at && at <= h.to)?.item
@@ -457,7 +474,7 @@ export function wedgeAt(score: Score, id: string): WedgeItem | undefined {
  * a hairpin over one long note). It must not overlap another hairpin and must cover at least one
  * sounding note; the first note may not come after the last.
  */
-export function addWedge(score: Score, type: WedgeType, fromId: string, toId: string): void {
+export function addWedge(score: VoiceScore, type: WedgeType, fromId: string, toId: string): void {
   const first = locate(score, fromId)
   const last = locate(score, toId)
   const order = melodyOrder(score)
@@ -477,7 +494,7 @@ export function addWedge(score: Score, type: WedgeType, fromId: string, toId: st
 }
 
 /** Removes the hairpin that covers the note (any note under it, not only its ends). */
-export function removeWedge(score: Score, id: string): void {
+export function removeWedge(score: VoiceScore, id: string): void {
   locate(score, id)
   const at = melodyOrder(score).get(id)
   const found = at === undefined ? undefined : hairpins(score).find((h) => h.from <= at && at <= h.to)
@@ -497,7 +514,7 @@ function chordSpan(items: MeasureItem[], at: number): [number, number] {
 }
 
 /** Takes the slurs and ties of a note, and their other ends, away: a rest or a deleted note has none. */
-function dropSlursAndTies(score: Score, note: Note): void {
+function dropSlursAndTies(score: VoiceScore, note: Note): void {
   for (const s of [...note.slurs]) if (s.type !== 'continue') removeSlur(score, note.id, s.number, s.type)
   note.slurs = []
   if (note.tieStart) {
@@ -516,11 +533,15 @@ function dropSlursAndTies(score: Score, note: Note): void {
  * Deletes a note and returns the id of the note to select next (the following one, else the previous).
  * A hairpin that starts or stops on the note goes with it, as a slur does.
  */
-export function deleteNote(score: Score, id: string): string | undefined {
+export function deleteNote(score: VoiceScore, id: string): string | undefined {
   dropSlursAndTies(score, locate(score, id).note)
   removeTremolo(score, id)
   // A hairpin item sits before its first note, so look the note up again once they are gone.
-  for (const m of score.measures) m.items = m.items.filter((i) => !(isWedge(i) && (i.start === id || i.stop === id)))
+  // In place: the view's `items` is the score's own list, which a new array would no longer be.
+  for (const m of score.measures) {
+    const kept = m.items.filter((i) => !(isWedge(i) && (i.start === id || i.stop === id)))
+    m.items.splice(0, m.items.length, ...kept)
+  }
   const { note, measure, barIndex, at } = locate(score, id)
   const next = neighbour(score, id, 1)
   const prev = neighbour(score, id, -1)
@@ -543,7 +564,7 @@ export function deleteNote(score: Score, id: string): string | undefined {
 }
 
 /** A pitch for a note made next to, or out of a rest at, the note `id`: its own, else the nearest pitched note's, else B4. No accidental. */
-function pitchNear(score: Score, id: string): Pitch {
+function pitchNear(score: VoiceScore, id: string): Pitch {
   const notes = allNotes(score)
   const i = notes.findIndex((l) => l.note.id === id)
   let source: Pitch | undefined = notes[i]?.note.pitch
@@ -556,7 +577,7 @@ function pitchNear(score: Score, id: string): Pitch {
  * the length of the selected one; a note takes its pitch too (a rest selected: the nearest pitched note,
  * else B4), without a printed accidental.
  */
-export function insertNote(score: Score, id: string, where: 'before' | 'after', what: 'note' | 'rest'): string {
+export function insertNote(score: VoiceScore, id: string, where: 'before' | 'after', what: 'note' | 'rest'): string {
   const { note, measure, at, barIndex } = locate(score, id)
   const newId = freshId(score)
   const fresh: Note = { kind: 'note', id: newId, dots: note.dots, duration: note.duration, slurs: [], tuplets: [] }
@@ -582,7 +603,7 @@ export function insertNote(score: Score, id: string, where: 'before' | 'after', 
  * accidental, tie, slur or articulation, so those go, and the other ends of its slurs and ties go
  * with them; a fermata and any hairpin that ends on it stay. A chord's other notes are removed with it.
  */
-export function noteToRest(score: Score, id: string): void {
+export function noteToRest(score: VoiceScore, id: string): void {
   const { note } = locate(score, id)
   if (note.rest) throw new EditError('That is already a rest')
   if (note.grace) throw new EditError('A grace note cannot become a rest')
@@ -625,7 +646,7 @@ function valueOf(duration: Note['duration']): { type: NoteType; dots: number } |
  * note (B4 when there is none) and without an accidental; a fermata stays. A whole-measure rest takes
  * the printed value of its length, so it needs one that a single note can have.
  */
-export function restToNote(score: Score, id: string): void {
+export function restToNote(score: VoiceScore, id: string): void {
   const { note, barIndex } = locate(score, id)
   if (!note.rest) throw new EditError('That is already a note')
   if (note.measureRest && !note.type) {
@@ -648,24 +669,31 @@ export function restToNote(score: Score, id: string): void {
  * recomputes every un-marked note's sounding alter: with one sharp, every F without its own accidental
  * becomes F♯ (an F with a printed natural stays F).
  */
-export function setKey(score: Score, fifths: number): void {
+export function setKey(score: Score, ref: VoiceRef, fifths: number): void {
   if (!Number.isInteger(fifths) || fifths < -7 || fifths > 7) throw new EditError('A key signature has 0 to 7 sharps or flats')
-  const first = score.measures[0]
+  const first = score.bars[0]?.parts[partOf(score, ref)]
   if (!first) throw new EditError('The score has no bars')
+  // For now the key is set on the part of `ref` (design D8).
   first.key = { fifths, ...(first.key?.mode ? { mode: first.key.mode } : {}) }
-  resolveAlters(score)
+  resolveAlters(voiceView(score, ref))
 }
 
 /** Sets the time signature at the start of the exercise; it is no longer an inferred one. */
 export function setTime(score: Score, beats: number, beatType: number, symbol?: 'common' | 'cut'): void {
   if (!Number.isInteger(beats) || beats < 1 || beats > 32) throw new EditError('Beats must be 1 to 32')
   if (![1, 2, 4, 8, 16].includes(beatType)) throw new EditError('The beat type must be 1, 2, 4, 8 or 16')
-  const first = score.measures[0]
+  const first = score.bars[0]
   if (!first) throw new EditError('The score has no bars')
   const time: TimeSignature = { beats, beatType }
   if (symbol) time.symbol = symbol
   first.time = time
-  for (const m of score.measures) if (m.time?.inferred) delete m.time.inferred
+  for (const bar of score.bars) if (bar.time?.inferred) delete bar.time.inferred
+}
+
+function partOf(score: Score, ref: VoiceRef): number {
+  const pi = partIndex(score, ref.part)
+  if (pi < 0) throw new EditError('That part does not exist')
+  return pi
 }
 
 export interface TempoChoice {
@@ -678,7 +706,7 @@ export interface TempoChoice {
 }
 
 /** Replaces the exercise's first tempo marking (or adds one at the start); an empty choice removes it. */
-export function setTempoMarking(score: Score, choice: TempoChoice): void {
+export function setTempoMarking(score: VoiceScore, choice: TempoChoice): void {
   const words = choice.words?.trim()
   const hasMark = choice.perMinute !== undefined
   if (hasMark && !(choice.perMinute! > 0 && Number.isFinite(choice.perMinute!))) throw new EditError('The tempo must be a positive number')
@@ -709,7 +737,7 @@ export function setTempoMarking(score: Score, choice: TempoChoice): void {
 }
 
 /** The first tempo marking of the score, for the editor form. */
-export function firstTempoMarking(score: Score): TempoItem | undefined {
+export function firstTempoMarking(score: VoiceScore): TempoItem | undefined {
   for (const m of score.measures) for (const i of m.items) if (i.kind === 'tempo') return i
   return undefined
 }
@@ -732,16 +760,17 @@ export const MAX_REPEAT_TIMES = 8
 
 /** Styles that read as a double bar line (a recognised final bar line `light-heavy` counts too, as in playback). */
 const DOUBLE_STYLES = new Set(['light-light', 'light-heavy', 'heavy-light', 'heavy-heavy'])
-const isPlainDouble = (b: Measure['leftBarline']): boolean => !!b && !b.repeat && !!b.style && DOUBLE_STYLES.has(b.style)
+const isPlainDouble = (b: Barline | undefined): boolean => !!b && !b.repeat && !!b.style && DOUBLE_STYLES.has(b.style)
 
-function barAt(score: Score, index: number): Measure {
-  const m = Number.isInteger(index) ? score.measures[index] : undefined
+// The bar line setters work on the score's bars (the shared attributes, design D1), not on a view.
+function barAt(score: Score, index: number): Bar {
+  const m = Number.isInteger(index) ? score.bars[index] : undefined
   if (!m) throw new EditError('That bar does not exist')
   return m
 }
 
 /** Drops a bar line that says nothing any more (no style, repeat, count or ending). */
-function tidyBarlines(m: Measure): void {
+function tidyBarlines(m: Bar): void {
   for (const side of ['leftBarline', 'rightBarline'] as const) {
     const b = m[side]
     if (b && !b.style && !b.repeat && b.times === undefined && !b.ending) delete m[side]
@@ -754,10 +783,10 @@ function tidyBarlines(m: Measure): void {
  * style or a repeat of its own, in which case it is dropped. An ending on it stays where it is.
  */
 function normalizeBoundary(score: Score, index: number): void {
-  if (index <= 0 || index >= score.measures.length) return
-  const m = score.measures[index]!
+  if (index <= 0 || index >= score.bars.length) return
+  const m = score.bars[index]!
   if (!isPlainDouble(m.leftBarline)) return
-  const prev = score.measures[index - 1]!
+  const prev = score.bars[index - 1]!
   if (!prev.rightBarline?.style && !prev.rightBarline?.repeat) prev.rightBarline = { ...prev.rightBarline, style: 'light-light' }
   delete m.leftBarline!.style
   tidyBarlines(m)
@@ -766,7 +795,7 @@ function normalizeBoundary(score: Score, index: number): void {
 /** How the bar `index` starts and ends, whichever side of a boundary recognition wrote a double bar line on. */
 export function barLinesOf(score: Score, index: number): BarLines {
   const m = barAt(score, index)
-  const next = score.measures[index + 1]
+  const next = score.bars[index + 1]
   const right = m.rightBarline
   const end: BarEnd = right?.repeat === 'backward' ? 'repeat' : isPlainDouble(right) || isPlainDouble(next?.leftBarline) ? 'double' : 'normal'
   return {
@@ -793,7 +822,7 @@ export function setBarStart(score: Score, index: number, start: BarStart): void 
  */
 export function setBarEnd(score: Score, index: number, end: BarEnd): void {
   const m = barAt(score, index)
-  const next = score.measures[index + 1]
+  const next = score.bars[index + 1]
   if (next && isPlainDouble(next.leftBarline)) {
     delete next.leftBarline!.style
     tidyBarlines(next)
@@ -838,7 +867,7 @@ function middleLine(clef: Clef): number {
 }
 
 /** The clef in force at bar `index` (from 0): the last one set at or before it, else treble. */
-export function clefAt(score: Score, index: number): Clef {
+export function clefAt(score: VoiceScore, index: number): Clef {
   for (let b = Math.min(index, score.measures.length - 1); b >= 0; b--) {
     const clef = score.measures[b]!.clef
     if (clef) return clef
@@ -847,7 +876,7 @@ export function clefAt(score: Score, index: number): Clef {
 }
 
 /** The last bar (from 0) that the clef set at bar `index` applies to: the bar before the next clef change, or the last bar. */
-function clefRangeEnd(score: Score, index: number): number {
+function clefRangeEnd(score: VoiceScore, index: number): number {
   for (let b = index + 1; b < score.measures.length; b++) if (score.measures[b]!.clef) return b - 1
   return score.measures.length - 1
 }
@@ -857,7 +886,7 @@ function clefRangeEnd(score: Score, index: number): number {
  * line or space of the staff (design D3), then works out the alters again: a printed accidental stays with
  * its note, any other note takes its alter from the key. One bar past the range too, for a tie into it.
  */
-function keepStaffPositions(score: Score, from: number, to: number, before: Clef, after: Clef): void {
+function keepStaffPositions(score: VoiceScore, from: number, to: number, before: Clef, after: Clef): void {
   const shift = middleLine(after) - middleLine(before)
   if (shift === 0) return
   for (let b = from; b <= to; b++) {
@@ -875,35 +904,47 @@ function keepStaffPositions(score: Score, from: number, to: number, before: Clef
  * Sets the clef at bar `index` (from 0), the first one or a change, and keeps every note where it is on the
  * staff up to the next clef change: their pitches are read again under the new clef (spec "Fix a clef").
  */
-export function setClef(score: Score, index: number, clef: Clef): void {
-  const m = barAt(score, index)
+export function setClef(score: Score, ref: VoiceRef, index: number, clef: Clef): void {
+  const staff = staffBarAt(score, ref, index)
   if (!CLEF_SIGNS.has(clef.sign)) throw new EditError('A clef is a treble, bass or C clef')
-  const before = clefAt(score, index)
-  m.clef = { ...clef }
-  keepStaffPositions(score, index, clefRangeEnd(score, index), before, clef)
+  const view = voiceView(score, ref)
+  const before = clefAt(view, index)
+  const end = clefRangeEnd(view, index)
+  staff.clef = { ...clef }
+  keepStaffPositions(view, index, end, before, clef)
+}
+
+/** The staff of `ref` in bar `index`, where its clef is set. */
+function staffBarAt(score: Score, ref: VoiceRef, index: number): StaffBar {
+  const bar = barAt(score, index)
+  const staff = bar.parts[partOf(score, ref)]?.staves[ref.staff]
+  if (!staff) throw new EditError('That staff does not exist')
+  return staff
 }
 
 /**
  * Deletes the clef change at bar `index`: the clef before it applies again, and the notes keep their place
  * on the staff. The first clef is changed, not deleted.
  */
-export function deleteClef(score: Score, index: number): void {
-  const m = barAt(score, index)
+export function deleteClef(score: Score, ref: VoiceRef, index: number): void {
+  const staff = staffBarAt(score, ref, index)
   if (index === 0) throw new EditError('The first clef can be changed, not deleted')
-  if (!m.clef) throw new EditError('There is no clef change in that bar')
-  const before = m.clef
-  const end = clefRangeEnd(score, index)
-  delete m.clef
-  keepStaffPositions(score, index, end, before, clefAt(score, index - 1))
+  if (!staff.clef) throw new EditError('There is no clef change in that bar')
+  const before = staff.clef
+  const end = clefRangeEnd(voiceView(score, ref), index)
+  delete staff.clef
+  const view = voiceView(score, ref)
+  keepStaffPositions(view, index, end, before, clefAt(view, index - 1))
 }
 
 /** Deletes the key change at bar `index`: the key before it applies again to the notes without their own accidental. */
-export function deleteKey(score: Score, index: number): void {
+export function deleteKey(score: Score, ref: VoiceRef, index: number): void {
   const m = barAt(score, index)
+  const part = m.parts[partOf(score, ref)]
   if (index === 0) throw new EditError('The first key signature is changed in the Score tab, not deleted')
-  if (!m.key) throw new EditError('There is no key change in that bar')
-  delete m.key
-  resolveAlters(score, index)
+  if (!part?.key) throw new EditError('There is no key change in that bar')
+  delete part.key
+  resolveAlters(voiceView(score, ref), index)
 }
 
 /** Deletes the time signature change at bar `index`: the one before it applies again (the bar check shows any bar that no longer fits). */
@@ -921,15 +962,16 @@ export function deleteTime(score: Score, index: number): void {
  * its ends. The first clef, key and time signature, and bar lines, are not deleted. Throws `EditError` when
  * the element is not there.
  */
-export function deleteElement(score: Score, ref: ElementRef): void {
+export function deleteElement(score: Score, voice: VoiceRef, ref: ElementRef): void {
+  const view = voiceView(score, voice)
   const gone = (): never => {
     throw new EditError('That element is no longer in the score')
   }
   switch (ref.kind) {
     case 'clef':
-      return deleteClef(score, ref.bar)
+      return deleteClef(score, voice, ref.bar)
     case 'key':
-      return deleteKey(score, ref.bar)
+      return deleteKey(score, voice, ref.bar)
     case 'time':
       return deleteTime(score, ref.bar)
     case 'barline':
@@ -937,7 +979,7 @@ export function deleteElement(score: Score, ref: ElementRef): void {
     case 'dynamic':
     case 'tempo':
     case 'words':
-      for (const m of score.measures) {
+      for (const m of view.measures) {
         const at = m.items.findIndex((i) => isDirection(i) && i.kind === ref.kind && i.id === ref.id)
         if (at >= 0) {
           m.items.splice(at, 1)
@@ -946,17 +988,17 @@ export function deleteElement(score: Score, ref: ElementRef): void {
       }
       return gone()
     case 'slur': {
-      const { note } = locate(score, ref.noteId)
+      const { note } = locate(view, ref.noteId)
       if (!note.slurs.some((s) => s.type === 'start' && s.number === ref.number)) return gone()
-      return removeSlur(score, ref.noteId, ref.number, 'start')
+      return removeSlur(view, ref.noteId, ref.number, 'start')
     }
     case 'tie': {
-      const { note } = locate(score, ref.noteId)
+      const { note } = locate(view, ref.noteId)
       if (!note.tieStart) return gone()
-      return toggleTie(score, ref.noteId)
+      return toggleTie(view, ref.noteId)
     }
     case 'wedge':
-      for (const m of score.measures) {
+      for (const m of view.measures) {
         const at = m.items.findIndex((i) => isWedge(i) && i.start === ref.startId)
         if (at >= 0) {
           m.items.splice(at, 1)
@@ -965,9 +1007,9 @@ export function deleteElement(score: Score, ref: ElementRef): void {
       }
       return gone()
     case 'articulation': {
-      const { note } = locate(score, ref.noteId)
+      const { note } = locate(view, ref.noteId)
       if (!note[ref.mark]) return gone()
-      if (ref.mark === 'tremolo') removeTremolo(score, ref.noteId)
+      if (ref.mark === 'tremolo') removeTremolo(view, ref.noteId)
       else delete note[ref.mark]
       return
     }

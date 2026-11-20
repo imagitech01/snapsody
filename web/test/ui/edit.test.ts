@@ -11,6 +11,7 @@ import { noteIdsByBar, tab, tapNote, textOf } from './journey.ts'
 import { BUILD_DIR } from './paths.ts'
 import { ID } from './pieces.ts'
 import { barsScore, elementsScore } from './scores.ts'
+import { firstLine } from '../helpers.ts'
 
 // The edit journey (practice-app design D15, "edit: note, mark, preview, save & practice"; tasks 15.1 to
 // 15.4; specs `score-editing`, `score-capture` "Add pages to a piece", `piece-library` "Rename"; change
@@ -45,7 +46,7 @@ async function stored(app: App, pieceId: string): Promise<Score> {
   const info = JSON.parse((await app.file(`pieces/${pieceId}/piece.json`)) ?? '{}') as { score: string }
   return parseMusicXml((await app.file(`pieces/${pieceId}/${info.score}`)) ?? '')
 }
-const noteOf = (score: Score, id: string) => score.measures.flatMap((m) => m.items.filter(isNote)).find((n) => n.id === id)!
+const noteOf = (score: Score, id: string) => firstLine(score).measures.flatMap((m) => m.items.filter(isNote)).find((n) => n.id === id)!
 
 /** Waits until the score has this many of something drawn (the score is laid out again a moment after each edit). */
 async function drawn(page: Page, selector: string, count: number): Promise<void> {
@@ -520,7 +521,7 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     const score = await stored(app, ode)
     assert.deepEqual(noteOf(score, ODE[0]![0]!).slurs, [{ type: 'start', number: 1 }])
     assert.deepEqual(noteOf(score, ODE[0]![3]!).slurs, [{ type: 'stop', number: 1 }])
-    const wedge = score.measures[2]!.items.find(isWedge)
+    const wedge = firstLine(score).measures[2]!.items.find(isWedge)
     assert.deepEqual([wedge?.type, wedge?.start, wedge?.stop], ['crescendo', ODE[2]![0]!, ODE[2]![3]!])
     await openEditor(page, ode)
     await drawn(page, '.score-view g.slur', 1)
@@ -576,7 +577,7 @@ test('edit: the Marks tab sets how a bar starts and ends, and the passes of an e
     assert.match(bar3, /<barline location="left">\s*<bar-style>heavy-light<\/bar-style>\s*<repeat direction="forward"\/>/)
     assert.match(bar3, /<barline location="right">\s*<bar-style>light-heavy<\/bar-style>\s*<repeat direction="backward"\/>/)
     const saved = await stored(app, ID.ode)
-    assert.deepEqual([saved.measures[2]!.leftBarline?.repeat, saved.measures[2]!.rightBarline?.repeat, saved.measures[2]!.rightBarline?.times], ['forward', 'backward', undefined])
+    assert.deepEqual([firstLine(saved).measures[2]!.leftBarline?.repeat, firstLine(saved).measures[2]!.rightBarline?.repeat, firstLine(saved).measures[2]!.rightBarline?.times], ['forward', 'backward', undefined])
   })
 })
 
@@ -941,10 +942,10 @@ test('edit: deleting a misread clef moves the notes up 12 steps, as one undo ste
     await save(page).click()
     await onScreen(page, 'practice')
     const saved = await stored(app, id)
-    assert.equal(saved.measures[2]!.clef, undefined, 'no clef at bar 3')
-    const bar3 = saved.measures[2]!.items.filter(isNote).map((n) => `${n.pitch!.step}${n.pitch!.octave}`)
+    assert.equal(firstLine(saved).measures[2]!.clef, undefined, 'no clef at bar 3')
+    const bar3 = firstLine(saved).measures[2]!.items.filter(isNote).map((n) => `${n.pitch!.step}${n.pitch!.octave}`)
     assert.deepEqual(bar3, ['B4', 'D5', 'F5', 'A5'], 'D3 is B4: twelve diatonic steps up')
-    assert.deepEqual(saved.measures[3]!.items.filter(isNote).map((n) => `${n.pitch!.step}${n.pitch!.octave}`), ['B4', 'D5', 'F5', 'A5'], 'up to the end of the piece')
+    assert.deepEqual(firstLine(saved).measures[3]!.items.filter(isNote).map((n) => `${n.pitch!.step}${n.pitch!.octave}`), ['B4', 'D5', 'F5', 'A5'], 'up to the end of the piece')
   })
 })
 

@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { firstVoice, partIndex, voiceView } from '../src/core/score/model.ts'
+import type { Measure, Score, VoiceScore } from '../src/core/score/model.ts'
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url))
 
@@ -8,6 +10,10 @@ export const COMMITTED_FIXTURE = here('./fixtures/all-elements.musicxml')
 export const HOMR_MARKS_FIXTURE = here('./fixtures/homr-marks.musicxml')
 /** Local-only, copyrighted material; tests that need it skip when it is absent. */
 export const LOCAL_PAGE = here('../../fixtures/local/page.musicxml')
+/** A melody-and-piano page in homr 0.7.1's form, with original music (parts-and-accompaniment). */
+export const MELODY_PIANO_FIXTURE = here('./fixtures/melody-piano.musicxml')
+/** Local-only: a real homr 0.7.1 reading of a melody-and-piano book page (copyrighted, never committed). */
+export const LOCAL_HOMR_PIANO_PAGE = here('../../prototype/out/v071/aba-mars/page.musicxml')
 export const LOCAL_EXERCISE_87 = here('../../fixtures/local/exercise87_crop_padded.mac.musicxml')
 
 export function read(path: string): string {
@@ -65,4 +71,26 @@ export function score(bodies: string[], time?: [number, number]): string {
     `<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name/></score-part></part-list>` +
     `<part id="P1">${bodies.map((b, i) => `<measure number="${i + 1}">${attrs(i)}${b}</measure>`).join('')}</part></score-partwise>`
   )
+}
+
+/** The first voice of the first part of a score as a voice view: the one line the app works on for now (change parts-and-accompaniment). */
+export const firstLine = (score: Score): VoiceScore => voiceView(score, firstVoice(score))
+
+/**
+ * Sets (or, with `undefined`, removes) a bar attribute of the first voice's bar `index` where the model keeps it: the clef on the
+ * staff, the key on the part, the rest on the bar. A voice view's attributes are copies, so they cannot be set through it.
+ */
+export function setAttr<K extends 'clef' | 'key' | 'time' | 'leftBarline' | 'rightBarline' | 'multiRest' | 'newSystem'>(
+  score: Score,
+  index: number,
+  name: K,
+  value: Measure[K] | undefined,
+): void {
+  const bar = score.bars[index]
+  if (!bar) throw new Error(`no bar ${index}`)
+  const ref = firstVoice(score)
+  const part = bar.parts[partIndex(score, ref.part)]!
+  const target = (name === 'clef' ? part.staves[ref.staff]! : name === 'key' || name === 'multiRest' ? part : bar) as unknown as Record<string, unknown>
+  if (value === undefined) delete target[name]
+  else target[name] = value
 }

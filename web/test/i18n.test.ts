@@ -11,6 +11,7 @@ import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import { computeWarnings } from '../src/core/score/warnings.ts'
 import type { ScoreWarning, ScoreWarningKind } from '../src/core/score/warnings.ts'
 import { eighths, note, quarters, score } from './helpers.ts'
+import { firstLine } from './helpers.ts'
 
 // The English texts (practice-app task 9.1, design D13; English only since `paper-and-ink-and-about` D11):
 // the catalogue, plurals, relative dates and the warning messages. Every date is built with the local constructor and `now` is passed in, so
@@ -189,7 +190,7 @@ test('instrument families have a label', () => {
 // ---- Score warnings --------------------------------------------------------------------------
 
 /** The warnings of a score as the editor computes them, for the tenor saxophone unless said otherwise. */
-const warningsOf = (xml: string, instrument = TENOR_SAX): ScoreWarning[] => computeWarnings(parseMusicXml(xml), instrument)
+const warningsOf = (xml: string, instrument = TENOR_SAX): ScoreWarning[] => computeWarnings(firstLine(parseMusicXml(xml)), instrument)
 const a3 = note({ step: 'A', octave: 3, type: 'quarter' })
 
 test('warnings: a note outside the range reads the same as core says it', () => {
@@ -220,12 +221,12 @@ test('warnings: a bar that does not add up, and the two time-signature warnings'
   const sixEight = warningsOf(score([eighths(6), eighths(5)], [6, 8]))
   assert.equal(english.warning(sixEight[0]!), 'Bar 2 adds up to 5 beats but 6/8 needs 6.')
 
-  const inferred = computeWarnings(parseMusicXml(prepareRecognisedScore(score([quarters(3), quarters(3)])).musicxml), TENOR_SAX)
+  const inferred = computeWarnings(firstLine(parseMusicXml(prepareRecognisedScore(score([quarters(3), quarters(3)])).musicxml)), TENOR_SAX)
   assert.deepEqual(inferred.map((w) => w.kind), ['time-signature-inferred'])
   assert.deepEqual(inferred[0]!.time, { beats: 3, beatType: 4 })
   assert.equal(english.warning(inferred[0]!), 'No time signature was found, so 3/4 was worked out from the bar lengths. Check that it is right.')
 
-  const missing = computeWarnings(parseMusicXml(prepareRecognisedScore(score([quarters(2), quarters(3), quarters(4)])).musicxml), TENOR_SAX)
+  const missing = computeWarnings(firstLine(parseMusicXml(prepareRecognisedScore(score([quarters(2), quarters(3), quarters(4)])).musicxml)), TENOR_SAX)
   assert.deepEqual(missing.map((w) => w.kind), ['time-signature-missing'])
 })
 

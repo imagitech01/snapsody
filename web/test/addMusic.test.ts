@@ -7,12 +7,18 @@ import { createI18n } from '../src/app/i18n/index.ts'
 import { LibraryError, createLibrary } from '../src/app/library.ts'
 import type { Library, Staff } from '../src/app/library.ts'
 import { loadSettings } from '../src/app/settings.ts'
+import { editedVoice } from '../src/app/editorSession.ts'
+import { hasInstrumentRow, hasPartsRow, partsHintOf, resolvePart } from '../src/app/parts.ts'
+import { PIANO, TENOR_SAX } from '../src/core/instruments/instruments.ts'
+import { buildTimeline } from '../src/core/playback/timeline.ts'
+import { computeScoreWarnings } from '../src/core/score/warnings.ts'
 import { notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
 import type { FakePageOutcome, FakePlatform } from '../src/platform/fake/index.ts'
 import type { Reader, ReaderEvent } from '../src/platform/port.ts'
-import { eighths, quarters, score } from './helpers.ts'
+import { MELODY_PIANO_FIXTURE, eighths, quarters, read, score } from './helpers.ts'
+import { firstLine } from './helpers.ts'
 
 // Adding music (practice-app task 9.5, design D6; specs `score-capture`, `score-recognition`) with
 // the fake scanner and reader: the hint, progress, pages combined into one piece, adding pages to a
@@ -199,8 +205,8 @@ test('two pages give one piece with continuous bars, the default name, each raw 
   assert.equal(piece.info.bars, 5)
   assert.deepEqual(piece.info.pages.map((p) => [p.n, p.firstBar, p.lastBar, p.staves]), [[1, 1, 3, []], [2, 4, 5, []]])
   const merged = parseMusicXml(piece.musicxml)
-  assert.deepEqual(merged.measures.map((m) => m.number), ['1', '2', '3', '4', '5'])
-  assert.equal(merged.measures[3]!.time, undefined, 'page 2 brings no time change')
+  assert.deepEqual(firstLine(merged).measures.map((m) => m.number), ['1', '2', '3', '4', '5'])
+  assert.equal(firstLine(merged).measures[3]!.time, undefined, 'page 2 brings no time change')
   assert.deepEqual(piece.info.repairs.map((r) => r.bar), ['5'], "page 2's bars are checked against page 1's 3/4")
   assert.equal(s.platform.files.text(`pieces/${pieceId}/pages/1/recognised.musicxml`), PAGE_1)
   assert.equal(s.platform.files.text(`pieces/${pieceId}/pages/2/recognised.musicxml`), PAGE_2)
@@ -426,9 +432,9 @@ test('add pages: the new pages go after the last bar; the bars and corrections t
   assert.equal(after.info.name, before.info.name, 'the name is kept')
   const merged = parseMusicXml(after.musicxml)
   const old = parseMusicXml(corrected)
-  assert.deepEqual(merged.measures.slice(0, 3), old.measures, 'the first bars, with their correction and note ids, are untouched')
-  assert.equal(notesOf(merged.measures[0]!)[0]!.pitch!.step, 'F')
-  assert.deepEqual(merged.measures.map((m) => m.number), ['1', '2', '3', '4', '5', '6'])
+  assert.deepEqual(firstLine(merged).measures.slice(0, 3), firstLine(old).measures, 'the first bars, with their correction and note ids, are untouched')
+  assert.equal(notesOf(firstLine(merged).measures[0]!)[0]!.pitch!.step, 'F')
+  assert.deepEqual(firstLine(merged).measures.map((m) => m.number), ['1', '2', '3', '4', '5', '6'])
   assert.deepEqual(after.info.repairs.map((r) => r.bar), ['5'], 'only the new bars are repaired')
   assert.deepEqual(s.platform.files.paths().filter((p) => p.startsWith(`pieces/${id}/pages/1/`)).map((p) => [p, s.platform.files.text(p)]), page1)
   assert.equal(s.platform.files.text(`pieces/${id}/pages/3/recognised.musicxml`), PAGE_3)
@@ -460,7 +466,7 @@ test('add pages: appended to the score as saved when the pages are done, and onc
   assert.equal(stepOf(flow), 'saved')
   const after = await s.library.load(id)
   assert.equal(after.info.bars, 4)
-  assert.equal(notesOf(parseMusicXml(after.musicxml).measures[0]!)[0]!.pitch!.step, 'F', 'the correction saved in between is kept')
+  assert.equal(notesOf(firstLine(parseMusicXml(after.musicxml)).measures[0]!)[0]!.pitch!.step, 'F', 'the correction saved in between is kept')
 
   // a piece that keeps changing under the flow: it gives up after the second try
   const stubborn: AddMusicDeps['library'] = {
@@ -506,7 +512,7 @@ test('staves: a reader that reports staff positions has them stored with each pa
 test('time: an estimated time signature at the top of a page counts as absent, for a new piece and for added pages', async () => {
   // Page 2 as homr reads a page without a printed meter: an n/4 from the median bar length (here 4/4: the nine eighths are the longest bar).
   const estimated = score([quarters(3, 'C'), eighths(9, 'D')], [4, 4])
-  const times = (musicxml: string) => parseMusicXml(musicxml).measures.flatMap((m, i) => (m.time ? [`${i + 1}:${m.time.beats}/${m.time.beatType}`] : []))
+  const times = (musicxml: string) => firstLine(parseMusicXml(musicxml)).measures.flatMap((m, i) => (m.time ? [`${i + 1}:${m.time.beats}/${m.time.beatType}`] : []))
 
   const s = await setup()
   s.platform.scanner.willReturn(2)
@@ -557,4 +563,169 @@ test('scanFolderOf: the scan folder of a scanned page is removed with it, and no
   assert.equal(scanFolderOf('scans/page-1.jpg'), undefined, 'never the scans folder itself')
   assert.equal(scanFolderOf('pieces/p1/pages/1/source.jpg'), undefined)
   assert.equal(scanFolderOf('page-1.jpg'), undefined)
+})
+
+// ---- the parts step (change parts-and-accompaniment, design D4) -------------------------------
+
+type PartsState = Extract<AddMusicState, { step: 'parts' }>
+const partsOf = (flow: AddMusicFlow): PartsState => {
+  const state = flow.state.value
+  assert.equal(state.step, 'parts')
+  return state as PartsState
+}
+
+/** Reads the melody-and-piano fixture as one page and stops in the parts step. */
+async function melodyAndPiano(s: Awaited<ReturnType<typeof setup>>): Promise<AddMusicFlow> {
+  s.platform.scanner.willReturn(1)
+  s.platform.reader.willRead([{ result: 'done', musicxml: read(MELODY_PIANO_FIXTURE) }])
+  const flow = createAddMusic(s.deps)
+  await flow.start()
+  return flow
+}
+
+test('parts step: a one-part reading goes straight to a saved piece, with no step and no practice.json', async () => {
+  const s = await setup()
+  const id = await onePagePiece(s)
+  assert.equal(await s.library.readPractice(id), null)
+  assert.deepEqual((await s.library.load(id)).info.partsRead, [{ staves: 1, kept: true }])
+})
+
+test('parts step: two parts wait for the user, all kept, the first chosen; nothing is created yet', async () => {
+  const s = await setup()
+  const flow = await melodyAndPiano(s)
+  const state = partsOf(flow)
+  assert.deepEqual(state.parts.map((p) => [p.id, p.name, p.staves]), [['P1', 'Melody', 1], ['P2', 'Piano', 2]])
+  assert.deepEqual(state.keep, [true, true])
+  assert.equal(state.play, 0)
+  assert.deepEqual(pieceFiles(s.platform), [], 'no piece yet')
+  assert.notDeepEqual(scans(s.platform), [], 'the scans wait for the choice')
+})
+
+test('parts step: keeping both saves both parts and the chosen part in practice.json', async () => {
+  const s = await setup()
+  const flow = await melodyAndPiano(s)
+  flow.setPlay(1)
+  assert.equal(partsOf(flow).play, 1)
+  await flow.continueParts()
+  const state = flow.state.value
+  assert.equal(state.step, 'saved')
+  const { pieceId } = state as Extract<AddMusicState, { step: 'saved' }>
+  const piece = await s.library.load(pieceId)
+  assert.deepEqual(parseMusicXml(piece.musicxml).parts.map((p) => p.id), ['P1', 'P2'])
+  assert.deepEqual(piece.info.partsRead, [{ staves: 1, kept: true }, { staves: 2, kept: true }])
+  assert.deepEqual((await s.library.readPractice(pieceId))?.part, { id: 'P2' })
+  assert.deepEqual(scans(s.platform), [], 'the scans are removed')
+})
+
+test('parts step: dropping Piano saves the melody only, and the choice moves to the first kept part', async () => {
+  const s = await setup()
+  const flow = await melodyAndPiano(s)
+  flow.setPlay(1)
+  flow.setKept(1, false)
+  assert.deepEqual(partsOf(flow).keep, [true, false])
+  assert.equal(partsOf(flow).play, 0, 'dropping the part you play moves the choice')
+  flow.setPlay(1)
+  assert.equal(partsOf(flow).play, 0, 'a dropped part cannot be chosen')
+  await flow.continueParts()
+  const { pieceId } = flow.state.value as Extract<AddMusicState, { step: 'saved' }>
+  const piece = await s.library.load(pieceId)
+  assert.deepEqual(parseMusicXml(piece.musicxml).parts.map((p) => [p.id, p.name]), [['P1', 'Melody']])
+  assert.deepEqual(piece.info.partsRead, [{ staves: 1, kept: true }, { staves: 2, kept: false }])
+  assert.deepEqual((await s.library.readPractice(pieceId))?.part, { id: 'P1' })
+})
+
+test('parts step: with nothing kept Continue is refused until a part is kept again', async () => {
+  const s = await setup()
+  const flow = await melodyAndPiano(s)
+  flow.setKept(0, false)
+  flow.setKept(1, false)
+  assert.deepEqual(partsOf(flow).keep, [false, false])
+  await flow.continueParts()
+  assert.equal(stepOf(flow), 'parts', 'still waiting')
+  assert.deepEqual(pieceFiles(s.platform), [])
+  flow.setKept(1, true)
+  assert.equal(partsOf(flow).play, 1, 'the only kept part is the one played')
+  await flow.continueParts()
+  assert.equal(stepOf(flow), 'saved')
+  const { pieceId } = flow.state.value as Extract<AddMusicState, { step: 'saved' }>
+  assert.deepEqual(parseMusicXml((await s.library.load(pieceId)).musicxml).parts.map((p) => p.id), ['P2'])
+})
+
+test('parts step: Back cancels, as cancelling the reading does: no piece, the scans removed', async () => {
+  const s = await setup()
+  const flow = await melodyAndPiano(s)
+  assert.equal(await flow.cancel(), true)
+  assert.equal(stepOf(flow), 'cancelled')
+  assert.deepEqual(pieceFiles(s.platform), [])
+  assert.deepEqual(scans(s.platform), [])
+  await flow.continueParts() // nothing happens after the end
+  assert.equal(stepOf(flow), 'cancelled')
+})
+
+test('parts step: pages added to a melody-only piece show no step, and a part that is not kept is dropped again with a warning flag', async () => {
+  const s = await setup()
+  const flow = await melodyAndPiano(s)
+  flow.setKept(1, false)
+  await flow.continueParts()
+  const { pieceId } = flow.state.value as Extract<AddMusicState, { step: 'saved' }>
+  s.platform.scanner.willReturn(1)
+  s.platform.reader.willRead([{ result: 'done', musicxml: read(MELODY_PIANO_FIXTURE) }])
+  const more = createAddMusic(s.deps, { pieceId })
+  await more.start()
+  const state = more.state.value
+  assert.equal(state.step, 'saved', 'no parts step')
+  assert.equal((state as Extract<AddMusicState, { step: 'saved' }>).added, true)
+  assert.equal((state as Extract<AddMusicState, { step: 'saved' }>).partDropped, false, 'a part that was not kept is not a warning')
+  assert.deepEqual(parseMusicXml((await s.library.load(pieceId)).musicxml).parts.map((p) => p.id), ['P1'])
+})
+
+test('parts step: a part that is only on a later page is left out of the combined pages, and the saved state says so', async () => {
+  const s = await setup()
+  s.platform.scanner.willReturn(2)
+  s.platform.reader.willRead([
+    { result: 'done', musicxml: PAGE_1 },
+    { result: 'done', musicxml: read(MELODY_PIANO_FIXTURE) },
+  ])
+  const flow = createAddMusic(s.deps)
+  await flow.start()
+  const state = flow.state.value
+  assert.equal(state.step, 'saved', 'the first page has one part: no step')
+  assert.equal((state as Extract<AddMusicState, { step: 'saved' }>).partDropped, true)
+})
+
+test('parts step: dropping the melody keeps a piano piece that the editor, practice and added pages all take as the piano', async () => {
+  const s = await setup()
+  const flow = await melodyAndPiano(s)
+  flow.setKept(0, false)
+  assert.equal(partsOf(flow).play, 1, 'the piano is the part played')
+  await flow.continueParts()
+  const { pieceId } = flow.state.value as Extract<AddMusicState, { step: 'saved' }>
+  const piece = await s.library.load(pieceId)
+  const saved = parseMusicXml(piece.musicxml)
+  assert.deepEqual(saved.parts, [{ id: 'P2', name: 'Piano', staves: 2 }], 'the part keeps the id it was read with')
+  assert.deepEqual(piece.info.partsRead, [{ staves: 1, kept: false }, { staves: 2, kept: true }])
+  const practice = await s.library.readPractice(pieceId)
+  assert.deepEqual(practice?.part, { id: 'P2' }, 'practice.json names the part that is in the score')
+  // the bars keep what the melody carried for the whole score
+  assert.deepEqual(saved.bars[0]!.time, { beats: 4, beatType: 4 })
+  assert.equal(saved.bars[3]!.rightBarline?.repeat, 'backward')
+  assert.deepEqual(computeScoreWarnings(saved, 'P2', TENOR_SAX), [], 'no bar or range warning')
+  // the editor and practice open on the piano
+  assert.deepEqual(editedVoice(saved, { part: practice?.part?.id }), { part: 'P2', staff: 0, voice: 0 })
+  assert.deepEqual(resolvePart(saved, practice?.part), { id: 'P2' })
+  assert.equal(hasPartsRow(saved), true, 'the hands can be chosen')
+  assert.equal(hasInstrumentRow(saved), false, 'a piano-only piece has no instrument row')
+  assert.equal(partsHintOf(saved)?.kind, 'pianoAlone', 'the hint is the one for a piano piece')
+  const timeline = buildTimeline(saved, TENOR_SAX, { part: { id: 'P2' } })
+  assert.ok(timeline.events.length > 0 && timeline.events.every((e) => e.own && e.sound === PIANO.id), 'every note is yours and sounds as piano')
+  // a page added later keeps the piano only
+  s.platform.scanner.willReturn(1)
+  s.platform.reader.willRead([{ result: 'done', musicxml: read(MELODY_PIANO_FIXTURE) }])
+  const more = createAddMusic(s.deps, { pieceId })
+  await more.start()
+  assert.equal(more.state.value.step, 'saved', 'no parts step')
+  const after = parseMusicXml((await s.library.load(pieceId)).musicxml)
+  assert.deepEqual(after.parts.map((p) => p.id), ['P2'])
+  assert.equal(after.bars.length, saved.bars.length * 2)
+  assert.ok(after.bars.every((b) => b.parts.length === 1 && b.parts[0]!.staves.length === 2), 'every bar has the two piano staves')
 })

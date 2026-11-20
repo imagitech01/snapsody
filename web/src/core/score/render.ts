@@ -1,6 +1,8 @@
 import type { VerovioToolkit } from "verovio/esm";
 import type { Score } from "./model.ts";
+import { firstVoice, voiceView, voices } from "./model.ts";
 import { beamScore } from "./beams.ts";
+import type { BeamMark } from "./beams.ts";
 import { serializeMusicXml } from "./musicxml.ts";
 import type { MultiRests } from "./noteMap.ts";
 
@@ -17,6 +19,8 @@ export interface RenderOptions {
   scale?: number;
   /** A multi-measure rest that still holds: one symbol (`collapse`, practice) or bar by bar (`expand`, the editor). Default `collapse`. */
   multiRests?: MultiRests;
+  /** The parts to draw, by id (`SerializeOptions.parts`): practice draws your part only, a two-staff part as a grand staff (change parts-and-accompaniment, D7). The first part when absent (the editor). */
+  parts?: string[];
 }
 
 export const DEFAULT_SCALE = 40;
@@ -57,7 +61,15 @@ export async function renderScore(score: Score, options: RenderOptions): Promise
   // No part-name label or title: they only cost width on a phone (the app shows the name itself).
   // Beams are added for display only (homr writes none; see beams.ts), and so are the ids that let a
   // tap on a clef, slur, tie or hairpin be traced back to the model (elements.ts).
-  if (!tk.loadData(serializeMusicXml({ ...score, partName: "", title: undefined }, { beams: beamScore(score), drawingIds: true, multiRests: options.multiRests ?? "collapse" }))) throw new Error("Verovio could not read the score");
+  const drawn = options.parts ?? [firstVoice(score).part];
+  const first = { ...score, parts: score.parts.map((p) => ({ ...p, name: "" })) };
+  delete first.title;
+  const beams = new Map<string, BeamMark[]>();
+  for (const ref of voices(score)) {
+    if (!drawn.includes(ref.part)) continue;
+    for (const [id, marks] of beamScore(voiceView(score, ref))) beams.set(id, marks);
+  }
+  if (!tk.loadData(serializeMusicXml(first, { beams, drawingIds: true, multiRests: options.multiRests ?? "collapse", parts: drawn }))) throw new Error("Verovio could not read the score");
   const pages: string[] = [];
   for (let page = 1; page <= tk.getPageCount(); page++) pages.push(tk.renderToSVG(page));
   return pages;

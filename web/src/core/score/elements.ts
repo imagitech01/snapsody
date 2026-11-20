@@ -1,4 +1,4 @@
-import type { Clef, Measure, Note, Score } from './model.ts'
+import type { Clef, Measure, Note, VoiceScore } from './model.ts'
 import { isDirection, isNote, isWedge } from './model.ts'
 import type { DrawnBars } from './noteMap.ts'
 
@@ -106,7 +106,7 @@ export function sameElement(a: ElementRef, b: ElementRef): boolean {
 }
 
 /** Where the note with this id is: its bar (from 0), or undefined. */
-function noteAt(score: Score, id: string): { note: Note; bar: number } | undefined {
+function noteAt(score: VoiceScore, id: string): { note: Note; bar: number } | undefined {
   for (const [bar, m] of score.measures.entries()) {
     for (const item of m.items) if (isNote(item) && item.id === id) return { note: item, bar }
   }
@@ -114,7 +114,7 @@ function noteAt(score: Score, id: string): { note: Note; bar: number } | undefin
 }
 
 /** What the element is now, or undefined when it is gone from the score. */
-export function describeElement(score: Score, ref: ElementRef): ElementInfo | undefined {
+export function describeElement(score: VoiceScore, ref: ElementRef): ElementInfo | undefined {
   const inRange = (bar: number): boolean => Number.isInteger(bar) && bar >= 0 && bar < score.measures.length
   switch (ref.kind) {
     case 'clef': {
@@ -232,7 +232,7 @@ function fromDrawingId(id: string): ElementRef | undefined {
  * A node maps to one element; one element can be drawn by several nodes (a slur over a system break, a
  * key at the start of each system).
  */
-export function mapElements<N>(root: N, tree: SvgTree<N>, score: Score, bars?: Pick<DrawnBars, 'barsOf'>): Map<N, ElementRef> {
+export function mapElements<N>(root: N, tree: SvgTree<N>, score: VoiceScore, bars?: Pick<DrawnBars, 'barsOf'>): Map<N, ElementRef> {
   const found = new Map<N, ElementRef>()
   const has = (node: N, cls: string): boolean => tree.classes(node).includes(cls)
   const notesById = new Map<string, Note>()

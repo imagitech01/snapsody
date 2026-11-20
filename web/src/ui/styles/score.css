@@ -129,3 +129,8 @@
   fill: var(--primary);
   stroke: var(--primary);
 }
+
+/* The staff of the hand you do not play (practice, change parts-and-accompaniment, design D7): still there, as a guide. */
+.score-view g.staff.staff-faded {
+  opacity: 0.28;
+}

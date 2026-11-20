@@ -13,6 +13,7 @@ import {
   unitName,
 } from '../src/core/playback/tempo.ts'
 import { barOf, n, scoreOf } from './playbackHelpers.ts'
+import { firstLine } from './helpers.ts'
 
 const words = (w: string): string => `<direction><direction-type><words>${w}</words></direction-type></direction>`
 const metronome = (unit: string, perMinute: number, dot = false): string =>
@@ -46,42 +47,42 @@ test('tempo words: every table value is inside the user range once clamped', () 
 // 12.3: precedence metronome > word > 80, then the remembered tempo
 
 test('default tempo: no marking gives 80 beats per minute', () => {
-  const setup = tempoSetup(scoreOf(bars))
+  const setup = tempoSetup(firstLine(scoreOf(bars)))
   assert.equal(setup.defaultBpm, DEFAULT_TEMPO)
   assert.equal(setup.defaultBpm, 80)
   assert.equal(setup.source, 'default')
 })
 
 test('default tempo: a tempo word is looked up in the table', () => {
-  const setup = tempoSetup(scoreOf(bars, [4, 4], words('Moderato')))
+  const setup = tempoSetup(firstLine(scoreOf(bars, [4, 4], words('Moderato'))))
   assert.equal(setup.defaultBpm, TEMPO_WORDS.moderato)
   assert.equal(setup.source, 'words')
 })
 
 test('default tempo: a metronome mark wins over a tempo word', () => {
-  const setup = tempoSetup(scoreOf(bars, [4, 4], words('Allegro') + metronome('quarter', 66)))
+  const setup = tempoSetup(firstLine(scoreOf(bars, [4, 4], words('Allegro') + metronome('quarter', 66))))
   assert.equal(setup.defaultBpm, 66)
   assert.equal(setup.source, 'metronome')
 })
 
 test('default tempo: the metronome mark sets the beat unit, else the metre does', () => {
-  const dottedInFourFour = tempoSetup(scoreOf(bars, [4, 4], metronome('quarter', 100, true)))
+  const dottedInFourFour = tempoSetup(firstLine(scoreOf(bars, [4, 4], metronome('quarter', 100, true))))
   assert.deepEqual(dottedInFourFour.unit, frac(3, 2))
   assert.equal(dottedInFourFour.unitName, 'dotted quarter')
-  assert.equal(tempoSetup(scoreOf(bars, [6, 8], metronome('quarter', 90))).unitName, 'quarter', "the mark's own unit wins over 6/8")
-  assert.equal(tempoSetup(scoreOf(bars, [6, 8])).unitName, 'dotted quarter')
+  assert.equal(tempoSetup(firstLine(scoreOf(bars, [6, 8], metronome('quarter', 90)))).unitName, 'quarter', "the mark's own unit wins over 6/8")
+  assert.equal(tempoSetup(firstLine(scoreOf(bars, [6, 8]))).unitName, 'dotted quarter')
 })
 
 test('default tempo: a mark outside 30-200 is clamped', () => {
-  assert.equal(tempoSetup(scoreOf(bars, [4, 4], metronome('quarter', 240))).defaultBpm, 200)
-  assert.equal(tempoSetup(scoreOf(bars, [4, 4], metronome('quarter', 20))).defaultBpm, 30)
+  assert.equal(tempoSetup(firstLine(scoreOf(bars, [4, 4], metronome('quarter', 240)))).defaultBpm, 200)
+  assert.equal(tempoSetup(firstLine(scoreOf(bars, [4, 4], metronome('quarter', 20)))).defaultBpm, 30)
 })
 
 test('remembered tempo: the last chosen tempo wins over everything the score says', () => {
-  const marked = tempoSetup(scoreOf(bars, [4, 4], metronome('quarter', 66)))
+  const marked = tempoSetup(firstLine(scoreOf(bars, [4, 4], metronome('quarter', 66))))
   assert.equal(startingTempo(60, marked), 60)
   assert.equal(startingTempo(null, marked), 66)
-  assert.equal(startingTempo(undefined, tempoSetup(scoreOf(bars))), 80)
+  assert.equal(startingTempo(undefined, tempoSetup(firstLine(scoreOf(bars)))), 80)
   assert.equal(startingTempo(999, marked), 200, 'a stored value is kept in range')
 })
 
@@ -103,7 +104,7 @@ test('beat unit by metre: quarter, half, dotted quarter, eighth', () => {
 
 test('count-in clicks: one bar of beats in the metre', () => {
   const clicks = (beats: number, beatType: number, unit = meterBeatUnit({ beats, beatType })): number =>
-    countInClicks(scoreOf([{ body: n({}) }], [beats, beatType]), 0, unit)
+    countInClicks(firstLine(scoreOf([{ body: n({}) }], [beats, beatType])), 0, unit)
   assert.equal(clicks(3, 4), 3, '1-2-3')
   assert.equal(clicks(4, 4), 4)
   assert.equal(clicks(2, 2), 2)

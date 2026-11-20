@@ -58,8 +58,10 @@ hear how it goes, play along with it slowly, and loop the hard bars. Snapsody do
 
 - **Android only** (10+, arm64). The architecture keeps an iOS version possible, but there isn't
   one yet.
-- **Single-line melodies.** Snapsody reads one voice on one staff. It doesn't read chords or
-  piano grand staffs (piano and guitar play the melody only).
+- **What it reads.** Snapsody keeps every part, staff and voice the reader finds: a melody, a melody
+  with a piano accompaniment, or a piano grand staff with chords. Reading piano pages from phone
+  photos is newer and less tested than melodies. Lyrics, fingering, pedal marks, 8va lines and
+  chord symbols are not read.
 - **Scanning needs Google Play services.** The page scanner is Google's ML Kit Document Scanner
   (see [License](#license)).
 - Recognition isn't perfect, which is why there is an editor.

@@ -129,3 +129,11 @@ export function instrumentById(id: string): Instrument | undefined {
 export function instrumentOrDefault(id: string | undefined): Instrument {
   return (id === undefined ? undefined : instrumentById(id)) ?? DEFAULT_INSTRUMENT
 }
+
+/**
+ * The instrument a part sounds and is checked with (change parts-and-accompaniment, design D6): a two-staff
+ * part is a piano part (the piano's range and sound); any other part is played by the piece's instrument.
+ */
+export function instrumentOfPart<T extends { readonly transpose: number }>(part: { readonly staves: 1 | 2 }, pieceInstrument: T): T | Instrument {
+  return part.staves === 2 ? PIANO : pieceInstrument
+}

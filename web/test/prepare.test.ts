@@ -6,9 +6,10 @@ import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import { computeWarnings } from '../src/core/score/warnings.ts'
 import { COMMITTED_FIXTURE, LOCAL_EXERCISE_87, LOCAL_PAGE, eighths, note, quarters, read, score, skipUnless } from './helpers.ts'
+import { firstLine } from './helpers.ts'
 
 /** What the user should check in a prepared score, for the tenor saxophone. */
-const warningsOf = (musicxml: string) => computeWarnings(parseMusicXml(musicxml), TENOR_SAX)
+const warningsOf = (musicxml: string) => computeWarnings(firstLine(parseMusicXml(musicxml)), TENOR_SAX)
 
 test('prepare: pipeline repairs and serialises; the warnings are computed from the result', () => {
   const xml = score(
@@ -41,11 +42,11 @@ test('prepare: exercise 87 gives zero warnings (local fixture)', { skip: skipUnl
   assert.equal(result.bars, 19)
   assert.deepEqual(warningsOf(result.musicxml), [])
   const s = parseMusicXml(result.musicxml)
-  const first = s.measures[0]
+  const first = firstLine(s).measures[0]
   assert.deepEqual(first?.key, { fifths: 1 })
   assert.deepEqual(first?.time, { beats: 3, beatType: 4 })
   assert.ok(first?.items.some((i) => i.kind === 'dynamic' && i.mark === 'mf'))
-  const last = notesOf(s.measures[18] as never).at(-1)
+  const last = notesOf(firstLine(s).measures[18] as never).at(-1)
   assert.equal(last?.dots, 1)
   assert.equal(last?.type, 'half')
   assert.deepEqual(last?.pitch, { step: 'G', octave: 4 })

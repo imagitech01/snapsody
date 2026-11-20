@@ -6,7 +6,8 @@ import type { ElementRef } from '../../../core/score/elements.ts'
 import { lineOfBar } from '../../../core/score/lines.ts'
 import type { LineBars } from '../../../core/score/lines.ts'
 import { isNote } from '../../../core/score/model.ts'
-import type { Score } from '../../../core/score/model.ts'
+import type { MeasureItem, Note, Score, VoiceRef, VoiceScore } from '../../../core/score/model.ts'
+import { voiceView } from '../../../core/score/model.ts'
 import { Button, Icon, IconButton, SegmentedControl } from '../../components/index.ts'
 import { ScoreIsland } from '../../ScoreIsland.tsx'
 import { useShell } from '../../ShellContext.ts'
@@ -59,7 +60,12 @@ const PICK_ERROR: Readonly<Record<PickKind, FailureKey>> = {
 const noHeard = (): undefined => undefined
 
 /** The ids of every note and rest of the score, in order. */
-const noteOrder = (score: Score): Map<string, number> => new Map(score.measures.flatMap((m) => m.items.filter(isNote)).map((n, index) => [n.id, index]))
+/** A note or rest that is drawn: a hidden rest (a `<forward>`) is not there to select or count. */
+const isShown = (item: MeasureItem): item is Note => isNote(item) && !item.hidden
+
+const lineOf = (score: Score, ref: VoiceRef): VoiceScore => voiceView(score, ref)
+
+const noteOrder = (score: Score, ref: VoiceRef): Map<string, number> => new Map(lineOf(score, ref).measures.flatMap((m) => m.items.filter(isShown)).map((n, index) => [n.id, index]))
 
 export function Editor({ session }: { session: EditorSession }) {
   const { router, i18n } = useShell()
@@ -77,7 +83,7 @@ export function Editor({ session }: { session: EditorSession }) {
     const flagged = computed(() => session.warnings.value.flatMap((w) => (w.noteId ? [w.noteId] : [])))
     const flaggedBars = computed(() => {
       const bars = new Set(session.warnings.value.filter((w) => !w.noteId && w.bar !== undefined).map((w) => w.bar))
-      return session.score.value.measures.filter((m) => bars.has(m.number)).flatMap((m) => m.items.filter(isNote).map((n) => n.id))
+      return lineOf(session.score.value, session.voice).measures.filter((m) => bars.has(m.number)).flatMap((m) => m.items.filter(isShown).map((n) => n.id))
     })
     const fullScore = signal(false)
     return {
@@ -115,7 +121,7 @@ export function Editor({ session }: { session: EditorSession }) {
   }
 
   /** Runs an edit as one undo step (or as part of the last, `amend`); an edit that cannot be done says why and changes nothing. */
-  const run = (edit: (score: Score) => unknown, failure: FailureKey = 'editor.error.edit', options: { amend?: boolean } = {}): void => {
+  const run = (edit: (view: VoiceScore) => unknown, failure: FailureKey = 'editor.error.edit', options: { amend?: boolean } = {}): void => {
     try {
       session.apply(edit, options)
       setMessage(null)
@@ -136,7 +142,7 @@ export function Editor({ session }: { session: EditorSession }) {
       return
     }
     // The notes may be tapped in either order: the first of them in the score is where the mark starts.
-    const order = noteOrder(session.score.value)
+    const order = noteOrder(session.score.value, session.voice)
     const [from, to] = (order.get(pick.first) ?? 0) <= (order.get(id) ?? 0) ? [pick.first, id] : [id, pick.first]
     const { kind } = pick
     setPick(null)
@@ -242,7 +248,7 @@ export function Editor({ session }: { session: EditorSession }) {
   }
 
   // "Bar 3 · Note 4": the place of the note among the bar's notes and rests.
-  const place = selection && note ? (score.measures[selection.bar - 1]?.items.filter(isNote).findIndex((n) => n.id === note.id) ?? -1) + 1 : 0
+  const place = selection && note ? (lineOf(score, session.voice).measures[selection.bar - 1]?.items.filter(isShown).findIndex((n) => n.id === note.id) ?? -1) + 1 : 0
   const heading =
     tab === 'score'
       ? t('score.whole')
@@ -325,6 +331,7 @@ export function Editor({ session }: { session: EditorSession }) {
               <ScoreIsland
                 label={t('editor.scoreLabel')}
                 multiRests="expand"
+                part={session.drawn}
                 score={score}
                 bar={island.bar}
                 following={island.following}

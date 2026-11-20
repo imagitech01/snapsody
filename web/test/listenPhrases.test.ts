@@ -6,6 +6,7 @@ import { INSTRUMENTS } from '../src/core/instruments/instruments.ts'
 import { buildTimeline } from '../src/core/playback/timeline.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { phrasesFor, scaleRoot } from '../dev/phrases.ts'
+import { firstLine } from './helpers.ts'
 
 // The phrases of the listening page (web/dev/listen.html) are made of real music: they have to parse, stay
 // inside what each instrument can play and what its sample folder covers, and be slurred, short, held, accented
@@ -20,7 +21,7 @@ test('listening phrases: every instrument has the seven phrases, in its written 
     assert.deepEqual(phrases.map((p) => p.id), ['legato', 'staccato', 'held-low', 'held-mid', 'held-high', 'accent', 'crescendo'], instrument.id)
     const [lo, hi] = config.instruments[instrument.sound]!.range
     for (const phrase of phrases) {
-      const timeline = buildTimeline(parseMusicXml(phrase.xml), instrument)
+      const timeline = buildTimeline(firstLine(parseMusicXml(phrase.xml)), instrument)
       const pitched = timeline.events.filter((e) => !e.rest)
       assert.deepEqual(pitched.flatMap((e) => e.written), phrase.written, `${instrument.id} ${phrase.id}: what is written is what is played`)
       for (const midi of phrase.written) {
@@ -44,7 +45,7 @@ test('listening phrases: the scale starts on a C, with room for an octave', () =
 
 test('listening phrases: legato is one slur (every note after the first slurred), staccato is short, a held note is long and tied', () => {
   for (const instrument of INSTRUMENTS) {
-    const by = Object.fromEntries(phrasesFor(instrument).map((p) => [p.id, buildTimeline(parseMusicXml(p.xml), instrument)]))
+    const by = Object.fromEntries(phrasesFor(instrument).map((p) => [p.id, buildTimeline(firstLine(parseMusicXml(p.xml)), instrument)]))
     const legato = by.legato!.events
     assert.equal(legato.length, 15, 'eight up, six down and the root')
     assert.deepEqual(legato.map((e) => e.attack), [true, ...Array<boolean>(14).fill(false)], `${instrument.id}: the whole scale is slurred`)
@@ -62,12 +63,12 @@ test('listening phrases: legato is one slur (every note after the first slurred)
 test('listening phrases: the accents are on beats 1 and 3, at mf and then ff, and the crescendo rises from pp to ff', () => {
   const instrument = INSTRUMENTS[0]!
   const phrases = phrasesFor(instrument)
-  const accent = buildTimeline(parseMusicXml(phrases.find((p) => p.id === 'accent')!.xml), instrument).events
+  const accent = buildTimeline(firstLine(parseMusicXml(phrases.find((p) => p.id === 'accent')!.xml)), instrument).events
   assert.deepEqual(accent.map((e) => e.accent), [true, false, true, false, true, false, true, false])
   assert.deepEqual(accent.map((e) => e.dynamic), ['mf', 'mf', 'mf', 'mf', 'ff', 'ff', 'ff', 'ff'])
   assert.ok(accent.every((e) => e.attackGain <= 1), 'no attack above full scale')
   assert.ok(accent[0]!.attackGain > accent[0]!.gain * 1.5, 'the mf accent is +4 dB')
-  const cresc = buildTimeline(parseMusicXml(phrases.find((p) => p.id === 'crescendo')!.xml), instrument).events.map((e) => e.gain)
+  const cresc = buildTimeline(firstLine(parseMusicXml(phrases.find((p) => p.id === 'crescendo')!.xml)), instrument).events.map((e) => e.gain)
   assert.equal(cresc.length, 9)
   assert.ok(cresc.slice(0, 8).every((g, i) => i === 0 || g > cresc[i - 1]!), `each note louder than the one before: ${cresc}`)
   assert.equal(cresc[0], 0.2, 'from pp')

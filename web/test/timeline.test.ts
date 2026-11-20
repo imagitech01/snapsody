@@ -9,12 +9,13 @@ import { Scheduler } from '../src/core/playback/scheduler.ts'
 import type { NoteOnSpec, NoteOutput, TimerApi, VoiceHandle } from '../src/core/playback/scheduler.ts'
 import { ACCENT_DB, DYNAMIC_GAIN, MAX_ATTACK_GAIN, STRONG_ACCENT_DB, buildTimeline, expandMeasureOrder, loopSpanOf, midiOf, parseEndingNumbers } from '../src/core/playback/timeline.ts'
 import type { PlaybackEvent } from '../src/core/playback/timeline.ts'
-import { COMMITTED_FIXTURE, read } from './helpers.ts'
-import { barOf, dyn, n, scoreOf, scoreXml, tenorTimeline, wedge } from './playbackHelpers.ts'
+import { COMMITTED_FIXTURE, MELODY_PIANO_FIXTURE, read } from './helpers.ts'
+import { backup, barOf, dyn, inChord, inVoice, n, onLeftHand, partsOf, scoreOf, scoreXml, tenorTimeline, wedge } from './playbackHelpers.ts'
 import { setBarEnd, setBarStart, setRepeatTimes } from '../src/core/score/edit.ts'
+import { firstLine, setAttr } from './helpers.ts'
 
 const order = (bars: Parameters<typeof scoreOf>[0]): number[] =>
-  expandMeasureOrder(scoreOf(bars).measures).map((p) => p.barIndex + 1)
+  expandMeasureOrder(firstLine(scoreOf(bars)).measures).map((p) => p.barIndex + 1)
 
 const ev = (events: PlaybackEvent[], i: number): PlaybackEvent => {
   const e = events[i]
@@ -131,7 +132,7 @@ test('timeline: a double bar line inside a section with a forward sign does not 
 
 // --- edit-bar-lines task 1.3: playback follows the bar lines the user sets in the editor ---
 
-const playedOrder = (s: ReturnType<typeof scoreOf>): number[] => expandMeasureOrder(s.measures).map((p) => p.barIndex + 1)
+const playedOrder = (s: ReturnType<typeof scoreOf>): number[] => expandMeasureOrder(firstLine(s).measures).map((p) => p.barIndex + 1)
 
 test('timeline: a start-repeat the user adds wins over the double-bar-line fallback (exercise 82)', () => {
   const s = scoreOf([
@@ -172,7 +173,7 @@ test('timeline: first and second endings still play right after the count of the
   // Known gap (design.md Risks): the "1." ending is skipped on pass 2, so its end-repeat is never reached again,
   // and the section plays twice although the control says 3x. Endings and counts are pinned as they play now.
   assert.deepEqual(playedOrder(s), [1, 2, 3, 1, 2, 4, 5])
-  assert.equal(s.measures[2]!.leftBarline?.ending?.number, '1', 'the first ending is still there')
+  assert.equal(firstLine(s).measures[2]!.leftBarline?.ending?.number, '1', 'the first ending is still there')
   setRepeatTimes(s, 2, 2)
   assert.deepEqual(playedOrder(s), [1, 2, 3, 1, 2, 4, 5])
   assert.deepEqual(tenorTimeline(s).events.map((e) => e.pass), [1, 1, 1, 2, 2, 2, 1], 'the second ending plays on the last pass')
@@ -235,7 +236,7 @@ test('timeline: written G4 sounds as F3 (tenor), Bb3 (alto), F4 (clarinet), G3 (
   const score = scoreOf([{ body: n({ step: 'G', octave: 4, type: 'whole' }) }])
   const before = structuredClone(score)
   const sounding = (instrument: Instrument): number[] => {
-    const e = ev(buildTimeline(score, instrument).events, 0)
+    const e = ev(buildTimeline(firstLine(score), instrument).events, 0)
     assert.deepEqual(e.written, [67], `${instrument.id}: the written pitch is reported as printed`)
     return e.pitches
   }
@@ -250,7 +251,7 @@ test('timeline: written G4 sounds as F3 (tenor), Bb3 (alto), F4 (clarinet), G3 (
 
 test('timeline: a chord member is transposed with the instrument too', () => {
   const body = n({ step: 'C', octave: 5, type: 'whole' }) + n({ step: 'E', octave: 5, type: 'whole' }).replace('<note>', '<note><chord/>')
-  const t = buildTimeline(scoreOf([{ body }]), ALTO_SAX)
+  const t = buildTimeline(firstLine(scoreOf([{ body }])), ALTO_SAX)
   assert.deepEqual(ev(t.events, 0).pitches, [72 - 9, 76 - 9])
   assert.deepEqual(ev(t.events, 0).written, [72, 76])
 })
@@ -338,7 +339,7 @@ test('timeline: the committed fixture expands with every feature', () => {
     t.bars.map((b) => b.bar),
     ['1', '2', '3', '4', '1', '2', '3', '5', '6'],
   )
-  assert.ok(notesOf(score.measures[0]!).length > 0)
+  assert.ok(notesOf(firstLine(score).measures[0]!).length > 0)
 })
 
 // --- 5.3 expression: fermata, tenuto, accent, hairpins ---
@@ -491,7 +492,7 @@ test('timeline: a hairpin on one note, on a tied note, and one that cannot end d
   assert.equal(ev(tied.events, 1).gain, DYNAMIC_GAIN.f)
   // A hairpin whose last note is not in the score (it was deleted) is never played.
   const score = scoreOf([{ body: n({ id: 'a' }) + n({ id: 'b' }) + n({ id: 'c' }) }])
-  score.measures[0]!.items.unshift({ kind: 'wedge', type: 'crescendo', start: 'a', stop: 'gone' })
+  firstLine(score).measures[0]!.items.unshift({ kind: 'wedge', type: 'crescendo', start: 'a', stop: 'gone' })
   assert.deepEqual(gains(tenorTimeline(score)), [DYNAMIC_GAIN.mf, DYNAMIC_GAIN.mf, DYNAMIC_GAIN.mf])
 })
 
@@ -517,7 +518,7 @@ test('timeline: a hairpin in a repeated bar starts from the level in force on ea
 test('timeline: hairpin gains leave the score alone and do not depend on the instrument', () => {
   const score = scoreOf([{ body: wedge('crescendo') + n({}) + n({}) + wedge('stop') + dyn('ff') + n({}) + n({}) }])
   const before = structuredClone(score)
-  assert.deepEqual(gains(buildTimeline(score, PIANO)), gains(buildTimeline(score, TENOR_SAX)))
+  assert.deepEqual(gains(buildTimeline(firstLine(score), PIANO)), gains(buildTimeline(firstLine(score), TENOR_SAX)))
   assert.deepEqual(score, before)
 })
 
@@ -545,7 +546,7 @@ test('timeline: the beat grid follows a change of time signature and a repeat', 
     { body: n({}).repeat(4), right: '<repeat direction="backward"/>' },
     { body: n({}).repeat(3) },
   ])
-  score.measures[2]!.time = { beats: 3, beatType: 4 }
+  setAttr(score, 2, 'time', { beats: 3, beatType: 4 })
   const t = tenorTimeline(score)
   assert.equal(t.clicks.length, 4 + 4 + 4 + 4 + 3, 'bars 1, 2, 1, 2 in 4/4 and bar 3 in 3/4')
   assert.deepEqual(
@@ -737,7 +738,7 @@ const art = (inner: string): string => `<articulations>${inner}</articulations>`
 /** The timeline at concert pitch (no transposition), in a key. */
 function inKey(bars: string[], fifths = 0) {
   const xml = scoreXml(bars.map((body) => ({ body }))).replace('<fifths>0</fifths>', `<fifths>${fifths}</fifths>`)
-  return buildTimeline(parseMusicXml(xml), { transpose: 0 })
+  return buildTimeline(firstLine(parseMusicXml(xml)), { transpose: 0 })
 }
 const bt = (f: { n: number; d: number }): number => f.n / f.d
 const soundsOf = (e: PlaybackEvent) => {
@@ -951,4 +952,235 @@ test('ornaments: a mordent on the first note of a chord is played on it, the oth
   const t = inKey([x({ step: 'G', octave: 4, notations: orn('<mordent/>') }) + x({ step: 'B', octave: 4, chord: true }) + x({ step: 'C', octave: 4, type: 'half' }) + x({ step: 'C', octave: 4 })])
   const s = soundsOf(ev(t.events, 0))
   assert.deepEqual(s.map((x) => x.midi), [71, 67, 65, 67], 'B4 held, then G4 F4 G4')
+})
+
+// ---------------------------------------------------------------------------------------------------
+// Parts and accompaniment (change parts-and-accompaniment, group 4): one timeline from every part.
+// ---------------------------------------------------------------------------------------------------
+
+const melodyPiano = () => parseMusicXml(read(MELODY_PIANO_FIXTURE))
+const beatOf = (e: PlaybackEvent): number => e.start.n / e.start.d
+const lengthOf = (e: PlaybackEvent): number => e.length.n / e.length.d
+const partOf = (e: PlaybackEvent): string => e.voice.part
+
+test('timeline (parts): the events of every part are in time order, then part, staff and voice, and index is the position', () => {
+  const t = buildTimeline(melodyPiano(), TENOR_SAX)
+  t.events.forEach((e, i) => assert.equal(e.index, i))
+  for (let i = 1; i < t.events.length; i++) {
+    const a = t.events[i - 1]!
+    const b = t.events[i]!
+    const key = (e: PlaybackEvent): number[] => [beatOf(e), e.voice.part === 'P1' ? 0 : 1, e.voice.staff, e.voice.voice]
+    const [ka, kb] = [key(a), key(b)]
+    const firstDifferent = ka.findIndex((x, k) => x !== kb[k])
+    assert.ok(firstDifferent < 0 || ka[firstDifferent]! < kb[firstDifferent]!, `event ${i} is not before event ${i - 1}`)
+  }
+  // The bars are shared: the first event of each bar is the first that starts in it, whichever part it is of.
+  for (const span of t.bars) {
+    const first = t.events[span.firstEvent]
+    assert.ok(first && beatOf(first) >= span.start.n / span.start.d)
+    if (span.firstEvent > 0) assert.ok(beatOf(t.events[span.firstEvent - 1]!) < span.start.n / span.start.d)
+  }
+})
+
+test('timeline (parts): a repeat plays both parts twice', () => {
+  const t = buildTimeline(melodyPiano(), TENOR_SAX)
+  const firstBar = t.events.filter((e) => e.barIndex === 0)
+  for (const part of ['P1', 'P2']) {
+    assert.deepEqual([...new Set(firstBar.filter((e) => partOf(e) === part).map((e) => e.pass))], [1, 2], `${part} plays bar 1 on both passes`)
+  }
+  assert.deepEqual(t.bars.map((b) => `${b.bar}.${b.pass}`), ['1.1', '2.1', '3.1', '4.1', '1.2', '2.2', '3.2', '4.2', '5.1', '6.1', '7.1', '8.1'])
+  assert.equal(t.events.filter((e) => e.barIndex === 7).length, 3, 'the last bar is played once: a melody note and the piano chord and bass')
+})
+
+test('timeline (parts): the melody sounds a major ninth below written on the tenor saxophone, the piano at written pitch, each with its sound', () => {
+  const t = buildTimeline(melodyPiano(), TENOR_SAX)
+  const melody = t.events.find((e) => partOf(e) === 'P1')!
+  assert.deepEqual(melody.written, [67])
+  assert.deepEqual(melody.pitches, [53], 'written G4, sounding F3')
+  assert.equal(melody.sound, 'tenor-sax')
+  const chord = t.events.find((e) => partOf(e) === 'P2' && e.voice.staff === 0)!
+  assert.deepEqual(chord.written, [60, 64, 67])
+  assert.deepEqual(chord.pitches, [60, 64, 67], 'the piano is not transposed')
+  assert.equal(chord.sound, 'piano')
+  // On the alto saxophone the melody moves with the instrument and the piano does not.
+  const alto = buildTimeline(melodyPiano(), ALTO_SAX)
+  assert.deepEqual(alto.events.find((e) => partOf(e) === 'P1')!.pitches, [58])
+  assert.deepEqual(alto.events.find((e) => partOf(e) === 'P2')!.pitches, [60, 64, 67])
+})
+
+test('timeline (parts): your part is own, the others play along; a hand is your line, the other hand plays along (Left hand plays along)', () => {
+  const t = buildTimeline(melodyPiano(), TENOR_SAX)
+  assert.ok(t.events.every((e) => e.own === (partOf(e) === 'P1')), 'default: the first part')
+
+  const right = buildTimeline(melodyPiano(), TENOR_SAX, { part: { id: 'P2', hand: 'right' } })
+  assert.ok(right.events.some((e) => e.voice.staff === 1), 'the left hand is in the stream')
+  for (const e of right.events) {
+    assert.equal(e.own, partOf(e) === 'P2' && e.voice.staff === 0, `${e.voice.part}/${e.voice.staff} own`)
+    if (e.voice.part === 'P2' && e.voice.staff === 1) assert.equal(e.sound, 'piano')
+  }
+  const left = buildTimeline(melodyPiano(), TENOR_SAX, { part: { id: 'P2', hand: 'left' } })
+  assert.ok(left.events.every((e) => e.own === (partOf(e) === 'P2' && e.voice.staff === 1)))
+  const both = buildTimeline(melodyPiano(), TENOR_SAX, { part: { id: 'P2' } })
+  assert.ok(both.events.every((e) => e.own === (partOf(e) === 'P2')), 'a two-staff part without a hand is your line on both staves')
+})
+
+test('timeline (parts): a silent part or hand leaves no events at all, and the timing does not change', () => {
+  const all = buildTimeline(melodyPiano(), TENOR_SAX)
+  const noPiano = buildTimeline(melodyPiano(), TENOR_SAX, { silent: ['P2'] })
+  assert.ok(noPiano.events.length > 0 && noPiano.events.every((e) => partOf(e) === 'P1'))
+  assert.deepEqual(noPiano.bars.map((b) => [b.start.n / b.start.d, b.end.n / b.end.d]), all.bars.map((b) => [b.start.n / b.start.d, b.end.n / b.end.d]))
+  const noLeft = buildTimeline(melodyPiano(), TENOR_SAX, { silent: ['P2:left'] })
+  assert.ok(noLeft.events.some((e) => e.voice.part === 'P2' && e.voice.staff === 0))
+  assert.ok(!noLeft.events.some((e) => e.voice.part === 'P2' && e.voice.staff === 1))
+  assert.ok(!buildTimeline(melodyPiano(), TENOR_SAX, { silent: ['P2:right'] }).events.some((e) => e.voice.part === 'P2' && e.voice.staff === 0))
+  // Your own line is never left out by it.
+  assert.ok(buildTimeline(melodyPiano(), TENOR_SAX, { silent: ['P1'] }).events.some((e) => e.voice.part === 'P1'))
+  // A tap on a note of a silent part finds nothing.
+  const leftNote = all.events.find((e) => e.voice.part === 'P2' && e.voice.staff === 1)!.noteIds[0]!
+  assert.equal(noLeft.eventOfNote(leftNote), undefined)
+})
+
+test('timeline (parts): the melody slur is not broken by the piano events between its notes; legato follows the voice', () => {
+  const t = buildTimeline(melodyPiano(), TENOR_SAX)
+  const slur = t.events.filter((e) => partOf(e) === 'P1' && e.barIndex === 5)
+  assert.equal(slur.length, 4)
+  assert.deepEqual(slur.map((e) => [e.legatoNext, e.attack]), [[true, true], [true, false], [false, false], [false, true]])
+  for (const e of slur.slice(0, 3)) {
+    const next = t.events[e.nextInVoice!]!
+    assert.equal(partOf(next), 'P1')
+    assert.ok(beatOf(next) > beatOf(e))
+  }
+  assert.ok(slur.slice(0, 3).some((e) => e.nextInVoice !== e.index + 1), 'a piano chord lies between two of the slurred notes, and the slur is not broken by it')
+  // The piano's notes are not slurred.
+  assert.ok(t.events.filter((e) => partOf(e) === 'P2').every((e) => !e.legatoNext && e.attack))
+  // nextInVoice stays within one voice, for every event.
+  for (const e of t.events) {
+    if (e.nextInVoice === undefined) continue
+    const next = t.events[e.nextInVoice]!
+    assert.deepEqual(next.voice, e.voice)
+    assert.ok(e.nextInVoice > e.index)
+  }
+})
+
+test('timeline (parts): the chord notes of a guitar sound an octave below written', () => {
+  const score = scoreOf([{ body: n({ step: 'C', octave: 4 }) + inChord(n({ step: 'E', octave: 4 })) + inChord(n({ step: 'G', octave: 4 })) + n({ rest: true }) + n({ step: 'A', octave: 4 }) + n({ step: 'B', octave: 4 }) }])
+  const t = buildTimeline(score, GUITAR)
+  assert.deepEqual(t.events[0]!.written, [60, 64, 67])
+  assert.deepEqual(t.events[0]!.pitches, [48, 52, 55])
+  assert.equal(t.events[0]!.sound, 'guitar')
+  // The same through a guitar melody in a score with a piano.
+  const withPiano = buildTimeline(melodyPiano(), GUITAR)
+  assert.deepEqual(withPiano.events.find((e) => partOf(e) === 'P1')!.pitches, [55])
+  assert.equal(withPiano.events.find((e) => partOf(e) === 'P1')!.sound, 'guitar')
+  assert.deepEqual(withPiano.events.find((e) => partOf(e) === 'P2')!.pitches, [60, 64, 67])
+})
+
+test('timeline (parts): a one-line score read by the score builder is the same as by its view', () => {
+  const score = scoreOf([{ body: n({ step: 'C', slur: 'start' }) + n({ step: 'D' }) + n({ step: 'E', slur: 'stop', fermata: true }) + n({ step: 'F', accent: true }) }, { body: n({ step: 'G', type: 'whole' }) }])
+  const a = buildTimeline(score, TENOR_SAX)
+  const b = buildTimeline(firstLine(score), TENOR_SAX)
+  const plain = (t: ReturnType<typeof buildTimeline>) => JSON.stringify([t.events.map((e) => ({ ...e, voice: undefined })), t.bars, t.clicks, t.end])
+  assert.equal(plain(a), plain(b))
+})
+
+// Fermata map (design D6.2)
+
+test('timeline (parts): a fermata in one part holds the other parts too, and both go on together after it', () => {
+  const t = buildTimeline(melodyPiano(), TENOR_SAX)
+  // Bar 3: the fermata is on the melody's half note on beat 3; the piano plays chords and a bass there.
+  const bar3 = t.events.filter((e) => e.barIndex === 2 && e.pass === 1)
+  const held = (part: string) => bar3.filter((e) => partOf(e) === part && beatOf(e) === 10)
+  assert.ok(held('P1').length === 1 && held('P2').length >= 3)
+  for (const e of [...held('P1'), ...held('P2')]) assert.equal(lengthOf(e), 4, `${e.voice.part} is held for twice its value`)
+  // Before it nothing moves; after it both parts start bar 4 together, 2 beats later than written.
+  assert.deepEqual(bar3.filter((e) => beatOf(e) < 10).map(beatOf), [8, 8, 8, 8, 9, 9], 'the melody, the chord and two left-hand voices (one a rest) on beat 1, and two on beat 2')
+  const bar4 = t.events.filter((e) => e.barIndex === 3 && e.pass === 1)
+  assert.deepEqual([...new Set(bar4.map(beatOf))], [14])
+  assert.equal(bar4.length, 3)
+  // The bar spans and the next pass carry the same stretch; the repeat holds it again.
+  assert.deepEqual(t.bars.slice(0, 5).map((b) => [b.start.n, b.end.n]), [[0, 4], [4, 8], [8, 14], [14, 18], [18, 22]])
+  assert.equal(t.bars[6]!.end.n - t.bars[6]!.start.n, 6, 'the held bar on the second pass')
+  assert.equal(t.end.n, 52)
+})
+
+test('timeline (parts): a note across a fermata of another part is stretched with it', () => {
+  // Melody: four quarters, the second held. Piano: a whole note over the bar.
+  const score = partsOf([
+    { id: 'P1', bars: [n({ step: 'C' }) + n({ step: 'D', fermata: true }) + n({ step: 'E' }) + n({ step: 'F' })] },
+    { id: 'P2', bars: [n({ step: 'C', octave: 3, type: 'whole' })] },
+  ])
+  const t = buildTimeline(score, TENOR_SAX)
+  const piano = t.events.find((e) => partOf(e) === 'P2')!
+  assert.equal(lengthOf(piano), 5, 'a whole note is 4 beats written, and 5 with one of its quarters held')
+  assert.deepEqual(t.events.filter((e) => partOf(e) === 'P1').map((e) => [beatOf(e), lengthOf(e)]), [[0, 1], [1, 2], [3, 1], [4, 1]])
+  assert.equal(t.end.n, 5)
+})
+
+test('timeline (parts): overlapping fermatas of several parts are one hold, stretched once', () => {
+  // The melody holds its first quarter; the piano holds a half note over it: the union is the half note's two beats.
+  const score = partsOf([
+    { id: 'P1', bars: [n({ step: 'C', fermata: true }) + n({ step: 'D' }) + n({ step: 'E' }) + n({ step: 'F' }), n({ step: 'G', type: 'whole' })] },
+    { id: 'P2', bars: [n({ step: 'C', octave: 3, type: 'half', fermata: true }) + n({ step: 'G', octave: 2, type: 'half' }), n({ step: 'C', octave: 3, type: 'whole' })] },
+  ])
+  const t = buildTimeline(score, TENOR_SAX)
+  const melody = t.events.filter((e) => partOf(e) === 'P1')
+  assert.deepEqual(melody.map(beatOf), [0, 2, 4, 5, 6], 'the quarter after the held one starts after the whole hold of two beats written, doubled')
+  assert.deepEqual(melody.map(lengthOf), [2, 2, 1, 1, 4], 'the first quarter is stretched with the whole hold: 1 beat written inside [0, 2)')
+  const piano = t.events.filter((e) => partOf(e) === 'P2')
+  assert.deepEqual(piano.map((e) => [beatOf(e), lengthOf(e)]), [[0, 4], [4, 2], [6, 4]])
+  assert.deepEqual(t.bars.map((b) => [b.start.n, b.end.n]), [[0, 6], [6, 10]], 'written 2 + 2 + 4 = 4 beats, with the 2-beat hold doubled: +2')
+})
+
+test('timeline (parts): a tapped note starts every part at its time; clicks are laid once from the shared bars', () => {
+  const t = buildTimeline(melodyPiano(), TENOR_SAX)
+  const bar1 = t.clicks.filter((c) => c.barIndex === 0 && c.start.n < 4)
+  assert.deepEqual(bar1.map((c) => c.start.n), [0, 1, 2, 3], 'one click per beat, not one per voice')
+  // The fermata of bar 3 stops the clicks inside the hold, whichever part holds.
+  assert.deepEqual(t.clicks.filter((c) => c.barIndex === 2 && c.start.n < 14).map((c) => c.start.n), [8, 9, 10])
+  const tapped = t.eventOfNote(t.events.find((e) => partOf(e) === 'P1' && e.barIndex === 1 && beatOf(e) === 6)!.noteIds[0]!)!
+  assert.equal(beatOf(tapped), 6)
+  assert.ok(t.events.filter((e) => beatOf(e) === 6).length > 1, 'other parts have events at that time')
+})
+
+// Dynamics of a staff (design D6.3)
+
+test('timeline (parts): a dynamic in one voice applies to every voice of its staff, a hairpin too', () => {
+  const score = partsOf([
+    {
+      id: 'P1',
+      bars: [
+        dyn('p') + n({ step: 'C' }) + n({ step: 'D' }) + n({ step: 'E' }) + n({ step: 'F' }) + backup(4) + inVoice(n({ step: 'C', octave: 3, type: 'half' }) + n({ step: 'G', octave: 2, type: 'half' }), 2),
+        wedge('crescendo') + n({ step: 'C' }) + n({ step: 'D' }) + n({ step: 'E' }) + n({ step: 'F' }) + wedge('stop') + backup(4) + inVoice(n({ step: 'C', octave: 3, type: 'half' }) + n({ step: 'G', octave: 2, type: 'half' }), 2),
+      ],
+    },
+  ])
+  const t = buildTimeline(score, TENOR_SAX)
+  const voice = (k: number) => t.events.filter((e) => e.voice.voice === k)
+  assert.equal(voice(1).length, 4)
+  assert.ok(voice(0).concat(voice(1)).filter((e) => e.barIndex === 0).every((e) => e.gain === DYNAMIC_GAIN.p!), 'p is in force in both voices')
+  const second = voice(1).filter((e) => e.barIndex === 1)
+  assert.ok(second[1]!.gain > second[0]!.gain, 'the hairpin, written in the first voice, also lifts the second voice')
+  assert.ok(voice(0).filter((e) => e.barIndex === 1).at(-1)!.gain > DYNAMIC_GAIN.p!)
+})
+
+test('timeline (parts): the staves of a part have their own dynamics', () => {
+  const rh = n({ step: 'C', type: 'whole' })
+  const lh = onLeftHand(n({ step: 'C', octave: 3, type: 'whole' }))
+  const score = partsOf([{ id: 'P1', staves: 2, bars: [dyn('ff') + rh + backup(4) + lh, rh + backup(4) + lh] }])
+  const t = buildTimeline(score, TENOR_SAX)
+  const gains = (staff: number) => t.events.filter((e) => e.voice.staff === staff).map((e) => e.gain)
+  assert.deepEqual(gains(0), [DYNAMIC_GAIN.ff, DYNAMIC_GAIN.ff], 'the staff of the mark')
+  assert.deepEqual(gains(1), [DYNAMIC_GAIN.mf, DYNAMIC_GAIN.mf], 'the other staff is not touched')
+})
+
+test('timeline (parts): what sounds at a time is every event under it, a line of yours first, and the bar comes from the bar spans', () => {
+  const score = partsOf([{ id: 'P1', staves: 2, bars: [n({ step: 'C' }) + n({ step: 'D' }) + n({ step: 'E' }) + n({ step: 'F' }) + backup(4) + onLeftHand(n({ step: 'C', octave: 3, type: 'whole' })), n({ step: 'G', type: 'whole' }) + backup(4) + onLeftHand(n({ step: 'C', octave: 3, type: 'whole' }))] }])
+  const t = buildTimeline(score, TENOR_SAX)
+  assert.deepEqual(t.ownAt(2.5).map((e) => [e.voice.staff, beatOf(e)]), [[0, 2], [1, 0]], 'the quarter that began last, then the whole note')
+  assert.equal(t.eventAtBeat(2.5)!.voice.staff, 0)
+  assert.equal(t.barAt(2.5)!.barIndex, 0)
+  assert.equal(t.barAt(4)!.barIndex, 1)
+  assert.deepEqual(t.ownAt(4.5).map((e) => e.voice.staff), [0, 1])
+  assert.deepEqual(t.ownAt(8), [], 'nothing after the end')
+  assert.equal(t.eventAtBeat(8), undefined)
 })

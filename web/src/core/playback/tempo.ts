@@ -1,4 +1,4 @@
-import type { NoteType, Score, TempoItem, TimeSignature } from '../score/model.ts'
+import type { NoteType, VoiceScore, TempoItem, TimeSignature } from '../score/model.ts'
 import type { Frac } from '../score/rational.ts'
 import { add, frac, mul } from '../score/rational.ts'
 
@@ -92,7 +92,7 @@ export function barQuarters(time: TimeSignature | undefined): Quarters {
 }
 
 /** The time signature in force at a bar (the last one stated at or before it), 4/4 when none is. */
-export function timeSignatureAt(score: Score, barIndex: number): TimeSignature | undefined {
+export function timeSignatureAt(score: VoiceScore, barIndex: number): TimeSignature | undefined {
   let found: TimeSignature | undefined
   for (let i = 0; i <= barIndex && i < score.measures.length; i++) {
     const t = score.measures[i]!.time
@@ -128,7 +128,7 @@ export interface TempoSetup {
   defaultBpm: number
 }
 
-function firstTempoItem(score: Score, accept: (t: TempoItem) => boolean): TempoItem | undefined {
+function firstTempoItem(score: VoiceScore, accept: (t: TempoItem) => boolean): TempoItem | undefined {
   for (const m of score.measures) {
     for (const item of m.items) if (item.kind === 'tempo' && accept(item)) return item
   }
@@ -139,7 +139,7 @@ function firstTempoItem(score: Score, accept: (t: TempoItem) => boolean): TempoI
  * The tempo unit and the default tempo of a score: a metronome mark (in its own beat unit), else a
  * tempo word through the table (in the metre's unit), else 80 in the metre's unit.
  */
-export function tempoSetup(score: Score): TempoSetup {
+export function tempoSetup(score: VoiceScore): TempoSetup {
   const meter = meterBeatUnit(timeSignatureAt(score, 0))
   const mark = firstTempoItem(score, (t) => t.perMinute !== undefined && t.perMinute > 0)
   if (mark) {
@@ -158,7 +158,7 @@ export function tempoSetup(score: Score): TempoSetup {
 }
 
 /** How many clicks make one bar of count-in at `bar`, counted in `unit` (3/4 in quarters: 3; 6/8 in dotted quarters: 2). */
-export function countInClicks(score: Score, barIndex: number, unit: Quarters): number {
+export function countInClicks(score: VoiceScore, barIndex: number, unit: Quarters): number {
   const bar = barQuarters(timeSignatureAt(score, barIndex))
   return Math.max(1, Math.round((bar.n / bar.d) / (unit.n / unit.d)))
 }

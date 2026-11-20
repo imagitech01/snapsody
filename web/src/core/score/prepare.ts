@@ -1,5 +1,6 @@
 import { parseMusicXml, serializeMusicXml } from './musicxml.ts'
 import type { Score } from './model.ts'
+import { firstVoice, voiceView, voices } from './model.ts'
 import { inferTimeSignature, repairBarLengths } from './repairs.ts'
 import type { Repair } from './repairs.ts'
 
@@ -26,7 +27,13 @@ export function prepareRecognisedScore(recognised: string): PreparedScore {
  * It changes the score it is given.
  */
 export function prepareScore(score: Score): PreparedScore {
-  inferTimeSignature(score)
-  const repairs = repairBarLengths(score)
-  return { musicxml: serializeMusicXml(score), repairs, bars: score.measures.length }
+  // The time signature is inferred on the first part's first voice; the bars are repaired on every voice (design D4).
+  inferTimeSignature(voiceView(score, firstVoice(score)))
+  const repairs = repairVoices(score)
+  return { musicxml: serializeMusicXml(score), repairs, bars: score.bars.length }
+}
+
+/** Repairs the bar lengths of every voice of the score, from bar index `from` on (repairs.ts `repairBarLengths`), voice by voice. */
+export function repairVoices(score: Score, from = 0): Repair[] {
+  return voices(score).flatMap((ref) => repairBarLengths(voiceView(score, ref), from))
 }

@@ -1,6 +1,7 @@
 import { computed, signal } from '@preact/signals'
 import type { ReadonlySignal, Signal } from '@preact/signals'
 import { DEFAULT_TEMPO, clampTempo, startingTempo, tempoSetup } from '../core/playback/tempo.ts'
+import { firstVoice, voiceView } from '../core/score/model.ts'
 import { parseMusicXml } from '../core/score/musicxml.ts'
 import type { I18n } from './i18n/index.ts'
 import { DEFAULT_PRACTICE } from './library.ts'
@@ -132,7 +133,8 @@ export class Home {
     // No tempo chosen yet: the one the score's marking gives, as the practice session starts it.
     let tempo = DEFAULT_TEMPO
     try {
-      tempo = startingTempo(null, tempoSetup(parseMusicXml((await this.library.load(piece.id)).musicxml)))
+      const score = parseMusicXml((await this.library.load(piece.id)).musicxml)
+      tempo = startingTempo(null, tempoSetup(voiceView(score, firstVoice(score))))
     } catch {
       // A score that cannot be read: the card shows the default tempo; opening the piece says what is wrong.
     }

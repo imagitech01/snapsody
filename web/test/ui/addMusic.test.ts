@@ -9,12 +9,15 @@ import type { App } from './app.ts'
 import { tab, textOf } from './journey.ts'
 import { ID } from './pieces.ts'
 import { barsScore } from './scores.ts'
+import { MELODY_PIANO_FIXTURE } from '../helpers.ts'
 
 // The add-music journey (practice-app design D15, "add music: hint, fake scan of 2 pages, reading, one piece";
 // task 14.1; specs `score-capture` "Hint before scanning" and "Page scanner cannot run", `score-recognition`
 // "Progress and cancel" and "Recognition failure"): the hint, the fake scanner's pages, the reading screen
 // stepped by hand, and where each ending leads. The fake reader is `manual` here: it sends its events when the
 // journey steps it, so the reading screen can be looked at and cancelled.
+
+const MELODY_PIANO = readFileSync(MELODY_PIANO_FIXTURE, 'utf8')
 
 const PHOTO = readFileSync(fileURLToPath(new URL('../fixtures/page.jpg', import.meta.url))).toString('base64')
 
@@ -317,5 +320,77 @@ test('add music: pages added to a piece follow its last bar and the screen under
     assert.equal(saved.name, 'Even eighths')
     assert.equal((await pieceIds(app)).length, 4, 'no new piece')
     assert.deepEqual(await scanFiles(app), [])
+  })
+})
+
+test('add music: a melody-and-piano page shows the parts step, and keeping only the melody gives a melody-only piece that opens in the editor', async () => {
+  await withApp({ seed: '', reader: 'manual' }, async (app) => {
+    const { page } = app
+    await realPhotos(page)
+    await page.getByRole('button', { name: 'Add music' }).click()
+    await scanReturns(page, 1)
+    await readerWill(page, [{ result: 'done', musicxml: MELODY_PIANO }])
+    await page.getByRole('button', { name: 'Open the scanner' }).click()
+    await page.getByRole('heading', { name: 'Reading page 1 of 1', level: 2 }).waitFor()
+    await readerFinishes(page)
+
+    // The step: Melody and Piano, both ticked, Melody as the part played, the first bars of each drawn small.
+    await page.getByRole('heading', { name: 'Your parts', level: 1 }).waitFor()
+    assert.deepEqual(await app.screen(), { name: 'add-music' })
+    const melody = page.getByRole('checkbox', { name: 'Melody' })
+    const piano = page.getByRole('checkbox', { name: 'Piano' })
+    assert.equal(await melody.getAttribute('aria-checked'), 'true')
+    assert.equal(await piano.getAttribute('aria-checked'), 'true')
+    assert.equal(await page.getByRole('radio', { name: /I play this Melody/ }).getAttribute('aria-checked'), 'true')
+    assert.equal(await page.getByRole('radio', { name: /I play this Piano/ }).getAttribute('aria-checked'), 'false')
+    await page.locator('.add-part-preview > svg').first().waitFor()
+    assert.equal(await page.locator('.add-part-preview > svg').count(), 2, 'one drawing per part')
+    assert.deepEqual(await pieceIds(app), [], 'nothing is saved before Continue')
+    // Back from here is cancelling: checked in its own run below; here the step must fit the screen.
+    const box = await page.locator('[data-screen="add-music"] .add-actions').boundingBox()
+    assert.ok(box && box.y + box.height <= (page.viewportSize()?.height ?? 0), 'Continue is on the screen')
+
+    // Piano off: its radio can no longer be chosen, and the melody goes on being the part played.
+    await piano.click()
+    assert.equal(await piano.getAttribute('aria-checked'), 'false')
+    assert.equal(await page.getByRole('radio', { name: /I play this Piano/ }).isDisabled(), true)
+    await page.getByRole('button', { name: 'Continue' }).click()
+
+    await screenIs(page, 'editor')
+    const [id, ...others] = await pieceIds(app)
+    assert.deepEqual(others, [], 'one piece')
+    assert.deepEqual(await app.stack(), [{ name: 'home' }, { name: 'editor', pieceId: id, isNew: true }])
+    await page.getByRole('textbox', { name: 'Name this piece' }).waitFor()
+    const info = JSON.parse((await app.file(`pieces/${id}/piece.json`))!) as { score: string; partsRead: unknown }
+    assert.deepEqual(info.partsRead, [{ staves: 1, kept: true }, { staves: 2, kept: false }])
+    const musicxml = (await app.file(`pieces/${id}/${info.score}`))!
+    assert.equal((musicxml.match(/<score-part /g) ?? []).length, 1, 'a melody-only piece')
+    assert.match(musicxml, /<part-name>Melody<\/part-name>/)
+    assert.deepEqual(JSON.parse((await app.file(`pieces/${id}/practice.json`))!).part, { id: 'P1' })
+    assert.deepEqual(await scanFiles(app), [])
+  })
+})
+
+test('add music: Back from the parts step creates no piece and shows where adding started, and Continue waits while nothing is ticked', async () => {
+  await withApp({ seed: '', reader: 'manual' }, async (app) => {
+    const { page } = app
+    await page.getByRole('button', { name: 'Add music' }).click()
+    await scanReturns(page, 1)
+    await readerWill(page, [{ result: 'done', musicxml: MELODY_PIANO }])
+    await page.getByRole('button', { name: 'Open the scanner' }).click()
+    await page.getByRole('heading', { name: 'Reading page 1 of 1', level: 2 }).waitFor()
+    await readerFinishes(page)
+    await page.getByRole('heading', { name: 'Your parts', level: 1 }).waitFor()
+
+    await page.getByRole('checkbox', { name: 'Melody' }).click()
+    await page.getByRole('checkbox', { name: 'Piano' }).click()
+    assert.equal(await page.getByRole('button', { name: 'Continue' }).isDisabled(), true, 'nothing ticked: no way on')
+    await page.getByRole('status').filter({ hasText: 'Keep at least one part.' }).waitFor()
+
+    assert.equal(await app.back(), true)
+    await page.getByRole('heading', { name: 'Let’s practise', level: 1 }).waitFor()
+    assert.deepEqual(await app.stack(), [{ name: 'home' }])
+    assert.deepEqual(await pieceIds(app), [], 'no piece')
+    assert.deepEqual(await scanFiles(app), [], 'no page is kept')
   })
 })

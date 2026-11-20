@@ -1,6 +1,6 @@
 import { computed, effect, signal } from '@preact/signals'
 import type { ReadonlySignal, Signal } from '@preact/signals'
-import { instrumentOrDefault } from '../core/instruments/instruments.ts'
+import { instrumentById, instrumentOrDefault } from '../core/instruments/instruments.ts'
 import type { Instrument } from '../core/instruments/instruments.ts'
 import { Player } from '../core/playback/player.ts'
 import type { AudioBackend, PlayerState } from '../core/playback/player.ts'
@@ -8,12 +8,15 @@ import type { Position, TimerApi } from '../core/playback/scheduler.ts'
 import { clampTempo, startingTempo, tempoSetup } from '../core/playback/tempo.ts'
 import type { TempoSetup } from '../core/playback/tempo.ts'
 import { buildTimeline } from '../core/playback/timeline.ts'
-import type { LoopRest, Timeline } from '../core/playback/timeline.ts'
+import type { LoopRest, Timeline, TimelineOptions } from '../core/playback/timeline.ts'
 import { outputLatency } from '../core/playback/webaudio.ts'
 import { parseMusicXml } from '../core/score/musicxml.ts'
 import type { Score } from '../core/score/model.ts'
+import { firstVoice, voiceView } from '../core/score/model.ts'
 import type { Device } from '../platform/port.ts'
 import { DEFAULT_PRACTICE, LibraryError } from './library.ts'
+import { hasInstrumentRow, hasPartsRow, partsHintOf, resolvePart, sameYourPart } from './parts.ts'
+import type { PartsHint, YourPart } from './parts.ts'
 import type { Library, PieceInfo, PracticeState } from './library.ts'
 import type { Settings } from './settings.ts'
 
@@ -39,11 +42,19 @@ import type { Settings } from './settings.ts'
  * paused or tapped one), else the start of the loop, else bar 1. So the bar never drifts from what
  * Play will do, whichever intent moved it.
  *
- * What is remembered (`practice.json`, `PracticeState`): bar, tempo, loop, loopRest and metronome.
- * The instrument and the count-in are general settings (design D17): the session plays with the
- * settings' default instrument, and the count-in follows `settings.countIn` while the session is open
- * (it is switched in Settings only). The tempo is remembered only when the user chose one; until
- * then `practice.json` says `tempo: null` and the piece's marking decides.
+ * What is remembered (`practice.json`, `PracticeState`): bar, tempo, loop, loopRest and metronome, and for a
+ * piece with several parts your part (`part`), what is switched off under "Plays along" (`silent`), whether
+ * your own line sounds (`ownLine`), the piece's own instrument and whether the parts hint was shown. The
+ * count-in is a general setting (design D17): it follows `settings.countIn` while the session is open (it is
+ * switched in Settings only). The instrument is the piece's own once the user chose one (`setPieceInstrument`),
+ * else the settings' default, which it follows when that changes (change parts-and-accompaniment, D5, D9). The
+ * tempo is remembered only when the user chose one; until then `practice.json` says `tempo: null` and the
+ * piece's marking decides.
+ *
+ * Parts (D5, D6, D9). `part`, `silent` and `ownLine` are signals the card and the Your part sheet read. Choosing
+ * another part (`setPart`) clears `silent`, turns your line on, rebuilds the timeline, and, while playing, the
+ * music restarts in place with every part together. The parts hint (`hint`) is there the first time a piece with the
+ * Your part row is opened, until the user dismisses it or plays; `partsHintSeen` is saved at once so it never comes back.
  *
  * Saving. A change the user makes (tempo, loop, rest, metronome, a bar) is saved
  * after `saveDelay` of quiet (debounced). Pause, closing the session and the app going to the
@@ -112,6 +123,23 @@ const realTimer: TimerApi = {
 
 const wholeBar = (n: number): number => (Number.isFinite(n) ? Math.round(n) : 1)
 
+/** Your line and what plays along with it (design D5): what the timeline and the player are made with. */
+interface PlayAlong {
+  part?: TimelineOptions['part']
+  silent: string[]
+  ownLine: boolean
+}
+
+/**
+ * Your line and what plays along, from `practice.json` (design D5): the stored part when the score has it (else the first
+ * part, both hands), the parts switched off, and whether your own line sounds (absent: it does). The instrument is the
+ * same kind of seam: `settings.defaultInstrument` where the session opens.
+ */
+function playAlongOf(saved: PracticeState, score: Score): PlayAlong {
+  const part = saved.part && score.parts.some((p) => p.id === saved.part!.id) ? saved.part : undefined
+  return { ...(part ? { part } : {}), silent: saved.silent ?? [], ownLine: saved.ownLine ?? true }
+}
+
 export class PracticeSession {
   /** The piece as it was when the session opened (its name, pages and so on). */
   readonly piece: PieceInfo
@@ -143,8 +171,30 @@ export class PracticeSession {
   readonly shownBar: ReadonlySignal<number | null>
   /** True while the view scrolls along with the playing bar: no other bar is being shown. */
   readonly following: ReadonlySignal<boolean>
-  /** The instrument of this session: the settings' default when it opened. */
-  readonly instrument: Instrument
+  /** The instrument of the piece in use: its own once chosen, else the settings' default. A two-staff part sounds as piano whatever this is. */
+  get instrument(): Instrument {
+    return this.instrumentSignal.value
+  }
+  /** The same as a signal, for the Practice tools. */
+  readonly pieceInstrument: ReadonlySignal<Instrument>
+  /** The instrument the user chose for this piece (an id), or null while the default from Settings is followed. */
+  readonly instrumentChoice: ReadonlySignal<string | null>
+  /** Your part: the stored one when the score has it, else the first part, both hands. */
+  readonly part: ReadonlySignal<YourPart>
+  /** The parts and hands switched off under "Plays along": 'P1', 'P2:left' ... */
+  readonly silent: ReadonlySignal<readonly string[]>
+  /** Your own line sounds. */
+  readonly ownLine: ReadonlySignal<boolean>
+  /** The parts hint to show now, or null: not the first time, or dismissed, or the piece has no Your part row. */
+  readonly hint: ReadonlySignal<PartsHint | null>
+  /** True when the sound of the default instrument, which this session follows, could not be loaded after it changed. */
+  get instrumentProblem(): ReadonlySignal<boolean> {
+    return this.problemSignal
+  }
+  /** The piece has more than one part or a two-staff part: the Your part row and the card show. */
+  readonly hasPartsRow: boolean
+  /** The piece has a one-staff part: the Instrument for this piece row shows. */
+  readonly hasInstrumentRow: boolean
   /** Playing, and in the silence between two passes of a loop. */
   readonly resting: ReadonlySignal<boolean>
   /** During the count-in: which click is sounding, of how many (1-based); null when no count-in is sounding. */
@@ -157,7 +207,7 @@ export class PracticeSession {
   private readonly now: () => Date
   private readonly saveDelay: number
   private readonly pollInterval: number
-  private readonly timeline: Timeline
+  private timeline: Timeline
 
   private readonly stateSignal: Signal<PlayerState>
   private readonly barSignal: Signal<number>
@@ -170,6 +220,13 @@ export class PracticeSession {
   private readonly settings: PracticeSessionDeps['settings']
   private readonly restingSignal: Signal<boolean>
   private readonly countingSignal: Signal<{ n: number; of: number } | null>
+  private readonly instrumentSignal: Signal<Instrument>
+  private readonly choiceSignal: Signal<string | null>
+  private readonly partSignal: Signal<YourPart>
+  private readonly silentSignal: Signal<readonly string[]>
+  private readonly ownLineSignal: Signal<boolean>
+  private readonly hintSignal: Signal<PartsHint | null>
+  private readonly problemSignal: Signal<boolean> = signal(false)
 
   /** The tempo the user chose, or null: what `practice.json` keeps. */
   private chosenTempo: number | null
@@ -180,6 +237,7 @@ export class PracticeSession {
   private practised = false
   private awake = false
   private previous: PlayerState = 'stopped'
+  private readonly kept: Pick<PracticeState, 'part' | 'silent' | 'ownLine' | 'instrument' | 'partsHintSeen'>
   private polling: { handle: unknown } | undefined
   private saveSlot: { handle?: unknown } | undefined
   private readonly backends: Promise<AudioBackend>[] = []
@@ -196,12 +254,24 @@ export class PracticeSession {
     this.saveDelay = deps.saveDelay ?? SAVE_DELAY_MS
     this.pollInterval = deps.pollInterval ?? POLL_MS
 
-    const bars = score.measures.length
+    const bars = score.bars.length
     this.bars = bars
     this.score = score
-    this.tempoSetup = tempoSetup(score)
-    const instrument = instrumentOrDefault(deps.settings.defaultInstrument.value)
-    this.timeline = buildTimeline(score, instrument)
+    // The tempo and the count-in come from the bars every part shares; any voice's view has them.
+    const line = voiceView(score, firstVoice(score))
+    this.tempoSetup = tempoSetup(line)
+    const chosenInstrument = saved.instrument ? instrumentById(saved.instrument) : undefined
+    const instrument = chosenInstrument ?? instrumentOrDefault(deps.settings.defaultInstrument.value)
+    const along = playAlongOf(saved, score)
+    // What other screens keep in practice.json (your part, the parts hint, the instrument ...) is written back as it was.
+    this.kept = {}
+    if (saved.part !== undefined) this.kept.part = saved.part
+    if (saved.silent !== undefined) this.kept.silent = saved.silent
+    if (saved.ownLine !== undefined) this.kept.ownLine = saved.ownLine
+    if (saved.instrument !== undefined) this.kept.instrument = saved.instrument
+    if (saved.partsHintSeen !== undefined) this.kept.partsHintSeen = saved.partsHintSeen
+    // The same timeline the player plays: your line and the parts that play along, on the shared bars.
+    this.timeline = buildTimeline(score, instrument, { ...(along.part ? { part: along.part } : {}), silent: along.silent })
 
     // What practice.json says, held to this score (a stored bar or loop can be past its end).
     const loop = restoreLoop(saved.loop, bars)
@@ -230,7 +300,26 @@ export class PracticeSession {
     this.metronomeAlone = this.aloneSignal
     this.shownBar = this.shownSignal
     this.following = computed(() => this.shownSignal.value === null)
-    this.instrument = instrument
+    this.instrumentSignal = signal(instrument)
+    this.choiceSignal = signal(chosenInstrument ? chosenInstrument.id : null)
+    this.pieceInstrument = this.instrumentSignal
+    this.instrumentChoice = this.choiceSignal
+    this.partSignal = signal(resolvePart(score, saved.part))
+    this.silentSignal = signal(along.silent)
+    this.ownLineSignal = signal(along.ownLine)
+    this.part = this.partSignal
+    this.silent = this.silentSignal
+    this.ownLine = this.ownLineSignal
+    this.hasPartsRow = hasPartsRow(score)
+    this.hasInstrumentRow = hasInstrumentRow(score)
+    // The hint: the first time a piece with the Your part row is opened. It is marked seen at once (saved with the next write).
+    const hint = saved.partsHintSeen ? null : partsHintOf(score)
+    this.hintSignal = signal(hint)
+    this.hint = this.hintSignal
+    if (hint) {
+      this.kept.partsHintSeen = true
+      this.change()
+    }
     this.resting = this.restingSignal
     this.counting = this.countingSignal
 
@@ -250,6 +339,9 @@ export class PracticeSession {
       loopRest: saved.loopRest,
       // Only the switch: a player made with the metronome on stays silent until Play or the user switches it on.
       metronome: saved.metronome,
+      ...(along.part ? { part: along.part } : {}),
+      silent: along.silent,
+      ownLine: along.ownLine,
       onState: (state) => this.onState(state),
       onMetronomeAlone: (sounding) => {
         this.aloneSignal.value = sounding
@@ -268,6 +360,15 @@ export class PracticeSession {
         this.player.setCountIn(deps.settings.countIn.value)
       }),
     )
+    // The default instrument is followed until the user chooses one for the piece.
+    this.stops.push(
+      effect(() => {
+        const next = instrumentOrDefault(deps.settings.defaultInstrument.value)
+        if (this.choiceSignal.peek() !== null || next.id === this.instrumentSignal.peek().id) return
+        // The default changed under a session that follows it: when its sound cannot be loaded the old instrument stays (signal and player alike), and the screen says so.
+        void this.useInstrument(next).catch(() => (this.problemSignal.value = true))
+      }),
+    )
     this.stops.push(deps.device.onPause(() => this.background()))
   }
 
@@ -284,7 +385,7 @@ export class PracticeSession {
     } catch (error) {
       throw new LibraryError('damaged', `the score cannot be read: ${error instanceof Error ? error.message : String(error)}`, pieceId)
     }
-    if (score.measures.length === 0) throw new LibraryError('damaged', 'the score has no bars', pieceId)
+    if (score.bars.length === 0) throw new LibraryError('damaged', 'the score has no bars', pieceId)
     let saved: PracticeState | null = null
     try {
       saved = await deps.library.readPractice(pieceId)
@@ -417,6 +518,111 @@ export class PracticeSession {
     return this.setMetronome(!this.metronomeSignal.value)
   }
 
+  // ---- Parts (change parts-and-accompaniment, D5, D6, D9) -------------------------------------
+
+  /**
+   * Takes another part (and for a two-staff part a hand) as your own. What was switched off under "Plays along"
+   * is forgotten and your line is turned on, as for a new piece. The score view draws the new part, the timeline
+   * is made again and, while playing, the music goes on from where it was with every part together; stopped or paused,
+   * Play starts at the bar the user is at, on the first note of the new part. Remembered for the piece. The same part
+   * again changes nothing.
+   */
+  setPart(next: YourPart): void {
+    if (this.closed) return
+    const part = resolvePart(this.score, next)
+    if (sameYourPart(part, this.partSignal.value)) return
+    this.partSignal.value = part
+    this.silentSignal.value = []
+    this.ownLineSignal.value = true
+    this.kept.part = part
+    this.kept.silent = []
+    this.kept.ownLine = true
+    this.applyPlayAlong()
+    this.change()
+  }
+
+  /** Switches a part or hand ('P1', 'P2:left' ...) on or off under "Plays along"; heard at once, also while playing. */
+  setPlaysAlong(key: string, along: boolean): void {
+    if (this.closed) return
+    const without = this.silentSignal.value.filter((k) => k !== key)
+    const silent = along ? without : [...without, key]
+    if (silent.length === this.silentSignal.value.length && silent.every((k) => this.silentSignal.value.includes(k))) return
+    this.silentSignal.value = silent
+    this.kept.silent = silent
+    this.applyPlayAlong()
+    this.change()
+  }
+
+  /** Your own line sounds or not, also while playing: the notes stop from the next one, and come back from the next one. The cursor follows it either way. */
+  setOwnLine(on: boolean): void {
+    if (this.closed || this.ownLineSignal.value === on) return
+    this.ownLineSignal.value = on
+    this.kept.ownLine = on
+    this.player.setOwnLine(on)
+    this.change()
+  }
+
+  toggleOwnLine(): void {
+    this.setOwnLine(!this.ownLineSignal.value)
+  }
+
+  /** The timeline and the player for your part and what plays along now. */
+  private applyPlayAlong(): void {
+    const part = this.partSignal.value
+    const silent = this.silentSignal.value
+    this.timeline = buildTimeline(this.score, this.instrumentSignal.value, { part, silent })
+    this.player.setPlayAlong(part, silent, this.ownLineSignal.value)
+    // Not playing: Play starts at the first note of your new part in the bar the user is at.
+    if (this.player.state !== 'playing') {
+      const id = this.noteOfBar(this.barSignal.value)
+      if (id !== undefined) this.player.seek(id)
+      this.syncBar()
+    }
+  }
+
+  /**
+   * The instrument of this piece: an id from the list, or null for "Your default", which follows Settings from then on.
+   * Heard at once, also while playing (see `Player.setInstrument`); the promise rejects when its sound cannot be loaded,
+   * and the instrument in use is then the old one again. Remembered for the piece.
+   */
+  async setPieceInstrument(id: string | null): Promise<void> {
+    if (this.closed) return
+    const wanted = id === null ? undefined : instrumentById(id)
+    const choice = wanted ? wanted.id : null
+    if (choice === this.choiceSignal.value) return
+    const before = { choice: this.choiceSignal.value, instrument: this.instrumentSignal.value }
+    this.choiceSignal.value = choice
+    this.kept.instrument = choice
+    this.change()
+    try {
+      await this.useInstrument(wanted ?? instrumentOrDefault(this.settings.defaultInstrument.value))
+    } catch (error) {
+      // As before: the player keeps the old instrument when the new sound could not be loaded.
+      this.choiceSignal.value = before.choice
+      this.instrumentSignal.value = before.instrument
+      this.kept.instrument = before.choice
+      throw error
+    }
+  }
+
+  private async useInstrument(next: Instrument): Promise<void> {
+    const before = this.instrumentSignal.value
+    this.instrumentSignal.value = next
+    try {
+      await this.player.setInstrument(next)
+      this.problemSignal.value = false
+    } catch (error) {
+      // The player keeps the old instrument; the signal goes back with it, unless a later switch has taken over.
+      if (this.instrumentSignal.value === next) this.instrumentSignal.value = before
+      throw error
+    }
+  }
+
+  /** The hint goes away (the user closed it, opened Your part from it, or played). It was marked seen when the piece opened. */
+  dismissHint(): void {
+    if (this.hintSignal.value !== null) this.hintSignal.value = null
+  }
+
   /** The view looks at a bar (held to the piece) while the music plays on: following is paused. Never touches the player. */
   showBar(n: number): void {
     if (this.closed) return
@@ -458,6 +664,7 @@ export class PracticeSession {
       loop: this.loopSignal.value ? { ...this.loopSignal.value } : null,
       loopRest: this.restSignal.value,
       metronome: this.metronomeSignal.value,
+      ...this.kept,
     }
   }
 
@@ -494,6 +701,7 @@ export class PracticeSession {
     this.stateSignal.value = state
     if (state !== 'loading') this.setAwake(state === 'playing' || this.aloneSignal.value)
     if (state === 'playing') {
+      this.dismissHint()
       this.startPoll()
       this.markPracticed()
     } else {
@@ -537,7 +745,8 @@ export class PracticeSession {
   /** The head note of the first event of a bar (bar number, from 1), which is how the player is told to go there. */
   private noteOfBar(bar: number): string | undefined {
     const span = this.timeline.bars.find((b) => b.barIndex === bar - 1)
-    return span ? this.timeline.events[span.firstEvent]?.noteIds[0] : undefined
+    // An event of your line: it is drawn, and a tap on it is the same thing.
+    return span ? this.timeline.events.slice(span.firstEvent).find((e) => e.own)?.noteIds[0] : undefined
   }
 
   private readonly poll = (): void => {
@@ -545,7 +754,8 @@ export class PracticeSession {
     if (!position) return
     this.restingSignal.value = position.resting === true
     this.setCounting(position.count ?? null)
-    if (position.event && !position.resting) this.barSignal.value = position.event.barIndex + 1
+    const bar = position.barIndex ?? position.event?.barIndex
+    if (bar !== undefined && !position.resting) this.barSignal.value = bar + 1
   }
 
   /** Publishes the count-in click only when it changed, so that the signal does not fire on every look. */

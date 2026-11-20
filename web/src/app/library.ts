@@ -1,4 +1,4 @@
-import type { PageRange } from '../core/pages/pages.ts'
+import type { PageRange, PartRead } from '../core/pages/pages.ts'
 import { parseMusicXml } from '../core/score/musicxml.ts'
 import type { Repair } from '../core/score/repairs.ts'
 import { PlatformError } from '../platform/port.ts'
@@ -109,6 +109,12 @@ export interface PieceInfo {
   repairs: Repair[]
   /** The number of bars in the score. */
   bars: number
+  /**
+   * What the first reading found, one entry per part in reading order: the staves of the part and whether the
+   * piece kept it (change parts-and-accompaniment, design D4). Pages added later are matched against it and the
+   * parts not kept are dropped again. Absent in a piece saved before parts: it keeps only its first part from added pages.
+   */
+  partsRead?: PartRead[]
 }
 
 /** A piece as opened: its info and its corrected score (MusicXML). */
@@ -119,9 +125,10 @@ export interface Piece {
 
 /**
  * practice.json: what the practice session restores when the piece is opened again (spec
- * `practice-controls`, "Practice settings remembered"). The instrument and the count-in are general
- * settings (`settings.json`), and the view always follows the music, so neither is in it (design D17).
- * Older files may still carry `countIn` and `follow`; they are ignored.
+ * `practice-controls`, "Practice settings remembered"). The default instrument and the count-in are general
+ * settings (`settings.json`), and the view always follows the music, so neither is in it (design D17). A piece
+ * can have an instrument of its own (`instrument`, change parts-and-accompaniment); without one it follows the
+ * default. Older files may still carry `countIn` and `follow`; they are ignored.
  */
 export interface PracticeState {
   /** The bar the user was at. */
@@ -132,9 +139,23 @@ export interface PracticeState {
   /** Bars of rest between loop repeats. */
   loopRest: 0 | 1 | 2
   metronome: boolean
+  /** Your part (change parts-and-accompaniment, design D5): a part id, and for a two-staff part the hand. Absent: the first part, both hands. */
+  part?: { id: string; hand?: 'right' | 'left' }
+  /** Parts or hands switched off under "Plays along": 'P1', 'P2:left' ... Absent: none. */
+  silent?: string[]
+  /** Whether your own line sounds. Absent: true. */
+  ownLine?: boolean
+  /** The instrument chosen for this piece. Absent or null: the default from Settings. */
+  instrument?: string | null
+  /** The parts hint was shown for this piece. */
+  partsHintSeen?: boolean
 }
 
-/** What a piece starts with; what a missing or damaged field falls back to. */
+/**
+ * What a piece starts with; what a missing or damaged field falls back to. The fields of parts-and-accompaniment
+ * (`part`, `silent`, `ownLine`, `instrument`, `partsHintSeen`) are not here: absent means the first part with both hands,
+ * nothing switched off, your line on, the default instrument, and the hint not yet seen.
+ */
 export const DEFAULT_PRACTICE: Readonly<PracticeState> = {
   bar: 1,
   tempo: null,
@@ -168,6 +189,8 @@ export interface NewPiece {
   repairs: Repair[]
   /** At least one, in reading order; the pages are numbered 1, 2, ... Their ranges follow each other and cover 1..bars. */
   pages: NewPage[]
+  /** What the first reading found and which parts were kept (`PieceInfo.partsRead`). */
+  partsRead?: PartRead[]
 }
 
 /**
@@ -423,6 +446,7 @@ export class Library {
         repairs,
         bars: input.bars,
       }
+      if (input.partsRead !== undefined) info.partsRead = parsePartsRead(input.partsRead, bad)
       const temp = hiddenDir(id)
       const target = pieceDir(id)
       /** Whether this call may remove [target] when the rename fails: only when it was not there before. */
@@ -763,7 +787,9 @@ function parseInfo(text: string, id: string): PieceInfo {
     return { n: page.n, firstBar: page.firstBar as number, lastBar: page.lastBar as number, staves: parseStaves(page.staves ?? [], `page ${index + 1}`, bad) }
   })
   checkPages(pages, bars, bad)
-  return { format: PIECE_FORMAT, id, name: json.name, created: json.created, lastPracticed, favorite, score, pages, repairs: parseRepairs(json.repairs ?? [], bad), bars }
+  const info: PieceInfo = { format: PIECE_FORMAT, id, name: json.name, created: json.created, lastPracticed, favorite, score, pages, repairs: parseRepairs(json.repairs ?? [], bad), bars }
+  if (json.partsRead !== undefined) info.partsRead = parsePartsRead(json.partsRead, bad)
+  return info
 }
 
 type Bad = (message: string) => never
@@ -826,6 +852,14 @@ function parseStaves(value: unknown, where: string, bad: Bad): Staff[] {
   })
 }
 
+function parsePartsRead(value: unknown, bad: Bad): PartRead[] {
+  if (!Array.isArray(value)) return bad('partsRead is not a list')
+  return value.map((part: unknown): PartRead => {
+    if (!isRecord(part) || (part.staves !== 1 && part.staves !== 2) || typeof part.kept !== 'boolean') return bad('a part read needs its staves (1 or 2) and whether it was kept')
+    return { staves: part.staves, kept: part.kept }
+  })
+}
+
 function parseRepairs(value: unknown, bad: Bad): Repair[] {
   if (!Array.isArray(value)) return bad('repairs is not a list')
   return value.map((repair: unknown): Repair => {
@@ -839,11 +873,21 @@ export function normalisePractice(value: unknown): PracticeState {
   const o = isRecord(value) ? value : {}
   const d = DEFAULT_PRACTICE
   const loop = isRecord(o.loop) && isInt(o.loop.start, 1) && isInt(o.loop.end, 1) && o.loop.end >= o.loop.start ? { start: o.loop.start, end: o.loop.end } : null
-  return {
+  const state: PracticeState = {
     bar: isInt(o.bar, 1) ? o.bar : d.bar,
     tempo: typeof o.tempo === 'number' && Number.isFinite(o.tempo) && o.tempo > 0 ? o.tempo : d.tempo,
     loop,
     loopRest: o.loopRest === 1 || o.loopRest === 2 ? o.loopRest : d.loopRest,
     metronome: typeof o.metronome === 'boolean' ? o.metronome : d.metronome,
   }
+  // The fields of parts-and-accompaniment are kept only when they are well formed; a bad one is as if absent.
+  if (isRecord(o.part) && typeof o.part.id === 'string' && o.part.id !== '') {
+    state.part = o.part.hand === 'right' || o.part.hand === 'left' ? { id: o.part.id, hand: o.part.hand } : { id: o.part.id }
+  }
+  if (Array.isArray(o.silent) && o.silent.every((s) => typeof s === 'string')) state.silent = [...(o.silent as string[])]
+  if (typeof o.ownLine === 'boolean') state.ownLine = o.ownLine
+  if (typeof o.instrument === 'string' && o.instrument !== '') state.instrument = o.instrument
+  else if (o.instrument === null) state.instrument = null
+  if (typeof o.partsHintSeen === 'boolean') state.partsHintSeen = o.partsHintSeen
+  return state
 }

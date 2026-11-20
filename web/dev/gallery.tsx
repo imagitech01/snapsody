@@ -13,6 +13,7 @@ import { useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import type { PlaybackEvent } from '../src/core/playback/timeline.ts'
 import type { Position } from '../src/core/playback/scheduler.ts'
+import { firstVoice, voiceView } from '../src/core/score/model.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { indexScore } from '../src/core/score/noteMap.ts'
 import {
@@ -52,7 +53,7 @@ const TABS: { id: TabId; label: string; icon: IconName }[] = [
 // ---- The fake practice session of the island demo ----------------------------------------------------
 
 const score = parseMusicXml(exerciseXml)
-const index = indexScore(score)
+const index = indexScore(voiceView(score, firstVoice(score)))
 const firstNoteOfBar: string[] = []
 for (const [id, info] of index) if (!info.note.rest && firstNoteOfBar[info.barIndex] === undefined) firstNoteOfBar[info.barIndex] = id
 
@@ -76,7 +77,7 @@ const eventOf = (noteId: string): PlaybackEvent => {
   return event
 }
 let hearing: string | undefined
-const heard = (): Position | undefined => (hearing ? { beat: 0, event: eventOf(hearing), finished: false } : undefined)
+const heard = (): Position | undefined => (hearing ? { beat: 0, event: eventOf(hearing), events: [eventOf(hearing)], finished: false } : undefined)
 
 function hear(barNumber: number): void {
   hearing = firstNoteOfBar[barNumber - 1]

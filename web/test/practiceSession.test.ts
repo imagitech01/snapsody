@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { effect } from '@preact/signals'
+import { createI18n } from '../src/app/i18n/index.ts'
 import { DEFAULT_PRACTICE, LibraryError, createLibrary } from '../src/app/library.ts'
+import { partsHintOf, partsHintText } from '../src/app/parts.ts'
 import type { PiecePatch, PracticeState } from '../src/app/library.ts'
 import { PracticeSession, SAVE_DELAY_MS } from '../src/app/practiceSession.ts'
 import type { PracticeLibrary } from '../src/app/practiceSession.ts'
@@ -12,8 +14,10 @@ import type { AudioBackend } from '../src/core/playback/player.ts'
 import { PLAYBACK_TUNING } from '../src/core/playback/scheduler.ts'
 import type { ClickSpec, NoteOnSpec, TimerApi, VoiceHandle } from '../src/core/playback/scheduler.ts'
 import { notesOf } from '../src/core/score/model.ts'
+import type { Score } from '../src/core/score/model.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
-import { n, scoreXml } from './playbackHelpers.ts'
+import { n, partsXml, scoreXml } from './playbackHelpers.ts'
+import { MELODY_PIANO_FIXTURE, firstLine, read } from './helpers.ts'
 
 // The practice session (practice-app task 9.3, design D8 and D11 to D12, specs `practice-controls`,
 // `score-playback` "Cursor follows playback" and `instruments` "Instrument for one session") against
@@ -133,6 +137,8 @@ interface SetupOptions {
   instrument?: string
   /** The settings' count-in. */
   countIn?: boolean
+  /** The piece's MusicXML (with `bars`), instead of the whole-note exercise. */
+  xml?: string
   /** Makes the backend; the default is the rig's. */
   backend?: (instrument: Instrument) => Promise<AudioBackend>
 }
@@ -146,7 +152,7 @@ async function setup(options: SetupOptions = {}) {
   const bars = options.bars ?? 12
   const info = await library.create({
     name: 'Ode to Joy',
-    musicxml: piecesXml(bars, options.directions),
+    musicxml: options.xml ?? piecesXml(bars, options.directions),
     bars,
     repairs: [],
     pages: [{ source: 'scans/1/page-1.jpg', recognised: '<score-partwise/>', firstBar: 1, lastBar: bars }],
@@ -623,7 +629,7 @@ test('goToBar jumps while playing, moves the start while paused, and clears a ba
 
 test('goToNote (tap to start from a note) moves the start while stopped and jumps while playing, and an unknown note changes nothing', async () => {
   const { rig: r, session } = await setup()
-  const noteOfBar = (bar: number): string => notesOf(session.score.measures[bar - 1]!)[0]!.id
+  const noteOfBar = (bar: number): string => notesOf(firstLine(session.score).measures[bar - 1]!)[0]!.id
   session.goToNote(noteOfBar(9))
   assert.equal(session.bar.value, 9)
   assert.equal(session.shownBar.value, null)
@@ -645,7 +651,7 @@ test('goToNote (tap to start from a note) moves the start while stopped and jump
 
 test('the session holds the score it plays, and says which count-in click sounds (spec "Count-in in 3/4")', async () => {
   const { rig: r, session } = await setup({ countIn: true, practice: { tempo: 120, bar: 1 } })
-  assert.equal(session.score.measures.length, 12)
+  assert.equal(firstLine(session.score).measures.length, 12)
   assert.equal(session.counting.value, null)
   await session.play()
   const clicks: string[] = []
@@ -935,4 +941,300 @@ test('leaving the piece while the audio for the metronome is still loading: noth
   assert.deepEqual(s.rig.clicks, [])
   assert.equal(s.session.metronomeAlone.value, false)
   assert.equal(s.rig.closed, 1, 'the audio is closed when it comes')
+})
+
+// ---- Parts and accompaniment (change parts-and-accompaniment, group 6) -------------------------------------------
+
+/** A melody and a piano part, 8 bars: the melody on one staff, the piano on two. At 120 bpm a bar lasts 2 s. */
+const melodyPiano = (options: SetupOptions = {}) => setup({ xml: read(MELODY_PIANO_FIXTURE), bars: 8, ...options })
+const soundsOf = (r: Rig, from = 0): string[] => [...new Set(r.notes.slice(from).map((x) => x.spec.sound))].sort() as string[]
+
+const hintScore = (...parts: [string, 1 | 2][]): Score => ({ parts: parts.map(([name, staves], i) => ({ id: `P${i + 1}`, name, staves })), bars: [] })
+
+test('parts hint: shown the first time a piece with the Your part row is opened, never again (spec "Parts hint")', async () => {
+  const s = await melodyPiano({ practice: null })
+  assert.equal(s.session.hasPartsRow, true)
+  assert.equal(s.session.hint.value?.kind, 'melodyPiano')
+  assert.equal(partsHintText(createI18n().t, s.session.hint.value!), 'Melody with a piano accompaniment. Try ⋯ › Your part.')
+  await s.session.close()
+  assert.equal((await stored(s))!.partsHintSeen, true, 'saved when the piece closes')
+  const second = await PracticeSession.open(s.info.id, s.deps)
+  assert.equal(second.hint.value, null, 'the second time: no hint')
+
+  // Playing takes it away too, and it is marked seen at once (it is saved with the next write).
+  const third = await melodyPiano({ practice: null })
+  await third.session.play()
+  assert.equal(third.session.hint.value, null)
+  await third.session.save()
+  assert.equal((await stored(third))!.partsHintSeen, true)
+
+  // Closed by the user (the x): gone for this session.
+  const fourth = await melodyPiano({ practice: null })
+  fourth.session.dismissHint()
+  assert.equal(fourth.session.hint.value, null)
+})
+
+test('parts hint: a one-line piece has none, and its practice.json gets no new field', async () => {
+  const s = await setup({ practice: null })
+  assert.equal(s.session.hasPartsRow, false)
+  assert.equal(s.session.hasInstrumentRow, true)
+  assert.equal(s.session.hint.value, null)
+  s.session.setTempo(100)
+  await s.session.save()
+  assert.deepEqual(Object.keys((await stored(s))!).sort(), ['bar', 'loop', 'loopRest', 'metronome', 'tempo'])
+})
+
+test('parts hint: the wording per combination of parts', () => {
+  const { t } = createI18n()
+  const text = (score: Score): string => partsHintText(t, partsHintOf(score)!)
+  assert.equal(text(hintScore(['Melody', 1], ['Piano', 2])), 'Melody with a piano accompaniment. Try ⋯ › Your part.')
+  assert.equal(text(hintScore(['Melody 2', 1], ['Piano', 2])), 'Melody 2 with a piano accompaniment. Try ⋯ › Your part.', 'the one-staff part\'s own name')
+  assert.equal(text(hintScore(['Piano', 2])), 'A piano piece. Take one hand in ⋯ › Your part, and the app plays the other.')
+  assert.equal(text(hintScore(['Melody 1', 1], ['Melody 2', 1])), '2 parts: Melody 1, Melody 2. Choose yours in ⋯ › Your part.')
+  assert.equal(text(hintScore(['Melody 1', 1], ['Melody 2', 1], ['Melody 3', 1])), '3 parts: Melody 1, Melody 2, Melody 3. Choose yours in ⋯ › Your part.')
+  assert.equal(text(hintScore(['Melody 1', 1], ['Melody 2', 1], ['Piano', 2])), 'Melody 1, Melody 2, Piano. Choose your part in ⋯ › Your part.')
+  assert.equal(text(hintScore(['Piano', 2], ['Piano', 2])), 'Piano, Piano. Choose your part in ⋯ › Your part.')
+  assert.equal(partsHintOf(hintScore(['Melody', 1])), null, 'one line: no hint')
+})
+
+test('instrument for this piece: a clarinet piece in a sax player\'s library (spec "A clarinet piece in a sax player\'s library")', async () => {
+  const s = await setup({ instrument: 'tenor-sax' })
+  assert.equal(s.session.instrument.id, 'tenor-sax')
+  assert.equal(s.session.instrumentChoice.value, null)
+  await s.session.setPieceInstrument('clarinet')
+  assert.equal(s.session.instrument.id, 'clarinet')
+  await s.session.play()
+  s.rig.advance(1_000)
+  assert.deepEqual(soundsOf(s.rig), ['clarinet'])
+  assert.equal(s.rig.notes[0]!.spec.midi[0], writtenOfBar(1) + CLARINET_TRANSPOSE, 'transposed as a B flat clarinet')
+  await s.session.close()
+  assert.equal((await stored(s))!.instrument, 'clarinet', 'the piece remembers it')
+  assert.equal((await s.settings.defaultInstrument.value), 'tenor-sax', 'the default is untouched')
+
+  const again = await PracticeSession.open(s.info.id, s.deps)
+  assert.equal(again.instrument.id, 'clarinet', 'opened again: still the clarinet')
+  assert.equal(again.instrumentChoice.value, 'clarinet')
+
+  // Another piece, without an instrument of its own: the tenor saxophone.
+  const other = await setup({ instrument: 'tenor-sax' })
+  await other.session.play()
+  other.rig.advance(1_000)
+  assert.deepEqual(soundsOf(other.rig), ['tenor-sax'])
+  assert.equal(other.rig.notes[0]!.spec.midi[0], concertOfBar(1))
+})
+
+const CLARINET_TRANSPOSE = -2
+
+test('instrument for this piece: the default is followed until the user chooses (spec "Default changed later")', async () => {
+  const s = await setup({ instrument: 'tenor-sax' })
+  await s.settings.setDefaultInstrument('alto-sax')
+  assert.equal(s.session.instrument.id, 'alto-sax', 'a session that is open follows it')
+  const next = await PracticeSession.open(s.info.id, s.deps)
+  assert.equal(next.instrument.id, 'alto-sax', 'and the next one')
+  await next.play()
+  s.rig.advance(1_000)
+  assert.deepEqual(soundsOf(s.rig), ['alto-sax'])
+
+  // Once chosen, the piece keeps its own, whatever the default does; "Your default" goes back to following it.
+  await next.setPieceInstrument('clarinet')
+  await s.settings.setDefaultInstrument('tenor-sax')
+  assert.equal(next.instrument.id, 'clarinet')
+  await next.setPieceInstrument(null)
+  assert.equal(next.instrument.id, 'tenor-sax')
+  assert.equal(next.instrumentChoice.value, null)
+  await next.save()
+  assert.equal((await stored(s))!.instrument, null)
+  await s.settings.setDefaultInstrument('alto-sax')
+  assert.equal(next.instrument.id, 'alto-sax')
+})
+
+test('instrument for this piece: the melody sounds as the instrument, the piano part as piano, at once, also while playing', async () => {
+  const s = await melodyPiano({ instrument: 'tenor-sax' })
+  await s.session.play()
+  s.rig.advance(500)
+  assert.deepEqual(soundsOf(s.rig), ['piano', 'tenor-sax'])
+  const heard = s.rig.notes.length
+  await s.session.setPieceInstrument('clarinet')
+  s.rig.advance(10_000)
+  assert.deepEqual(soundsOf(s.rig, heard), ['clarinet', 'piano'], 'what comes after it is the clarinet and the piano')
+  const piano = s.rig.notes.find((x) => x.spec.sound === 'piano')!
+  assert.ok(piano.spec.midi.every((m) => m >= 36), 'the piano at written pitch (C3 and up), not transposed')
+})
+
+test('your part: another part is drawn and played, what plays along is cleared and your line is on (spec "Switch to the piano")', async () => {
+  const s = await melodyPiano({ practice: { part: { id: 'P1' }, silent: ['P2'], ownLine: false } })
+  assert.deepEqual(s.session.part.value, { id: 'P1' })
+  assert.deepEqual(s.session.silent.value, ['P2'])
+  assert.equal(s.session.ownLine.value, false)
+
+  s.session.setPart({ id: 'P2' })
+  assert.deepEqual(s.session.part.value, { id: 'P2' })
+  assert.deepEqual(s.session.silent.value, [], 'what was switched off plays along again')
+  assert.equal(s.session.ownLine.value, true)
+  assert.equal(s.session.player.ownLine, true)
+  await s.session.play()
+  s.rig.advance(500)
+  assert.deepEqual(soundsOf(s.rig), ['piano', 'tenor-sax'], 'the melody plays along now')
+  const events = s.session.player.timeline!.events
+  assert.ok(events.filter((e) => e.own).every((e) => e.voice.part === 'P2'), 'the cursor follows the piano')
+
+  s.session.setPart({ id: 'P2', hand: 'left' })
+  await settle()
+  assert.ok(s.session.player.timeline!.events.filter((e) => e.own).every((e) => e.voice.part === 'P2' && e.voice.staff === 1), 'the left hand only')
+  await s.session.save()
+  assert.deepEqual(await stored(s), { ...DEFAULT_PRACTICE, tempo: 120, part: { id: 'P2', hand: 'left' }, silent: [], ownLine: true, partsHintSeen: true })
+  s.session.setPart({ id: 'P2', hand: 'left' })
+  assert.equal(s.log.writes.length, 1, 'the same part again changes nothing')
+})
+
+test('your part: a hand is only for a two-staff part, and a part the score does not have is the first part', async () => {
+  const s = await melodyPiano({ practice: { part: { id: 'P9' } } })
+  assert.deepEqual(s.session.part.value, { id: 'P1' })
+  s.session.setPart({ id: 'P1', hand: 'left' })
+  assert.deepEqual(s.session.part.value, { id: 'P1' }, 'a melody has no hands')
+})
+
+test('plays along: switching the piano off leaves only your line; heard at once while playing, and on again from the next note (spec "Practise without the accompaniment")', async () => {
+  const s = await melodyPiano()
+  await s.session.play()
+  s.rig.advance(500)
+  assert.deepEqual(soundsOf(s.rig), ['piano', 'tenor-sax'])
+  s.session.setPlaysAlong('P2', false)
+  await settle()
+  s.rig.advance(0)
+  assert.deepEqual(s.session.silent.value, ['P2'])
+  assert.ok(s.session.player.timeline!.events.every((e) => e.voice.part === 'P1'), 'only the melody is in the scheduled notes')
+  const heard = s.rig.notes.length
+  s.rig.advance(14_000)
+  assert.deepEqual(soundsOf(s.rig, heard), ['tenor-sax'], 'no piano from then on')
+
+  // Remembered for the piece, and switched on again, also while playing: the piano is back with the next notes.
+  await s.session.save()
+  await settle()
+  assert.deepEqual((await stored(s))!.silent, ['P2'])
+  const quiet = s.rig.notes.length
+  s.session.setPlaysAlong('P2', true)
+  await settle()
+  s.rig.advance(3_000)
+  assert.deepEqual(soundsOf(s.rig, quiet), ['piano', 'tenor-sax'], 'the piano plays along again')
+  assert.deepEqual(s.session.silent.value, [])
+})
+
+test('your line on or off: the melody is no longer heard, the piano goes on, the cursor keeps following it, and it comes back from the next note (spec "Play it yourself")', async () => {
+  const s = await melodyPiano()
+  await s.session.play()
+  s.rig.advance(1_000)
+  s.session.toggleOwnLine()
+  assert.equal(s.session.ownLine.value, false)
+  const off = s.rig.ms / 1000
+  const before = s.rig.notes.length
+  s.rig.advance(5_000)
+  const during = s.rig.notes.slice(before).filter((x) => x.spec.when > off + PLAYBACK_TUNING.lookahead + 1e-9 && !x.cancelled)
+  assert.ok(during.length > 0)
+  assert.deepEqual([...new Set(during.map((x) => x.spec.sound))], ['piano'], 'only the piano')
+  const position = s.session.heard()!
+  assert.ok(position.events.length > 0 && position.events.every((e) => e.voice.part === 'P1'), 'the cursor still follows the melody')
+
+  s.session.toggleOwnLine()
+  const on = s.rig.ms / 1000
+  s.rig.advance(5_000)
+  assert.ok(s.rig.notes.some((x) => x.spec.sound === 'tenor-sax' && x.spec.when > on), 'heard again')
+  await s.session.save()
+  await settle()
+  assert.equal((await stored(s))!.ownLine, true)
+})
+
+test('reopen a piano piece: the left hand, the melody off, your line off and the clarinet are all back (spec "Reopen a piano piece")', async () => {
+  const s = await melodyPiano({ practice: { part: { id: 'P2', hand: 'left' }, silent: ['P1'], ownLine: false, instrument: 'clarinet' } })
+  const { session } = s
+  assert.deepEqual(session.part.value, { id: 'P2', hand: 'left' })
+  assert.deepEqual(session.silent.value, ['P1'])
+  assert.equal(session.ownLine.value, false)
+  assert.equal(session.instrument.id, 'clarinet')
+  assert.equal(session.player.ownLine, false)
+  await session.play()
+  s.rig.advance(2_000)
+  assert.deepEqual(soundsOf(s.rig), ['piano'], 'your line off and the melody off: only the right hand is heard')
+  assert.ok(session.player.timeline!.events.every((e) => e.voice.part === 'P2'))
+  assert.ok(session.player.timeline!.events.filter((e) => e.own).every((e) => e.voice.staff === 1))
+})
+
+// ---- Changes while playing, and while the sound loads (review of group 6) -------------------------------------------
+
+/** P1 holds C5 for the bar, P2 plays D5 E5 F5 G5: at 120 bpm a quarter lasts 0.5 s. Pitches tell the notes apart (tenor saxophone, -14). */
+const wholeAndQuarters = () =>
+  partsXml([
+    { id: 'P1', bars: [n({ step: 'C', octave: 5, type: 'whole' })] },
+    { id: 'P2', bars: [['D', 'E', 'F', 'G'].map((step) => n({ step, octave: 5 })).join('')] },
+  ])
+const C5 = 72 - 14
+const D5 = 74 - 14
+const E5 = 76 - 14
+const F5 = 77 - 14
+const G5 = 79 - 14
+
+test('switching part while playing carries on from the time reached: no rewind, the sounding notes struck again for what is left', async () => {
+  const s = await setup({ xml: wholeAndQuarters(), bars: 1 })
+  await s.session.play()
+  s.rig.advance(START * 1000 + 1_550) // beat 3.1: the G is sounding
+  const mark = s.rig.notes.length
+  const swappedAt = s.rig.seconds
+  s.session.setPart({ id: 'P2' })
+  await settle()
+  s.rig.advance(400)
+  const after = s.rig.notes.slice(mark).filter((x) => !x.cancelled && x.spec.when >= swappedAt).map((x) => x.spec.midi[0])
+  assert.ok(after.includes(G5), 'the G that sounds is struck again')
+  assert.ok(after.includes(C5), 'and the whole note still held, for what is left of it')
+  for (const old of [D5, E5, F5]) assert.ok(!after.includes(old), 'nothing before the time reached is played again')
+  const heard = s.session.heard()!
+  assert.ok(heard.beat > 3 && heard.events.every((e) => e.voice.part === 'P2'), 'the cursor is on the new part, at the same place')
+})
+
+test('your line on or off while playing does not restart anything', async () => {
+  const s = await setup({ xml: wholeAndQuarters(), bars: 1 })
+  await s.session.play()
+  s.rig.advance(START * 1000 + 1_550)
+  const mark = s.rig.notes.length
+  s.session.toggleOwnLine()
+  await settle()
+  s.rig.advance(300)
+  assert.equal(s.rig.notes.length, mark, 'no note struck again')
+  s.session.toggleOwnLine()
+  s.rig.advance(100)
+  assert.equal(s.rig.notes.length, mark)
+})
+
+test('a part or Plays along change while the sound is loading is not lost', async () => {
+  let release: () => void = () => undefined
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  const s = await setup({
+    xml: wholeAndQuarters(),
+    bars: 1,
+    backend: async () => Object.create(rig.audio, { useSound: { value: async () => gate } }) as AudioBackend,
+  })
+  const playing = s.session.play()
+  await settle()
+  assert.equal(s.session.state.value, 'loading')
+  s.session.setPart({ id: 'P2' })
+  s.session.setPlaysAlong('P1', false)
+  release()
+  await playing
+  const events = s.session.player.timeline!.events
+  assert.ok(events.every((e) => e.voice.part === 'P2' && e.own), 'the timeline is for P2, with P1 silent')
+  s.rig.advance(START * 1000 + 100)
+  assert.ok(s.rig.notes.every((x) => x.spec.midi[0] !== C5), 'the silent part is not heard')
+})
+
+test('the default instrument followed while playing: when its sound fails, the old instrument stays in the signal and the player, and the problem is told', async () => {
+  const s = await setup({
+    instrument: 'tenor-sax',
+    backend: async () => Object.create(rig.audio, { useSound: { value: async (sound: string) => { if (sound === 'alto-sax') throw new Error('no sound') } } }) as AudioBackend,
+  })
+  await s.session.play()
+  s.rig.advance(500)
+  await s.settings.setDefaultInstrument('alto-sax')
+  await settle()
+  assert.equal(s.session.instrument.id, 'tenor-sax')
+  assert.equal(s.session.player.instrument.id, 'tenor-sax')
+  assert.equal(s.session.instrumentProblem.value, true)
 })

@@ -1019,3 +1019,29 @@ test('pageImageUrl: the photo of a page by its number', async () => {
   assert.equal(await codeOf(library.pageImageUrl('piece-1', 3)), 'not-found')
   assert.equal(await codeOf(library.pageImageUrl('piece-1', 0)), 'invalid')
 })
+
+test('practice: the fields of parts-and-accompaniment are absent in an old file, round-trip, and a malformed one falls back', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  // An old practice.json: no new field comes up, so every one falls back where it is read (first part, nothing silent, own line on, default instrument).
+  files.seed('pieces/piece-1/practice.json', JSON.stringify({ bar: 3, tempo: 90, loop: null, loopRest: 0, metronome: false }))
+  const old = (await library.readPractice('piece-1'))!
+  assert.deepEqual(old, { bar: 3, tempo: 90, loop: null, loopRest: 0, metronome: false })
+  assert.equal(old.part, undefined)
+  assert.deepEqual(old.silent ?? [], [])
+  assert.equal(old.ownLine ?? true, true)
+  assert.equal(old.instrument ?? null, null)
+
+  // The new fields round-trip.
+  const full = { ...DEFAULT_PRACTICE, bar: 2, part: { id: 'P2', hand: 'left' as const }, silent: ['P1', 'P2:right'], ownLine: false, instrument: 'clarinet', partsHintSeen: true }
+  await library.writePractice('piece-1', full)
+  assert.deepEqual(await library.readPractice('piece-1'), full)
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, part: { id: 'P1' }, instrument: null })
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, part: { id: 'P1' }, instrument: null })
+
+  // A malformed field falls back to absent; the good fields stay, and nothing throws.
+  const bad = { part: { id: 7 }, silent: ['P1', 2], ownLine: 'yes', instrument: 5, partsHintSeen: 1 }
+  assert.deepEqual(normalisePractice({ bar: 4, ...bad }), { ...DEFAULT_PRACTICE, bar: 4 })
+  assert.deepEqual(normalisePractice({ part: { id: 'P2', hand: 'both' }, silent: 'P1', instrument: '' }), { ...DEFAULT_PRACTICE, part: { id: 'P2' } })
+  assert.deepEqual(normalisePractice({ part: 'P2', silent: null, ownLine: false }), { ...DEFAULT_PRACTICE, ownLine: false })
+})

@@ -59,6 +59,8 @@ export interface NoteOnSpec {
   attack: boolean
   /** Fade-in length in seconds. */
   fade: number
+  /** The instrument that plays it (an `InstrumentId`, which is also its sample folder); absent: the output's current sound. */
+  sound?: string
   /** The sounding note this one slurs from; the output fades it out over `fade` from `when`. */
   join?: VoiceHandle
   /**
@@ -109,6 +111,11 @@ export interface StartOptions {
   delay?: number
   countIn?: CountIn
   loop?: LoopSpan
+  /**
+   * Start at this beat instead of at an event's start: every event that starts at or after it plays, and every note of any
+   * voice still sounding there is struck again for what is left of it. For a swap of the timeline in mid-note (`replaceTimeline`).
+   */
+  atBeat?: Frac
 }
 
 export interface Clock {
@@ -135,6 +142,8 @@ export interface SchedulerOptions {
   bpm?: number
   /** The metronome is on from the start (default off); `setMetronome` changes it while playing. */
   metronome?: boolean
+  /** Your line sounds from the start (default on); `setOwnLine` changes it while playing. */
+  ownLine?: boolean
   /** Called once when the last note has finished. */
   onEnd?: () => void
 }
@@ -168,11 +177,29 @@ function leadOf(ev: PlaybackEvent): Frac {
   return lead
 }
 
+/** The longest lead of the events that start at `start` (every part has its own grace notes before the beat). */
+function leadAt(events: readonly PlaybackEvent[], start: Frac): Frac {
+  let lead = ZERO
+  for (const e of events) {
+    if (cmp(e.start, start) !== 0) continue
+    const own = leadOf(e)
+    if (cmp(own, lead) > 0) lead = own
+  }
+  return lead
+}
+
+/** The voice of an event as a key: slurs join notes of one voice. */
+const voiceKey = (ev: PlaybackEvent): string => `${ev.voice.part}/${ev.voice.staff}/${ev.voice.voice}`
+
 export interface Position {
   /** Beats from the start of the score (fractional). */
   beat: number
-  /** The event sounding (or resting) at that time; undefined before the first note or after the end. */
+  /** The event sounding (or resting) at that time, a line of yours first; undefined before the first note or after the end. */
   event: PlaybackEvent | undefined
+  /** Every event of your line sounding at that time (the cursor highlights all of them): `event` alone when none is yours; empty when `event` is undefined. */
+  events: PlaybackEvent[]
+  /** The bar being played, by the bar spans (index in the score's bars); absent before the first note and after the end. */
+  barIndex?: number
   /** Playback has passed the end of the score. */
   finished: boolean
   /** During a count-in: which click is sounding (1-based) of how many. */
@@ -213,12 +240,15 @@ export class Scheduler {
   private pass = 0
   /** Voices turned on in this run, by event index, with the time each one is over (Infinity while open). */
   private voices = new Map<string, { handle: VoiceHandle; endsAt: number }>()
-  /** The note turned on last, for slur joins. */
-  private lastOn: { index: number; voice: { handle: VoiceHandle; endsAt: number } } | undefined
+  /** The note turned on last in each voice, for slur joins. */
+  private lastOn = new Map<string, { index: number; voice: { handle: VoiceHandle; endsAt: number } }>()
+  /** Your line sounds (default); off, its events are skipped as they come, and picked up from the next one when it is on again. */
+  private ownLineOn: boolean
 
   constructor(timeline: Timeline, options: SchedulerOptions) {
     this.timelineValue = timeline
     this.metronomeOn = options.metronome ?? false
+    this.ownLineOn = options.ownLine ?? true
     this.clock = options.clock
     this.output = options.output
     this.timer = options.timer ?? realTimer
@@ -239,6 +269,10 @@ export class Scheduler {
 
   get metronome(): boolean {
     return this.metronomeOn
+  }
+
+  get ownLine(): boolean {
+    return this.ownLineOn
   }
 
   /** Quarter-note beats per minute. */
@@ -265,8 +299,13 @@ export class Scheduler {
     this.halt(PLAYBACK_TUNING.stopFade)
     const events = this.timeline.events
     if (events.length === 0) return
-    const first = Math.max(0, Math.min(fromEvent, events.length - 1))
-    const firstStart = events[first]!.start
+    let first = Math.max(0, Math.min(fromEvent, events.length - 1))
+    if (options.atBeat) {
+      const at = options.atBeat
+      const found = events.findIndex((e) => cmp(e.start, at) >= 0)
+      first = found < 0 ? events.length - 1 : found
+    }
+    const firstStart = options.atBeat ?? events[first]!.start
     let loop = options.loop
     if (loop && cmp(loop.end, loop.start) <= 0) loop = undefined
     if (loop && cmp(firstStart, loop.end) >= 0) loop = undefined
@@ -283,12 +322,12 @@ export class Scheduler {
     this.firstBeat = firstStart
     this.anchorTime = this.clock.currentTime + (options.delay ?? this.startDelay)
     // Grace notes of the first event sound before it: in the last beat of the count-in, or else playback begins that much earlier.
-    const lead = leadOf(events[first]!)
+    const lead = leadAt(events, firstStart)
     const before = sub(firstStart, lead)
     this.anchorBeat = countIn ? sub(firstStart, mul(countIn.spacing, frac(countIn.clicks))) : before
     if (countIn && cmp(before, this.anchorBeat) < 0) this.anchorBeat = before
     this.pass = 0
-    this.lastOn = undefined
+    this.lastOn.clear()
     this.actions = this.buildPass(0)
     this.next = 0
     this.active = true
@@ -350,6 +389,42 @@ export class Scheduler {
   }
 
   /**
+   * Plays on with another timeline of the same music that cannot be swapped in place (its events differ, for
+   * instance after a part was switched off): everything restarts at the time actually reached, not at an event's start.
+   * Every event that starts from there plays, and every note of any voice (yours too) still sounding there is struck
+   * again for what is left of it. During the count-in or the silence of a loop it restarts as before. `ownLine`, when
+   * given, is applied together with the new timeline.
+   */
+  replaceTimeline(timeline: Timeline, ownLine?: boolean): void {
+    const delay = 0.02
+    const where = this.active ? this.positionAt(this.clock.currentTime + delay) : undefined
+    const old = this.timelineValue
+    this.timelineValue = timeline
+    if (ownLine !== undefined) this.ownLineOn = ownLine
+    if (!where || where.finished) return
+    if (!where.count && !where.resting && where.beat >= num(this.firstBeat)) {
+      // The beat reached, to a 960th of a whole beat: exact enough, and a fraction as the timeline wants.
+      const atBeat = frac(Math.round(where.beat * 960), 960)
+      this.start(this.firstEvent, { delay, ...(this.loop ? { loop: this.loop } : {}), atBeat })
+      return
+    }
+    const at = where.event?.start ?? (where.resting && this.loop ? this.loop.start : old.events[this.firstEvent]?.start)
+    const first = at === undefined ? -1 : timeline.events.findIndex((e) => cmp(e.start, at) >= 0)
+    if (first < 0) return
+    this.start(first, { delay: 0.02, ...(this.loop ? { loop: this.loop } : {}), ...(where.count && this.countInSpec ? { countIn: this.countInSpec } : {}) })
+  }
+
+  /**
+   * Your line on or off, also while playing: no restart. It is decided as each note comes, like the metronome's
+   * clicks: switched off, the notes of your line stop from the next one (the one sounding finishes, and a slur out
+   * of it ends with it) while the other parts play on; switched on, they are heard again from the next event. The
+   * cursor follows your line either way.
+   */
+  setOwnLine(on: boolean): void {
+    this.ownLineOn = on
+  }
+
+  /**
    * Swaps in another timeline of the same score, for instance after the instrument changed (only the
    * pitches differ). Nothing restarts: the notes sounding keep sounding and the notes to come use
    * the new timeline, at the times they already had. Returns false (and changes nothing) when the
@@ -367,16 +442,16 @@ export class Scheduler {
 
   /** Where playback is at an audio-clock time (the cursor passes a latency-corrected time). */
   positionAt(audioTime: number): Position {
-    if (!this.anchorBeat) return { beat: 0, event: undefined, finished: false }
+    if (!this.anchorBeat) return { beat: 0, event: undefined, events: [], finished: false }
     const anchor = num(this.anchorBeat)
     const beat = anchor + (audioTime - this.anchorTime) / (60 / this.bpmValue)
-    if (beat < anchor) return { beat, event: undefined, finished: false }
+    if (beat < anchor) return { beat, event: undefined, events: [], finished: false }
     const firstBeat = num(this.firstBeat)
     if (beat < firstBeat) {
       const clicks = this.countInSpec?.clicks ?? 0
       const spacing = this.countInSpec ? num(this.countInSpec.spacing) : 1
       const n = Math.min(clicks, Math.floor((beat - anchor) / spacing) + 1)
-      return { beat, event: undefined, finished: false, ...(clicks > 0 ? { count: { n, of: clicks } } : {}) }
+      return { beat, event: undefined, events: [], finished: false, ...(clicks > 0 ? { count: { n, of: clicks } } : {}) }
     }
     if (this.loop && beat >= num(this.loop.end)) {
       const start = num(this.loop.start)
@@ -385,12 +460,20 @@ export class Scheduler {
       const passes = Math.floor((beat - start) / length)
       const inLoop = num(sub(this.loop.end, this.loop.start))
       if (into >= inLoop) {
-        return { beat: num(this.loop.end) + (into - inLoop), event: undefined, finished: false, loopPass: passes, resting: true }
+        return { beat: num(this.loop.end) + (into - inLoop), event: undefined, events: [], finished: false, loopPass: passes, resting: true }
       }
-      return { beat: start + into, event: this.timeline.eventAtBeat(start + into), finished: false, loopPass: passes }
+      return { beat: start + into, ...this.eventsAt(start + into), finished: false, loopPass: passes }
     }
-    if (beat >= num(this.timeline.end)) return { beat, event: undefined, finished: true }
-    return { beat, event: this.timeline.eventAtBeat(beat), finished: false, ...(this.loop ? { loopPass: 0 } : {}) }
+    if (beat >= num(this.timeline.end)) return { beat, event: undefined, events: [], finished: true }
+    return { beat, ...this.eventsAt(beat), finished: false, ...(this.loop ? { loopPass: 0 } : {}) }
+  }
+
+  /** The event, the events of your line and the bar at a beat of the timeline. */
+  private eventsAt(beat: number): Pick<Position, 'event' | 'events' | 'barIndex'> {
+    const event = this.timeline.eventAtBeat(beat)
+    const own = this.timeline.ownAt(beat)
+    const bar = this.timeline.barAt(beat)
+    return { event, events: own.length > 0 ? own : event ? [event] : [], ...(bar ? { barIndex: bar.barIndex } : {}) }
   }
 
   /** The actions of one pass, on the run's own beat axis (pass k of a loop is shifted by k loop lengths). */
@@ -398,11 +481,25 @@ export class Scheduler {
     const events = this.timeline.events
     const loop = this.loop
     const offset = pass === 0 ? ZERO : mul(this.loopLength, frac(pass))
+    // From the first event's start in every part (a tap on a note starts all parts there), up to the end of the loop.
     const played =
       pass === 0
-        ? events.slice(this.firstEvent).filter((e) => !loop || cmp(e.start, loop.end) < 0)
+        ? events.filter((e) => cmp(e.start, this.firstBeat) >= 0 && (!loop || cmp(e.start, loop.end) < 0))
         : this.loopEvents
+    const playedIndex = new Set(played.map((e) => e.index))
     const actions: Action[] = []
+    // Everything jumps back to the start time together: a note of another voice that is sounding at that time is struck
+    // again there, for what is left of it (a held bass under the note we restart on).
+    if (pass === 0) {
+      for (const ev of events) {
+        if (ev.rest || cmp(ev.start, this.firstBeat) >= 0) continue
+        const off = add(ev.start, ev.sounding)
+        if (cmp(add(ev.start, ev.length), this.firstBeat) <= 0 || cmp(off, this.firstBeat) <= 0) continue
+        const stop = loop && cmp(off, loop.end) > 0 ? loop.end : off
+        actions.push({ beat: this.firstBeat, kind: 'on', event: ev })
+        actions.push({ beat: stop, kind: 'off', event: ev })
+      }
+    }
     if (pass === 0 && this.countInSpec) {
       const { clicks, spacing } = this.countInSpec
       for (let k = 0; k < clicks; k++) {
@@ -417,16 +514,16 @@ export class Scheduler {
     for (const c of ticks) actions.push({ beat: add(c.start, offset), kind: 'tick', accent: c.accent })
     for (const c of loop?.restClicks ?? []) actions.push({ beat: add(add(loop!.end, c.offset), offset), kind: 'tick', accent: c.accent })
     // In a loop the first event's grace notes sound at the end of the pass before, so nothing else may sound over them.
-    const latest = loop ? sub(add(loop.end, loop.rest ?? ZERO), leadOf(this.loopEvents[0]!)) : undefined
+    const latest = loop ? sub(add(loop.end, loop.rest ?? ZERO), leadAt(this.loopEvents, this.loopEvents[0]!.start)) : undefined
     const noLater = (beat: Frac): Frac => (latest && cmp(beat, latest) > 0 ? latest : beat)
     // The grace notes before a loop's first event belong to the pass before (see below), so a later pass leaves them out.
-    const loopFirst = loop ? this.loopEvents[0] : undefined
-    played.forEach((ev, i) => {
+    const loopFirsts = loop ? this.loopEvents.filter((e) => cmp(e.start, this.loopEvents[0]!.start) === 0) : []
+    played.forEach((ev) => {
       if (ev.rest) return
       if (ev.sounds) {
         // The event carries its own sounds: each is a note of its own, from its offset for its length.
         ev.sounds.forEach((s, k) => {
-          if (pass > 0 && ev === loopFirst && s.offset.n < 0) return
+          if (pass > 0 && loopFirsts.includes(ev) && s.offset.n < 0) return
           const at = add(ev.start, s.offset)
           actions.push({ beat: add(at, offset), kind: 'on', event: ev, sound: k })
           actions.push({ beat: add(noLater(add(at, s.length)), offset), kind: 'off', event: ev, sound: k })
@@ -435,12 +532,13 @@ export class Scheduler {
       }
       actions.push({ beat: add(ev.start, offset), kind: 'on', event: ev })
       // A slurred note is not released when the next note takes it over; at the end of a pass nothing does.
-      const taken = ev.legatoNext && played[i + 1]?.index === ev.index + 1
+      const taken = ev.legatoNext && ev.nextInVoice !== undefined && playedIndex.has(ev.nextInVoice)
       if (!taken) actions.push({ beat: add(noLater(add(ev.start, ev.sounding)), offset), kind: 'off', event: ev })
     })
     // The next pass's grace notes sound before its start, so they are scheduled with this pass: the next pass is only
     // built once this one is handed out, which can be later than they begin (1/8 beat is more than the lookahead at 60 bpm).
-    if (loopFirst?.sounds) {
+    for (const loopFirst of loopFirsts) {
+      if (!loopFirst.sounds) continue
       const next = add(offset, this.loopLength)
       loopFirst.sounds.forEach((s, k) => {
         if (s.offset.n >= 0) return
@@ -463,7 +561,7 @@ export class Scheduler {
       if (v.endsAt > now) v.handle.release(now, fade)
     }
     this.voices.clear()
-    this.lastOn = undefined
+    this.lastOn.clear()
     this.actions = []
     this.active = false
   }
@@ -517,6 +615,14 @@ export class Scheduler {
         this.output.click?.({ when, accent: !!action.accent })
         action.sounded = true
       }
+    } else if (action.kind === 'on' && ev && ev.own && !this.ownLineOn) {
+      // Your line is off: the note is left out. A slurred note that the one sounding before it in the voice
+      // was waiting to hand over to has no `off` of its own, so it ends here, as it would have by the join.
+      const previous = this.lastOn.get(voiceKey(ev))
+      if (!ev.attack && previous && this.timeline.events[previous.index]?.nextInVoice === ev.index && previous.voice.endsAt === Number.POSITIVE_INFINITY) {
+        previous.voice.handle.release(when, PLAYBACK_TUNING.legatoFade)
+        previous.voice.endsAt = when + PLAYBACK_TUNING.legatoFade
+      }
     } else if (action.kind === 'on' && ev && action.sound !== undefined) {
       const s = ev.sounds![action.sound]!
       // Only the sound on the beat carries the accent.
@@ -524,6 +630,7 @@ export class Scheduler {
       const handle = this.output.noteOn({
         when,
         midi: [s.midi],
+        sound: ev.sound,
         gain: s.gain,
         attack: true,
         fade: PLAYBACK_TUNING.attackFade,
@@ -531,12 +638,15 @@ export class Scheduler {
       })
       this.voices.set(`${ev.index}:${action.sound}`, { handle, endsAt: Number.POSITIVE_INFINITY })
     } else if (action.kind === 'on' && ev) {
-      const previous = this.lastOn
-      const joined = !ev.attack && previous !== undefined && previous.index === ev.index - 1 && previous.voice.endsAt === Number.POSITIVE_INFINITY
+      const key = voiceKey(ev)
+      const previous = this.lastOn.get(key)
+      const joined =
+        !ev.attack && previous !== undefined && this.timeline.events[previous.index]?.nextInVoice === ev.index && previous.voice.endsAt === Number.POSITIVE_INFINITY
       const fade = joined ? PLAYBACK_TUNING.legatoFade : PLAYBACK_TUNING.attackFade
       const handle = this.output.noteOn({
         when,
         midi: ev.pitches,
+        sound: ev.sound,
         gain: ev.gain,
         attack: !joined,
         fade,
@@ -546,7 +656,7 @@ export class Scheduler {
       if (joined) previous.voice.endsAt = when + fade
       const voice = { handle, endsAt: Number.POSITIVE_INFINITY }
       this.voices.set(`${ev.index}`, voice)
-      this.lastOn = { index: ev.index, voice }
+      this.lastOn.set(key, { index: ev.index, voice })
     } else if (action.kind === 'off' && ev) {
       const voice = this.voices.get(action.sound === undefined ? `${ev.index}` : `${ev.index}:${action.sound}`)
       if (!voice) return

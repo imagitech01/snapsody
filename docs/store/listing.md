@@ -4,8 +4,8 @@ The texts of the Play Store listing, in English (en-US). The app and the listing
 feature graphic are made by `tools/store/` (see its README). Play's limits: app name 30 characters,
 short description 80, full description 4000.
 
-Keep the texts honest about what the app does today (README "Current limits"): it reads
-single-line melodies, and recognition isn't perfect.
+Keep the texts honest about what the app does today (README "Current limits"): recognition isn't
+perfect, and reading a piano grand staff from a phone photo is newer and less tested than a melody.
 
 ---
 
@@ -48,7 +48,7 @@ YOUR MUSIC, YOUR PHONE
 • Open source (AGPL-3.0).
 
 GOOD TO KNOW
-• Snapsody reads single-line melodies on one staff: the kind of exercise you'd find in a method book for sax, clarinet, trumpet or violin. It doesn't read chords or piano grand staffs.
+• Snapsody reads printed method-book music: a melody for sax, clarinet, trumpet or violin, a melody with a piano accompaniment, or a piano piece on a grand staff, chords included. Choose the part you play, and the other parts play along. It doesn't read lyrics, fingering, pedal marks or chord symbols.
 • Scanning uses Google's document scanner, which comes with Google Play services.
 
 ### Screenshot captions

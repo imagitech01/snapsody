@@ -1,7 +1,8 @@
 import type { Instrument, InstrumentId } from '../instruments/instruments.ts'
-import type { Score } from './model.ts'
-import { isNote } from './model.ts'
-import { eq, frac, mul } from './rational.ts'
+import { instrumentOfPart } from '../instruments/instruments.ts'
+import type { Score, VoiceScore } from './model.ts'
+import { isNote, partIndex, voiceView, voices } from './model.ts'
+import { cmp, eq, frac, mul } from './rational.ts'
 import { barLength, beatsText, effectiveTimes, expectedLength, hasNotes, midiName, midiNumber, pitchName } from './repairs.ts'
 
 /*
@@ -42,21 +43,27 @@ export interface ScoreWarning {
 }
 
 /**
- * Every warning of the score for this instrument: the time signature first (it concerns the whole
+ * Every warning of one voice for this instrument: the time signature first (it concerns the whole
  * piece), then the bars and notes in score order, a bar's length before its notes' ranges. Does not
  * touch the score.
  */
-export function computeWarnings(score: Score, instrument: Instrument): ScoreWarning[] {
-  const warnings = timeSignatureWarnings(score)
+export function computeWarnings(score: VoiceScore, instrument: Instrument): ScoreWarning[] {
+  return [...timeSignatureWarnings(score), ...voiceWarnings(score, instrument).flat()]
+}
+
+/** The bar and range warnings of one voice, by bar (index from 0). A voice without an instrument gets the bar check only. */
+function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, laterVoice = false): ScoreWarning[][] {
   const times = effectiveTimes(score)
-  const { low, high } = instrument.writtenRange
-  score.measures.forEach((m, index) => {
+  return score.measures.map((m, index) => {
+    const found: ScoreWarning[] = []
     const time = times[index]
     if (time && hasNotes(m)) {
       const length = barLength(m)
-      if (!eq(length, expectedLength(time))) {
+      // A voice after the first is flagged only when it is too long: a short one is simply not full.
+      const expected = expectedLength(time)
+      if (!eq(length, expected) && !(laterVoice && cmp(length, expected) < 0)) {
         const counted = beatsText(mul(length, frac(time.beatType)))
-        warnings.push({
+        found.push({
           kind: 'bar-length',
           bar: m.number,
           counted,
@@ -65,12 +72,14 @@ export function computeWarnings(score: Score, instrument: Instrument): ScoreWarn
         })
       }
     }
+    if (!instrument) return found
+    const { low, high } = instrument.writtenRange
     for (const item of m.items) {
       if (!isNote(item) || item.rest || !item.pitch) continue
       const midi = midiNumber(item.pitch)
       if (midi >= low && midi <= high) continue
       const pitch = pitchName(item.pitch)
-      warnings.push({
+      found.push({
         kind: 'out-of-range',
         bar: m.number,
         noteId: item.id,
@@ -79,11 +88,34 @@ export function computeWarnings(score: Score, instrument: Instrument): ScoreWarn
         message: `Bar ${m.number}: ${pitch} is outside the written range of the instrument (${instrument.name}, ${midiName(low)}–${midiName(high)}); it may be a misread`,
       })
     }
+    return found
   })
-  return warnings
 }
 
-function timeSignatureWarnings(score: Score): ScoreWarning[] {
+/**
+ * Every warning of a score of several parts (change parts-and-accompaniment, design D4): the time signature
+ * (read on the first part's first voice), the bar check on every voice, and the range check only on the voices of
+ * the user's part (`yourPart`, a part id), with that part's instrument: the piano's for a two-staff part, any
+ * other part the piece's instrument (`instrumentOfPart`). The other parts are not checked for range: a left hand
+ * down to C2 is not a misread on a tenor saxophone. Order as `computeWarnings`: by bar, and in a bar by voice. A voice with
+ * nothing in a bar is not checked in it. For a one-voice score it is `computeWarnings`.
+ */
+export function computeScoreWarnings(score: Score, yourPart: string, pieceInstrument: Instrument): ScoreWarning[] {
+  const refs = voices(score)
+  const first = refs[0]
+  if (!first) return []
+  const mine = partIndex(score, yourPart) >= 0 ? yourPart : first.part
+  const partInfo = score.parts[partIndex(score, mine)]!
+  const instrument = instrumentOfPart(partInfo, pieceInstrument)
+  const perVoice = refs.map((ref) => voiceWarnings(voiceView(score, ref), ref.part === mine ? instrument : undefined, ref.voice > 0))
+  const result = timeSignatureWarnings(voiceView(score, first))
+  score.bars.forEach((_, bar) => {
+    for (const found of perVoice) result.push(...(found[bar] ?? []))
+  })
+  return result
+}
+
+function timeSignatureWarnings(score: VoiceScore): ScoreWarning[] {
   if (score.measures.length === 0) return []
   if (!score.measures.some((m) => m.time)) {
     return [{ kind: 'time-signature-missing', message: 'No time signature was recognised and the bars do not agree on one length' }]

@@ -1,0 +1,12 @@
+{
+  "bar": 10,
+  "tempo": 72,
+  "loop": {
+    "start": 9,
+    "end": 12
+  },
+  "loopRest": 1,
+  "countIn": true,
+  "metronome": true,
+  "follow": true
+}

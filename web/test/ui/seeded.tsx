@@ -30,4 +30,10 @@ const practice = () => {
   const session = activePractice.value
   return session ? { bar: session.bar.value, bars: session.bars, shownBar: session.shownBar.value, following: session.following.value } : null
 }
-window.__test = { platform, shell, snapshot, practice }
+const practiceParts = () => {
+  const session = activePractice.value
+  if (!session) return null
+  const scheduled = [...new Set((session.player.timeline?.events ?? []).map((e) => `${e.voice.part}/${e.voice.staff}${e.own ? '*' : ''}`))].sort()
+  return { part: session.part.value, silent: session.silent.value, ownLine: session.ownLine.value, instrument: session.instrument.id, scheduled }
+}
+window.__test = { platform, shell, snapshot, practice, practiceParts }

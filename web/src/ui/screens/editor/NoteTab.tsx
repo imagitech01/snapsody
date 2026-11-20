@@ -1,7 +1,7 @@
 import type { EditorSession } from '../../../app/editorSession.ts'
 import { DURATION_TYPES, deleteNote, insertNote, noteToRest, restToNote, setAccidental, setDuration, stepPitch } from '../../../core/score/edit.ts'
 import type { AccidentalChoice } from '../../../core/score/edit.ts'
-import type { NoteType, Score } from '../../../core/score/model.ts'
+import type { NoteType, VoiceScore } from '../../../core/score/model.ts'
 import { pitchName } from '../../../core/score/repairs.ts'
 import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
@@ -18,7 +18,7 @@ export interface ToolProps {
    * Runs an edit of the score as one undo step, or with `amend` as part of the last one (the steps of a
    * held button); when it cannot be done, the reason is shown instead.
    */
-  run: (edit: (score: Score) => unknown, failure?: FailureKey, options?: { amend?: boolean }) => void
+  run: (edit: (score: VoiceScore) => unknown, failure?: FailureKey, options?: { amend?: boolean }) => void
 }
 
 /** The texts that say why a change did not happen (none of them has a parameter). */

@@ -3,7 +3,9 @@ import type { ReadonlySignal, Signal } from '@preact/signals'
 import { appendPages, preparePages } from '../core/pages/pages.ts'
 import type { PageOptions, PageRange, PreparedPages } from '../core/pages/pages.ts'
 import type { Files, Reader, ReaderEvent, ReaderJob, Scanner } from '../platform/port.ts'
-import { LibraryError } from './library.ts'
+import { parseMusicXml } from '../core/score/musicxml.ts'
+import type { Score } from '../core/score/model.ts'
+import { DEFAULT_PRACTICE, LibraryError } from './library.ts'
 import type { Library, NewPage, PieceInfo, Staff } from './library.ts'
 import type { Settings } from './settings.ts'
 
@@ -12,8 +14,9 @@ import type { Settings } from './settings.ts'
  * the hint, the page scanner, reading the pages, and saving them as a new piece or after the last
  * bar of an existing one.
  *
- *   hint ──► scanning ──► reading ──► saving ──► saved
- *     │          │           │
+ *   hint ──► scanning ──► reading ──► [parts] ──► saving ──► saved
+ *     │          │           │            │
+ *     │          │           │            └──► cancelled  (Back: nothing created)
  *     │          │           ├──► no-music (page N)  ──► scanAgain() ──► scanning
  *     │          │           ├──► failed   (page N, or the reader)  ──► scanAgain()
  *     │          │           └──► cancelled  (cancel(): nothing created, the piece unchanged)
@@ -33,6 +36,13 @@ import type { Settings } from './settings.ts'
  *   read is handled the same way (the spec has no scenario for it; the catalogue's `add.failed.*`
  *   says "Page N could not be read ... Nothing was added"). The first such page ends the job: the
  *   rest is not read.
+ * - The parts step (spec `score-recognition` "Choose the parts to keep", design D4): when the combined pages of a NEW
+ *   piece hold more than one part, the flow waits in `parts` with every part kept and the first one chosen as the
+ *   user's. `setKept`, `setPlay` and `continueParts` drive it; Continue is refused while no part is kept. The piece is
+ *   then saved with the kept parts only, and `practice.json` gets the chosen part. Back is `cancel()`. With one part, and
+ *   for pages added to a piece (matched against `partsRead`), there is no step.
+ * - A part found only on a later page is left out of the combined score with a warning; the `saved` state tells it
+ *   (`partDropped`) so the screen can say so.
  * - Cancel works while the pages are being read. Once saving has started it is too late.
  * - The scanner's files (the paths it returned in this flow, and only those) are removed whenever
  *   the flow ends, after the piece is saved (the save copies them) or when nothing is saved.
@@ -77,6 +87,12 @@ export type AddMusicState =
   | { readonly step: 'unavailable' }
   | { readonly step: 'reading'; readonly progress: ReadingProgress }
   | { readonly step: 'saving' }
+  /**
+   * The parts step: one entry of `parts` per part of the combined score, in order. `keep` says which are kept (at least
+   * one to continue) and `play` is the index of the part the user plays (always a kept one). `score` is the whole combined
+   * score, for drawing the first line of each part.
+   */
+  | { readonly step: 'parts'; readonly parts: readonly PartChoice[]; readonly keep: readonly boolean[]; readonly play: number; readonly score: Score }
   /** No music on page [page] (1-based): nothing was saved; offer `scanAgain`. */
   | { readonly step: 'no-music'; readonly page: number; readonly pages: number }
   /** Nothing was saved; offer `scanAgain`. `page` (1-based) for reason `page`. */
@@ -84,9 +100,16 @@ export type AddMusicState =
   /** Nothing was saved and the existing piece, if any, is unchanged: go back to where adding started. */
   | { readonly step: 'cancelled' }
   /** The piece was made (`added` false) or the pages were added to it (`added` true). */
-  | { readonly step: 'saved'; readonly pieceId: string; readonly added: boolean; readonly info: PieceInfo }
+  | { readonly step: 'saved'; readonly pieceId: string; readonly added: boolean; readonly info: PieceInfo; readonly partDropped: boolean }
 
 export type AddMusicStep = AddMusicState['step']
+
+/** A part of the combined score, as the parts step lists it. */
+export interface PartChoice {
+  readonly id: string
+  readonly name: string
+  readonly staves: 1 | 2
+}
 
 /** What the reader reports for a page next to its MusicXML (design D7), when it knows it. */
 export interface PageLayout {
@@ -142,7 +165,8 @@ export interface AddMusicDeps {
   reader: Reader
   /** For removing the scanner's files. */
   files: Pick<Files, 'remove'>
-  library: Pick<Library, 'create' | 'load' | 'addPages'>
+  /** `writePractice` stores the part the user plays after the parts step; without it that choice is not stored. */
+  library: Pick<Library, 'create' | 'load' | 'addPages'> & Partial<Pick<Library, 'writePractice'>>
   settings: Pick<Settings, 'scanHintSeen' | 'setScanHintSeen'>
   /** The name of a new piece: `i18n.defaultPieceName`. */
   defaultName: (added: Date) => string
@@ -191,6 +215,8 @@ export class AddMusicFlow {
   private reading: Reading | undefined
   /** The scanner's paths of this flow that are not removed yet. */
   private scans: string[] = []
+  /** What the parts step is waiting on: the readings to be combined again with the parts that are kept. */
+  private pending: { paths: string[]; raws: string[]; layouts: PageLayout[]; prepared: PreparedPages; score: Score } | undefined
 
   constructor(deps: AddMusicDeps, target: AddMusicTarget = {}) {
     this.deps = deps
@@ -249,6 +275,38 @@ export class AddMusicFlow {
     }
     await this.end({ step: 'cancelled' })
     return true
+  }
+
+  /** The parts step: keeps or drops part [index]. The part the user plays moves to the first kept part when it is dropped. */
+  setKept(index: number, kept: boolean): void {
+    const state = this.current.value
+    if (state.step !== 'parts' || !(index >= 0 && index < state.parts.length)) return
+    const keep = state.keep.map((k, i) => (i === index ? kept : k))
+    let play = state.play
+    if (!keep[play]) play = Math.max(0, keep.indexOf(true))
+    this.current.value = { ...state, keep, play }
+  }
+
+  /** The parts step: the user plays part [index]. Only a kept part can be chosen. */
+  setPlay(index: number): void {
+    const state = this.current.value
+    if (state.step !== 'parts' || !state.keep[index]) return
+    this.current.value = { ...state, play: index }
+  }
+
+  /** The parts step's Continue: saves the piece with the kept parts. Does nothing while no part is kept. */
+  async continueParts(): Promise<void> {
+    const state = this.current.value
+    const pending = this.pending
+    if (state.step !== 'parts' || !pending || !state.keep.some(Boolean)) return
+    this.pending = undefined
+    this.current.value = { step: 'saving' }
+    try {
+      const prepared = preparePages(pending.raws, pageOptions(pending.layouts), state.keep)
+      await this.create(prepared, pending.paths, pending.raws, pending.layouts, state.parts[state.play]!.id)
+    } catch (error) {
+      await this.end({ step: 'failed', reason: 'save', message: messageOf(error) })
+    }
   }
 
   // ---- inside --------------------------------------------------------------------------------
@@ -364,44 +422,69 @@ export class AddMusicFlow {
     }
   }
 
-  /** Combines the readings and saves them; the scans are removed afterwards in every case. */
-  private async save(paths: string[], raws: string[], layouts: PageLayout[]): Promise<void> {
-    this.current.value = { step: 'saving' }
-    const pageList = (prepared: PreparedPages): NewPage[] =>
-      paths.map((source, i) => {
-        const range = prepared.pages[i]!
-        const page: NewPage = { source, recognised: raws[i]!, firstBar: range.firstBar, lastBar: range.lastBar }
-        const staves = stavesForPiece(layouts[i]!.staves, range)
-        if (staves) page.staves = staves
-        return page
-      })
+  /** The pages as the library stores them, in the ranges `prepared` gives. */
+  private pageList(prepared: PreparedPages, paths: string[], raws: string[], layouts: PageLayout[]): NewPage[] {
+    return paths.map((source, i) => {
+      const range = prepared.pages[i]!
+      const page: NewPage = { source, recognised: raws[i]!, firstBar: range.firstBar, lastBar: range.lastBar }
+      const staves = stavesForPiece(layouts[i]!.staves, range)
+      if (staves) page.staves = staves
+      return page
+    })
+  }
 
+  /** Saves a new piece, and the part the user plays (when the parts step was shown) in its `practice.json`. */
+  private async create(prepared: PreparedPages, paths: string[], raws: string[], layouts: PageLayout[], part?: string): Promise<void> {
+    const info = await this.deps.library.create({
+      name: this.deps.defaultName(this.now()),
+      musicxml: prepared.musicxml,
+      bars: prepared.bars,
+      repairs: prepared.repairs,
+      pages: this.pageList(prepared, paths, raws, layouts),
+      partsRead: prepared.partsRead,
+    })
+    // practice.json is a convenience: a piece that is saved keeps going when it cannot be written (it then opens on the first part).
+    if (part !== undefined) await this.deps.library.writePractice?.(info.id, { ...DEFAULT_PRACTICE, part: { id: part } }).catch(() => undefined)
+    await this.end({ step: 'saved', pieceId: info.id, added: false, info, partDropped: prepared.warnings.length > 0 })
+  }
+
+  /** Combines the readings and saves them (a new piece waits in the parts step first when it has several parts); the scans are removed afterwards in every case. */
+  private async save(paths: string[], raws: string[], layouts: PageLayout[]): Promise<void> {
     const pieceId = this.pieceId
     try {
       if (pieceId === undefined) {
         let prepared: PreparedPages
+        let combined: Score
         try {
           prepared = preparePages(raws, pageOptions(layouts))
+          combined = parseMusicXml(prepared.musicxml)
         } catch (error) {
           await this.end({ step: 'failed', reason: 'reading', message: messageOf(error) })
           return
         }
-        const info = await this.deps.library.create({
-          name: this.deps.defaultName(this.now()),
-          musicxml: prepared.musicxml,
-          bars: prepared.bars,
-          repairs: prepared.repairs,
-          pages: pageList(prepared),
-        })
-        await this.end({ step: 'saved', pieceId: info.id, added: false, info })
+        if (prepared.partsRead.length > 1) {
+          // The parts step: wait for the user. `combined` has every part; Continue prepares the pages again with the kept ones.
+          this.pending = { paths, raws, layouts, prepared, score: combined }
+          this.current.value = {
+            step: 'parts',
+            parts: combined.parts.map((p) => ({ id: p.id, name: p.name, staves: p.staves })),
+            keep: combined.parts.map(() => true),
+            play: 0,
+            score: combined,
+          }
+          return
+        }
+        this.current.value = { step: 'saving' }
+        await this.create(prepared, paths, raws, layouts)
         return
       }
+      this.current.value = { step: 'saving' }
       // The piece's current score, loaded right before appending; once more when it was saved in between.
       for (let attempt = 1; ; attempt++) {
         const piece = await this.deps.library.load(pieceId)
         let prepared: PreparedPages
         try {
-          prepared = appendPages(piece.musicxml, raws, pageOptions(layouts))
+          prepared = appendPages(piece.musicxml, raws, pageOptions(layouts), piece.info.partsRead)
         } catch (error) {
           await this.end({ step: 'failed', reason: 'reading', message: messageOf(error) })
           return
@@ -409,10 +492,10 @@ export class AddMusicFlow {
         try {
           const info = await this.deps.library.addPages(
             pieceId,
-            { musicxml: prepared.musicxml, bars: prepared.bars, repairs: prepared.repairs, pages: pageList(prepared) },
+            { musicxml: prepared.musicxml, bars: prepared.bars, repairs: prepared.repairs, pages: this.pageList(prepared, paths, raws, layouts) },
             piece.info.score,
           )
-          await this.end({ step: 'saved', pieceId, added: true, info })
+          await this.end({ step: 'saved', pieceId, added: true, info, partDropped: prepared.warnings.length > 0 })
           return
         } catch (error) {
           if (!(error instanceof LibraryError && error.code === 'conflict') || attempt >= 2) throw error
@@ -427,6 +510,7 @@ export class AddMusicFlow {
   private async end(state: AddMusicState): Promise<void> {
     const scans = this.scans
     this.scans = []
+    this.pending = undefined
     for (const path of scans) await this.deps.files.remove(path).catch(() => undefined)
     // The scanner puts each scan's pages in a folder of its own (`scans/<scan>/`): remove it too.
     for (const folder of new Set(scans.map(scanFolderOf))) {

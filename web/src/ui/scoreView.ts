@@ -1,5 +1,6 @@
 import { type DrawnBars, type MultiRests, type NoteIndex, type NoteInfo, drawnBars, indexScore, unmappedNotes } from "../core/score/noteMap.ts";
 import type { Score } from "../core/score/model.ts";
+import { firstVoice, voiceView, voices } from "../core/score/model.ts";
 import { renderScore } from "../core/score/render.ts";
 import { mapElements, sameElement } from "../core/score/elements.ts";
 import type { ElementRef, SvgTree } from "../core/score/elements.ts";
@@ -78,6 +79,8 @@ export interface ScoreView {
   onRender: (() => void) | undefined;
   /** Replaces the score (e.g. after an edit) and re-renders. */
   setScore(score: Score): Promise<void>;
+  /** Draws another part (or the same part with another hand faded) and re-renders; the first part for undefined. */
+  setPart(part: DrawnPart | undefined): Promise<void>;
   /** Settles when the first layout is drawn (or was skipped because the view has no width yet). */
   readonly rendered: Promise<void>;
   /** Milliseconds the last render took, and its page count. */
@@ -123,8 +126,21 @@ export function describeNote(info: NoteInfo): TappedNote {
   };
 }
 
+/** The part the view draws, and the hand played (the other staff of a two-staff part is faded). */
+export interface DrawnPart {
+  id: string;
+  hand?: "right" | "left";
+  /** The voice the editor edits: the bars, clefs and marks of the drawing follow it (task 7.1). The first voice of the part when absent. */
+  voice?: { staff: number; voice: number };
+}
+
+/** The class on the `g.staff` that is not the hand played (practice, design D7); `score.css` fades it. */
+export const FADED_STAFF = "staff-faded";
+
 /** The hooks a caller can give before the first layout, so it does not miss that one. */
 export type ScoreViewHooks = Partial<Pick<ScoreView, "onTap" | "onTapElement" | "onBeforeRender" | "onRender">> & {
+  /** The part to draw (practice: your part): a part id, and for a two-staff part possibly the hand you play, the other staff is faded. Absent: the first part. */
+  part?: DrawnPart;
   /** A multi-measure rest that still holds: one symbol (`collapse`, the default: practice) or bar by bar (`expand`: the editor). */
   multiRests?: MultiRests;
 };
@@ -139,10 +155,29 @@ export async function showScore(container: HTMLElement, initial: Score): Promise
 /** Like `showScore`, but returns the view at once, with hooks in place before the first layout. */
 export function createScoreView(container: HTMLElement, initial: Score, hooks: ScoreViewHooks = {}): ScoreView {
   let score = initial;
+  let part: DrawnPart | undefined = hooks.part;
+  /** The voices that are drawn: every voice of the part shown (its two staves, its second voices), the first part when none is named or it is not in the score. */
+  const drawnVoices = () => {
+    const refs = part ? voices(score).filter((r) => r.part === part!.id) : [];
+    return refs.length > 0 ? refs : [firstVoice(score)];
+  };
+  /** The voice the bars and the editor's elements follow: the edited one when named, else the first of the drawn part. */
+  const lineRef = () => {
+    const refs = drawnVoices();
+    const v = part?.voice;
+    return (v && refs.find((r) => r.staff === v.staff && r.voice === v.voice)) || refs[0]!;
+  };
+  // The first voice of the drawn part is what the bars follow (`drawnBars`, the editor's elements); the note map holds every drawn voice.
+  let line = voiceView(score, lineRef());
+  const indexOf = (): NoteIndex => {
+    const merged: NoteIndex = new Map();
+    for (const ref of drawnVoices()) for (const [id, info] of indexScore(voiceView(score, ref))) merged.set(id, { ...info, index: merged.size });
+    return merged;
+  };
   const multiRests: MultiRests = hooks.multiRests ?? "collapse";
-  let index: NoteIndex = indexScore(score);
+  let index: NoteIndex = indexOf();
   /** Which drawn measure draws each bar (design D5); every bar looked up by its position goes through it. */
-  let bars: DrawnBars = drawnBars(score, multiRests);
+  let bars: DrawnBars = drawnBars(line, multiRests);
   let renderedWidth = 0;
   let pendingWidth = 0;
   let generation = 0;
@@ -208,6 +243,16 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     for (const [node, ref] of elementMap) if (sameElement(ref, markedElement)) node.classList.add("mk-el");
   };
 
+  /** With one hand of a two-staff part played, the other staff of each measure is faded, by its position in the measure (design D7). */
+  const fadeOtherHand = () => {
+    const hand = part?.hand;
+    const two = score.parts.find((p) => p.id === drawnVoices()[0]!.part)?.staves === 2;
+    for (const measure of element.querySelectorAll("g.measure")) {
+      const staves = [...measure.children].filter((c) => c.matches("g.staff"));
+      staves.forEach((staff, i) => staff.classList.toggle(FADED_STAFF, two && hand !== undefined && i !== (hand === "right" ? 0 : 1)));
+    }
+  };
+
   const render = async (force = false) => {
     const width = Math.floor(element.clientWidth);
     if (width <= 0) return;
@@ -215,7 +260,7 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     pendingWidth = width;
     const mine = ++generation;
     const started = performance.now();
-    const pages = await renderScore(score, { width, multiRests });
+    const pages = await renderScore(score, { width, multiRests, ...(part ? { parts: [drawnVoices()[0]!.part] } : {}) });
     if (mine !== generation) return;
     const ms = Math.round(performance.now() - started);
     view.onBeforeRender?.();
@@ -225,9 +270,10 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     lastRender = { ms, pages: pages.length, width };
     highlighted = [];
     applyMarks();
-    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, score, bars) : new Map();
+    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, line, bars) : new Map();
     lines = linesOf<Element>(element, DOM_TREE, bars);
     measureNodes = [...element.querySelectorAll<SVGGElement>("g.measure")];
+    fadeOtherHand();
     applyElementMark();
     element.dataset.rendered = "true";
     const missing = unmappedNotes(pages.join(""), index, bars);
@@ -314,13 +360,22 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   };
   let firstOfBar = firstNotes();
 
+  /** What follows the score or the part shown: the lines, the note map and the bars, then the drawing. */
+  const relayout = async () => {
+    line = voiceView(score, lineRef());
+    index = indexOf();
+    bars = drawnBars(line, multiRests);
+    firstOfBar = firstNotes();
+    await render(true);
+  };
+
   const view: ScoreView = {
     element,
     elementsFor,
     noteAtPoint,
     barOf: (id) => index.get(id)?.barIndex,
     get barCount() {
-      return score.measures.length;
+      return score.bars.length;
     },
     firstNoteOf: (barIndex) => firstOfBar[barIndex],
     get lines() {
@@ -352,10 +407,12 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     },
     async setScore(next) {
       score = next;
-      index = indexScore(score);
-      bars = drawnBars(score, multiRests);
-      firstOfBar = firstNotes();
-      await render(true);
+      await relayout();
+    },
+    async setPart(next) {
+      if (next?.id === part?.id && next?.hand === part?.hand) return;
+      part = next;
+      await relayout();
     },
     get lastRender() {
       return lastRender;

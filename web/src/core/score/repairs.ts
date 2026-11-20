@@ -1,4 +1,4 @@
-import type { Measure, Note, Pitch, Score, TimeSignature } from './model.ts'
+import type { Measure, Note, Pitch, TimeSignature, VoiceScore } from './model.ts'
 import { isNote } from './model.ts'
 import { noteDuration } from './musicxml.ts'
 import type { Frac } from './rational.ts'
@@ -61,7 +61,7 @@ export function expectedLength(time: TimeSignature): Frac {
 }
 
 /** The time signature in force for each measure (undefined before the first one). */
-export function effectiveTimes(score: Score): (TimeSignature | undefined)[] {
+export function effectiveTimes(score: VoiceScore): (TimeSignature | undefined)[] {
   let current: TimeSignature | undefined
   return score.measures.map((m) => {
     if (m.time) current = m.time
@@ -89,7 +89,7 @@ function timeSignatureFor(length: Frac): TimeSignature | undefined {
  * same length and cannot be told apart from durations alone). Returns whether one was set; when the
  * bars do not agree, the score is left without a time signature.
  */
-export function inferTimeSignature(score: Score): boolean {
+export function inferTimeSignature(score: VoiceScore): boolean {
   if (score.measures.some((m) => m.time)) return false
   const first = score.measures[0]
   if (!first) return false
@@ -109,6 +109,11 @@ export function inferTimeSignature(score: Score): boolean {
   const signature = best && best.count * 2 > counted.length ? timeSignatureFor(best.length) : undefined
   if (!signature) return false
   first.time = { ...signature, inferred: true }
+  // The view's attributes are copies; the time signature lives on the bar of the score it was made from (design D2).
+  if (score.of) {
+    const bar = score.of.score.bars[0]
+    if (bar) bar.time = first.time
+  }
   return true
 }
 
@@ -169,7 +174,7 @@ function repairTriplets(measure: Measure, expected: Frac): string | undefined {
  * signature in force there: this is how pages added to a piece are prepared without touching the
  * bars the piece already has (core/pages).
  */
-export function repairBarLengths(score: Score, from = 0): Repair[] {
+export function repairBarLengths(score: VoiceScore, from = 0): Repair[] {
   const repairs: Repair[] = []
   const times = effectiveTimes(score)
   score.measures.forEach((m, index) => {

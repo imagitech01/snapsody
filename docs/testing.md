@@ -93,6 +93,10 @@ taken), with no phone and no emulator. The adapter is `platform/browserDev/`. Tw
   - **Stored** lists the stored files, `recognised.musicxml` among them. They stay after a reload.
     **Clear** removes them.
 
+To try a piece with several parts, open `/?reading=melody-piano`: every page is then read as the
+melody-and-piano fixture (`web/test/fixtures/melody-piano.musicxml`), so adding music shows the parts step and practice
+shows the "your part" card, the hint and the Your part rows.
+
 Files live in the IndexedDB database `snapsody-browser-dev` of the page's origin. To start from
 nothing, use Clear or DevTools, Application, Storage, "Clear site data". In browser-dev, Escape
 stands in for the back button, and a hidden tab for the app going to the background.

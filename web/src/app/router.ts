@@ -72,7 +72,7 @@ export function isStartScreen(screen: Screen): boolean {
 }
 
 /** The sheets that slide over a screen (frames 02.3 and 02.4), and Settings' list (default instrument). */
-export type SheetName = 'tools' | 'loop' | 'instrument'
+export type SheetName = 'tools' | 'loop' | 'instrument' | 'part' | 'pieceInstrument'
 
 /** What a confirm dialog says. The texts are already in the user's language. */
 export interface ConfirmOptions {

@@ -259,6 +259,66 @@
   line-height: 1.2;
 }
 
+/* ---- A piece with parts (change parts-and-accompaniment, design D9) ------------------------------------ */
+
+/* The card for your own line, next to the metronome: three cards in the row (the metronome's icon goes, to make room). In
+   landscape it is an icon-sized square like the metronome, with a short form of its name instead of words (below). */
+.part-short {
+  display: none;
+}
+@media (orientation: portrait) {
+  .practice-row--parts {
+    grid-template-columns: minmax(0, 11fr) minmax(0, 8fr) minmax(0, 8fr);
+    column-gap: var(--space-2);
+  }
+  .practice-row--parts .metronome-toggle {
+    justify-content: center;
+    padding: 0 var(--space-2);
+    text-align: left;
+  }
+  .practice-row--parts .metronome-toggle .icon {
+    display: none;
+  }
+  .practice-row--parts .stepper-button {
+    width: 2.5rem;
+  }
+}
+
+/* The hint: a tinted bar over the top of the score, once per piece. */
+.practice-hint {
+  position: absolute;
+  inset: var(--space-2) var(--space-2) auto;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--primary-tint);
+  box-shadow: 0 0.125rem 0.5rem var(--shadow-float);
+  color: var(--primary);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+.practice-hint > span {
+  flex: 1;
+  min-width: 0;
+  padding-block: var(--space-1);
+}
+.practice-hint button {
+  flex: none;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  color: var(--primary);
+  font-weight: var(--fw-semibold);
+}
+.practice-hint-close {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
 /* ---- Landscape (frame 02.2) ------------------------------------------------------------------ */
 
 /* One bar about 48 high on top: back, the piece with its bar under it (ellipsis), Restart, Play, the tempo, the
@@ -350,6 +410,17 @@
   }
   .metronome-text {
     display: none;
+  }
+  /* The part card: its short name ("M", "R+L"), tinted while your line is on; its full name and state are the button's label. */
+  .part-short {
+    display: block;
+    font-size: var(--fs-12);
+    font-weight: var(--fw-semibold);
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .part-toggle[aria-pressed='false'] .part-short {
+    text-decoration: line-through;
   }
   .practice-count span {
     width: 4rem;

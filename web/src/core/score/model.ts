@@ -1,9 +1,11 @@
 import type { Frac } from './rational.ts'
 
 /**
- * The score model (design D6). Scope: one part, one voice, one staff, which is
- * what an exercise for a single instrument needs. Durations are exact
- * fractions of a whole note.
+ * The score model (design D6; parts, staves and voices since change parts-and-accompaniment, design D1).
+ * A score holds parts, a part one or two staves, a staff one or more voices. The bars hold what every
+ * part shares; each voice is a list of `MeasureItem`s per bar. Per-voice code works on a voice view
+ * (`voiceView`), which has the shape the model had before parts: a list of `Measure`s. Durations are
+ * exact fractions of a whole note.
  */
 
 export type NoteType =
@@ -90,6 +92,12 @@ export interface Note {
   tremolo?: { kind: 'single' | 'start' | 'stop'; strokes: number }
   /** Rolled upwards (`<arpeggiate/>`); kept on the first note of the chord, written on every chord note. */
   arpeggio?: boolean
+  /**
+   * An invisible rest (always with `rest`): a `<forward>` inside a voice (change parts-and-accompaniment,
+   * design D3), kept so that each voice's list still adds up. Written back as `<forward>`; never drawn,
+   * selected or flagged.
+   */
+  hidden?: boolean
 }
 
 /**
@@ -178,6 +186,11 @@ export interface Barline {
   ending?: Ending
 }
 
+/**
+ * One bar of one voice, in the shape of the model before parts: the bar's shared attributes, the part's
+ * key and multi-measure rest, the staff's clef, and the voice's items. Made by `voiceView`; `items` is the
+ * model's own list, the attributes are copies (see `VoiceScore`).
+ */
 export interface Measure {
   /** Printed measure number (kept as a string, as in MusicXML). */
   number: string
@@ -196,10 +209,170 @@ export interface Measure {
   items: MeasureItem[]
 }
 
-export interface Score {
+/**
+ * A voice view (design D2): one voice of a score as a list of measures. Each measure's `items` is the same
+ * array as the voice's list in the model, so an edit to items through the view edits the score; the bar
+ * attributes are read-only copies, set through the score-level functions. `of` points back to the score
+ * and the voice the view was made from (absent for a bare list of measures, as in some tests), so that
+ * fresh ids are taken from the whole score.
+ */
+export interface VoiceScore {
   title?: string
   partName?: string
   measures: Measure[]
+  of?: { score: Score; ref: VoiceRef }
+}
+
+/** A part as read: `P1`, `P2`, ... A two-staff part is a piano part (design D1). */
+export interface Part {
+  id: string
+  name: string
+  staves: 1 | 2
+}
+
+/** One staff of one part in one bar: its clef, where it changes, and its voices. */
+export interface StaffBar {
+  clef?: Clef
+  /**
+   * The staff's voices; `voices[0]` is its first voice. Every bar of a staff has the same number of
+   * voices; a voice that has nothing in a bar has an empty list there (never for the first voice).
+   */
+  voices: MeasureItem[][]
+}
+
+/** One part in one bar: what belongs to the part (key, multi-measure rest) and its staves. */
+export interface PartBar {
+  key?: KeySignature
+  /** As `Measure.multiRest`, for this part. */
+  multiRest?: number
+  /** One per staff of the part (`Part.staves`). */
+  staves: StaffBar[]
+}
+
+/** A bar: what every part shares, and the part bars, parallel to `Score.parts`. */
+export interface Bar {
+  number: string
+  time?: TimeSignature
+  leftBarline?: Barline
+  rightBarline?: Barline
+  newSystem?: boolean
+  parts: PartBar[]
+}
+
+export interface Score {
+  title?: string
+  parts: Part[]
+  bars: Bar[]
+}
+
+/** One voice of a score: the part's id, the staff (0 for the first) and the voice of that staff (0 for the first). */
+export interface VoiceRef {
+  part: string
+  staff: number
+  voice: number
+}
+
+/** The first voice of the first part: the whole score for a one-line piece. */
+export function firstVoice(score: Score): VoiceRef {
+  return { part: score.parts[0]?.id ?? 'P1', staff: 0, voice: 0 }
+}
+
+export function sameVoice(a: VoiceRef, b: VoiceRef): boolean {
+  return a.part === b.part && a.staff === b.staff && a.voice === b.voice
+}
+
+/** Index of a part in `score.parts` (and in each `Bar.parts`), or -1. */
+export function partIndex(score: Score, id: string): number {
+  return score.parts.findIndex((p) => p.id === id)
+}
+
+/**
+ * A one-line score (one part, one staff, one voice) from a list of measures in the shape of the model
+ * before parts. The voice lists are the measures' own `items` arrays, not copies.
+ */
+export function singleVoiceScore(measures: Measure[], options: { title?: string; partName?: string; partId?: string } = {}): Score {
+  const score: Score = {
+    parts: [{ id: options.partId ?? 'P1', name: options.partName ?? '', staves: 1 }],
+    bars: measures.map((m) => {
+      const bar: Bar = { number: m.number, parts: [] }
+      if (m.time) bar.time = m.time
+      if (m.leftBarline) bar.leftBarline = m.leftBarline
+      if (m.rightBarline) bar.rightBarline = m.rightBarline
+      if (m.newSystem) bar.newSystem = m.newSystem
+      const staff: StaffBar = { voices: [m.items] }
+      if (m.clef) staff.clef = m.clef
+      const part: PartBar = { staves: [staff] }
+      if (m.key) part.key = m.key
+      if (m.multiRest !== undefined) part.multiRest = m.multiRest
+      bar.parts.push(part)
+      return bar
+    }),
+  }
+  if (options.title !== undefined) score.title = options.title
+  return score
+}
+
+/**
+ * The view of one voice (design D2). Each measure carries the bar's number, time, bar lines and new
+ * system, the part's key and multi-measure rest, and the staff's clef, each where the model sets it (a
+ * change, as in the model before parts), and the voice's own `items` array.
+ */
+export function voiceView(score: Score, ref: VoiceRef): VoiceScore {
+  const pi = partIndex(score, ref.part)
+  if (pi < 0) throw new Error(`no part ${ref.part}`)
+  const part = score.parts[pi]!
+  const measures = score.bars.map((bar): Measure => {
+    const pb = bar.parts[pi]
+    const sb = pb?.staves[ref.staff]
+    const items = sb?.voices[ref.voice]
+    if (!pb || !sb || !items) throw new Error(`no voice ${ref.part}/${ref.staff}/${ref.voice} in bar ${bar.number}`)
+    const m: Measure = { number: bar.number, items }
+    if (sb.clef) m.clef = sb.clef
+    if (pb.key) m.key = pb.key
+    if (bar.time) m.time = bar.time
+    if (bar.leftBarline) m.leftBarline = bar.leftBarline
+    if (bar.rightBarline) m.rightBarline = bar.rightBarline
+    if (bar.newSystem) m.newSystem = bar.newSystem
+    if (pb.multiRest !== undefined) m.multiRest = pb.multiRest
+    return m
+  })
+  const view: VoiceScore = { measures, of: { score, ref } }
+  if (score.title !== undefined) view.title = score.title
+  if (part.name) view.partName = part.name
+  return view
+}
+
+/** Every voice of the score, in order of part, staff and voice. */
+export function voices(score: Score): VoiceRef[] {
+  const refs: VoiceRef[] = []
+  score.parts.forEach((part, pi) => {
+    for (let staff = 0; staff < part.staves; staff++) {
+      const count = Math.max(1, ...score.bars.map((b) => b.parts[pi]?.staves[staff]?.voices.length ?? 0))
+      for (let voice = 0; voice < count; voice++) refs.push({ part: part.id, staff, voice })
+    }
+  })
+  return refs
+}
+
+/** Every item list of the score (every voice in every bar), in bar order, then part, staff and voice. */
+export function allItemLists(score: Score): MeasureItem[][] {
+  const lists: MeasureItem[][] = []
+  for (const bar of score.bars) for (const pb of bar.parts) for (const sb of pb.staves) for (const v of sb.voices) lists.push(v)
+  return lists
+}
+
+/** The whole score a view or a score belongs to, for ids that must be unique in it. */
+function itemListsOf(score: Score | VoiceScore): MeasureItem[][] {
+  if ('bars' in score) return allItemLists(score)
+  if (score.of) return allItemLists(score.of.score)
+  return score.measures.map((m) => m.items)
+}
+
+/** Every note and direction id used in the whole score (of the view's score, for a view). */
+export function usedIds(score: Score | VoiceScore): Set<string> {
+  const used = new Set<string>()
+  for (const items of itemListsOf(score)) for (const item of items) if (isNote(item) || isDirection(item)) used.add(item.id)
+  return used
 }
 
 export function isNote(item: MeasureItem): item is Note {
@@ -218,9 +391,9 @@ export function isDirection(item: MeasureItem): item is DirectionItem {
  * A direction id that no note or direction of the score uses: `d1`, `d2`, ... For items made by an edit
  * or a merge; the parser keeps the ids it reads.
  */
-export function freshDirectionId(score: Score, taken: ReadonlySet<string> = new Set()): string {
-  const used = new Set(taken)
-  for (const m of score.measures) for (const item of m.items) if (isNote(item) || isDirection(item)) used.add(item.id)
+export function freshDirectionId(score: Score | VoiceScore, taken: ReadonlySet<string> = new Set()): string {
+  const used = usedIds(score)
+  for (const id of taken) used.add(id)
   let n = 1
   while (used.has(`d${n}`)) n++
   return `d${n}`
@@ -236,6 +409,13 @@ export interface MultiRestRun {
   length: number
 }
 
+/** Whether a voice's items are nothing but one plain whole-bar rest: no direction, other note or mark. */
+function isPlainRestItems(items: readonly MeasureItem[]): boolean {
+  const [only, ...more] = items
+  if (!only || more.length > 0 || !isNote(only)) return false
+  return only.rest === true && only.measureRest === true && !only.grace && !only.chord && !only.fermata && !only.hidden
+}
+
 /**
  * A bar that is nothing but one whole-bar rest: no barline, direction, other note or mark, and no clef,
  * key or time, except on the first bar of the run (`first`), where they are drawn before the symbol.
@@ -243,9 +423,7 @@ export interface MultiRestRun {
 function isPlainRestBar(m: Measure, first: boolean): boolean {
   if (!first && (m.clef || m.key || m.time)) return false
   if (m.leftBarline || m.rightBarline) return false
-  const [only, ...more] = m.items
-  if (!only || more.length > 0 || !isNote(only)) return false
-  return only.rest === true && only.measureRest === true && !only.grace && !only.chord && !only.fermata
+  return isPlainRestItems(m.items)
 }
 
 /**
@@ -255,7 +433,7 @@ function isPlainRestBar(m: Measure, first: boolean): boolean {
  * and whatever maps bars to drawn measures or clears `multiRest` after an edit asks it too. Runs come
  * in score order and never overlap; a `multiRest` inside a run that holds is ignored.
  */
-export function multiRestRuns(score: Score): MultiRestRun[] {
+export function multiRestRuns(score: VoiceScore): MultiRestRun[] {
   const runs: MultiRestRun[] = []
   let covered = 0
   score.measures.forEach((m, index) => {
@@ -273,6 +451,34 @@ export function multiRestRuns(score: Score): MultiRestRun[] {
 }
 
 /** Whether the bar at `barIndex` starts a multi-measure rest that still holds. */
-export function multiRestHolds(score: Score, barIndex: number): boolean {
+export function multiRestHolds(score: VoiceScore, barIndex: number): boolean {
   return multiRestRuns(score).some((r) => r.start === barIndex)
+}
+
+/**
+ * The multi-measure rests that still hold for one part (design D1, D3 of change parts-and-accompaniment):
+ * as `multiRestRuns`, but a bar is plain only when every staff of the part has one plain whole-bar rest in
+ * its first voice and nothing in any other voice, and none of its staves sets a clef (the part's key and
+ * the bar's time count as before). `partIndex` is the index in `score.parts`.
+ */
+export function partMultiRestRuns(score: Score, partIndex: number): MultiRestRun[] {
+  const plain = (index: number, first: boolean): boolean => {
+    const bar = score.bars[index]
+    const pb = bar?.parts[partIndex]
+    if (!bar || !pb) return false
+    if (!first && (pb.key || bar.time || pb.staves.some((s) => s.clef))) return false
+    if (bar.leftBarline || bar.rightBarline) return false
+    return pb.staves.length > 0 && pb.staves.every((s) => isPlainRestItems(s.voices[0] ?? []) && s.voices.slice(1).every((v) => v.length === 0))
+  }
+  const runs: MultiRestRun[] = []
+  let covered = 0
+  score.bars.forEach((bar, index) => {
+    if (index < covered) return
+    const n = bar.parts[partIndex]?.multiRest
+    if (n === undefined || n < 2 || index + n > score.bars.length) return
+    for (let k = 0; k < n; k++) if (!plain(index + k, k === 0)) return
+    runs.push({ start: index, length: n })
+    covered = index + n
+  })
+  return runs
 }

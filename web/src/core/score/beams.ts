@@ -1,4 +1,4 @@
-import type { Measure, Note, NoteType, Score, TimeSignature } from './model.ts'
+import type { Measure, Note, NoteType, VoiceScore, TimeSignature } from './model.ts'
 import { isNote } from './model.ts'
 import type { Frac } from './rational.ts'
 import { ZERO, add, cmp, frac, mul, sub } from './rational.ts'
@@ -45,7 +45,7 @@ function floorDiv(a: Frac, b: Frac): number {
 }
 
 /** Beam marks for every beamed note of the score, by note id. */
-export function beamScore(score: Score): Map<string, BeamMark[]> {
+export function beamScore(score: VoiceScore): Map<string, BeamMark[]> {
   const result = new Map<string, BeamMark[]>()
   let time: TimeSignature = { beats: 4, beatType: 4 }
   score.measures.forEach((m, index) => {

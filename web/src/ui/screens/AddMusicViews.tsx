@@ -1,6 +1,8 @@
 import type { ComponentChildren } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
-import type { AddMusicFlow, AddMusicState, PageState, ReadingProgress } from '../../app/addMusic.ts'
+import { useEffect, useId, useState } from 'preact/hooks'
+import type { AddMusicFlow, AddMusicState, PageState, PartChoice, ReadingProgress } from '../../app/addMusic.ts'
+import type { Score } from '../../core/score/model.ts'
+import { renderScore } from '../../core/score/render.ts'
 import type { Files } from '../../platform/port.ts'
 import { Button, Card, Icon, IconButton, ToggleRow } from '../components/index.ts'
 import type { IconName } from '../components/index.ts'
@@ -10,6 +12,8 @@ import { useShell } from '../ShellContext.ts'
  * What the add-music screen shows for each step of the flow (practice-app task 14.1, design D14):
  *  - the hint before the scanner (no frame: designed in the look of the others),
  *  - the pages being read (frame 05 "Process scan"),
+ *  - the parts step (spec `score-recognition` "Choose the parts to keep"): a row per part with a checkbox, its name,
+ *    its first bars drawn small and "I play this",
  *  - no music on a page, a page that could not be read, a piece that could not be saved, and the
  *    scanner that cannot run (no frames),
  *  - a plain waiting view for the moments between (the scanner opening, saving).
@@ -158,6 +162,92 @@ export function ReadingView({ flow, progress, onCancel }: { flow: AddMusicFlow; 
         </Button>
       </div>
     </div>
+  )
+}
+
+// ---- The parts step ----------------------------------------------------------------------------
+
+/** How many bars of a part are drawn: a few, so two melodies can be told apart and the drawing stays light. They are laid out wide enough to be one line. */
+const PREVIEW_BARS = 3
+
+/**
+ * The first bars of one part, drawn small with the toolkit the app already uses (one `loadData` and one page of SVG per
+ * part, on the first bars only). A drawing that fails leaves the box empty: the name is what the row stands on.
+ */
+function PartPreview({ score, part, label }: { score: Score; part: PartChoice; label: string }) {
+  const [svg, setSvg] = useState<string>()
+  useEffect(() => {
+    let wanted = true
+    const first: Score = { ...score, bars: score.bars.slice(0, PREVIEW_BARS) }
+    renderScore(first, { width: 460, scale: 40, parts: [part.id] })
+      .then((pages) => wanted && setSvg(pages[0]))
+      .catch(() => undefined)
+    return () => {
+      wanted = false
+    }
+  }, [score, part.id])
+  return <div class="add-part-preview" role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: svg ?? '' }} />
+}
+
+/**
+ * The parts step: every part with a checkbox (keep), its name, its first bars and a radio "I play this". Continue is off
+ * while nothing is kept; Back cancels, as cancelling the reading does. The choices live in the flow.
+ */
+export function PartsView({ flow, state, onBack }: { flow: AddMusicFlow; state: Extract<AddMusicState, { step: 'parts' }>; onBack: () => void }) {
+  const { t } = useShell().i18n
+  const none = !state.keep.some(Boolean)
+  return (
+    <Frame
+      step="parts"
+      title={t('add.parts.title')}
+      onBack={onBack}
+      actions={
+        <>
+          {none ? (
+            <p class="t-caption add-keep-open" role="status">
+              {t('add.parts.needOne')}
+            </p>
+          ) : null}
+          <Button block disabled={none} onPress={() => void flow.continueParts()}>
+            {t('add.parts.continue')}
+          </Button>
+        </>
+      }
+    >
+      <p class="t-subtitle add-parts-body">{t('add.parts.body')}</p>
+      <ul class="add-parts" role="radiogroup" aria-label={t('add.parts.play')}>
+        {state.parts.map((part, index) => (
+          <PartRow key={part.id} flow={flow} state={state} part={part} index={index} />
+        ))}
+      </ul>
+    </Frame>
+  )
+}
+
+function PartRow({ flow, state, part, index }: { flow: AddMusicFlow; state: Extract<AddMusicState, { step: 'parts' }>; part: PartChoice; index: number }) {
+  const { t } = useShell().i18n
+  const nameId = useId()
+  const playId = useId()
+  const kept = state.keep[index]!
+  const plays = state.play === index
+  return (
+    <li class={kept ? 'add-part' : 'add-part is-dropped'}>
+      <div class="add-part-head">
+        <button type="button" class="add-part-keep" role="checkbox" aria-checked={kept} aria-labelledby={nameId} onClick={() => flow.setKept(index, !kept)}>
+          <span class="add-part-box" aria-hidden="true">
+            {kept ? <Icon name="check" size={16} /> : null}
+          </span>
+        </button>
+        <span id={nameId} class="add-part-name">
+          {part.name}
+        </span>
+        <button type="button" class="add-part-play" role="radio" aria-checked={plays} aria-labelledby={`${playId} ${nameId}`} disabled={!kept} onClick={() => flow.setPlay(index)}>
+          <span id={playId}>{t('add.parts.play')}</span>
+          <Icon name="radio" class={plays ? 'radio-on' : 'radio-off'} />
+        </button>
+      </div>
+      <PartPreview score={state.score} part={part} label={t('add.parts.preview', { name: part.name })} />
+    </li>
   )
 }
 

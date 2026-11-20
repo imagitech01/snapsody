@@ -1,5 +1,7 @@
+import { instrumentById } from '../instruments/instruments.ts'
 import type { Instrument } from '../instruments/instruments.ts'
-import type { Score } from '../score/model.ts'
+import type { Score, VoiceScore } from '../score/model.ts'
+import { firstVoice, voiceView } from '../score/model.ts'
 import { frac } from '../score/rational.ts'
 import type { Frac } from '../score/rational.ts'
 import { FreeMetronome } from './freeMetronome.ts'
@@ -10,6 +12,7 @@ import { DEFAULT_TEMPO, clampTempo, countInClicks } from './tempo.ts'
 import type { Quarters } from './tempo.ts'
 import type { LoopRest, LoopSpan, PlaybackEvent, Timeline } from './timeline.ts'
 import { buildTimeline, loopSpanOf } from './timeline.ts'
+import type { TimelineOptions } from './timeline.ts'
 import { outputLatency } from './webaudio.ts'
 
 /*
@@ -43,7 +46,9 @@ export interface AudioBackend extends Clock {
   /**
    * Makes the output play from the sample set of an instrument's sound (`Instrument.sound`, the folder
    * `samples/<sound>/`), loading it when it is not loaded yet. Notes already sounding are not
-   * touched. Optional: an output with a single sound ignores it.
+   * touched. Every set loaded stays there for the notes that name their sound (`NoteOnSpec.sound`: the
+   * parts of a piece can have different instruments), and the last one asked for is what notes that name
+   * none play from. Optional: an output with a single sound ignores it.
    */
   useSound?(sound: string): Promise<void>
   /** Tunes the output to A4 = `hz` (notes that start from now on). Optional. */
@@ -81,6 +86,12 @@ export interface PlayerOptions {
   loopRest?: LoopRest
   /** The metronome (default off). */
   metronome?: boolean
+  /** Your line, as the piece is practised (design D5): a part and for a two-staff part a hand. Absent: the first part, both hands. */
+  part?: TimelineOptions['part']
+  /** The parts and hands that do not sound under "Plays along": 'P1', 'P2:left' ... Absent: none. */
+  silent?: readonly string[]
+  /** Your line sounds (default). `setOwnLine` changes it, also while playing. */
+  ownLine?: boolean
   /** A4 in Hz, 430 to 450 (default 440): all sound follows it. */
   pitchReference?: number
   onState?: (state: PlayerState) => void
@@ -89,6 +100,14 @@ export interface PlayerOptions {
 }
 
 export const DEFAULT_BPM = DEFAULT_TEMPO
+
+/** The sample folders, besides the instrument's own, that the events of a timeline sound with (a piano part's piano). */
+function otherSounds(timeline: Timeline, instrument: Instrument): string[] {
+  const sounds = new Set<string>()
+  for (const ev of timeline.events) sounds.add(instrumentById(ev.sound)?.sound ?? ev.sound)
+  sounds.delete(instrument.sound)
+  return [...sounds]
+}
 
 const num = (f: Frac): number => f.n / f.d
 
@@ -103,6 +122,9 @@ export class Player {
   private loopRange: LoopRange | undefined
   private loopRestBars: LoopRest
   private metronomeOn: boolean
+  private ownLineOn: boolean
+  private partValue: TimelineOptions['part'] | undefined
+  private silentValue: readonly string[]
   private reference: number
   private instrumentValue: Instrument
   /** The instrument whose pitches the current run plays (`instrumentValue` is ahead of it while a switch is loading). */
@@ -114,7 +136,10 @@ export class Player {
   private scheduler: Scheduler | undefined
   private timelineValue: Timeline | undefined
   private audio: AudioBackend | undefined
-  private runScore: Score | undefined
+  /** The first voice of the score of the current run: what the count-in's bar counts are read from (the bars are shared). */
+  private runScore: VoiceScore | undefined
+  /** The whole score of the current run, for the timeline of another instrument. */
+  private runLoaded: Score | undefined
   /** Where Play starts from after Stop: the last note the user tapped. */
   private seekNoteId: string | undefined
   /** Where Play resumes after a pause (the note heard when paused). */
@@ -124,7 +149,7 @@ export class Player {
   /** The metronome sounding on its own, while no music plays. */
   private alone: FreeMetronome | undefined
   /** The score and bar it counts, for a beat-unit change while it sounds. */
-  private aloneBar: { score: Score; barIndex: number } | undefined
+  private aloneBar: { score: VoiceScore; barIndex: number } | undefined
   /** Counts the starts and stops of the metronome on its own, so that a start still loading when it is overtaken does nothing. */
   private aloneId = 0
   /** A start of the metronome on its own that is waiting for the backend or the score. */
@@ -138,6 +163,9 @@ export class Player {
     this.loopRange = options.loop
     this.loopRestBars = clampRest(options.loopRest ?? 0)
     this.metronomeOn = options.metronome ?? false
+    this.ownLineOn = options.ownLine ?? true
+    this.partValue = options.part
+    this.silentValue = options.silent ?? []
     this.reference = clampPitchReference(options.pitchReference ?? PITCH_REFERENCE_DEFAULT)
     this.instrumentValue = options.instrument
     this.runInstrument = options.instrument
@@ -171,6 +199,11 @@ export class Player {
 
   get metronome(): boolean {
     return this.metronomeOn
+  }
+
+  /** Your line sounds. */
+  get ownLine(): boolean {
+    return this.ownLineOn
   }
 
   /** A4 in Hz. */
@@ -212,6 +245,11 @@ export class Player {
     this.o.onState?.(state)
   }
 
+  /** What the timeline is built for: your line, and what does not sound. */
+  private timelineOptions(): TimelineOptions {
+    return { ...(this.partValue ? { part: this.partValue } : {}), silent: this.silentValue }
+  }
+
   /** Quarter-note beats per minute for the scheduler. */
   private quarterBpm(): number {
     return this.bpmValue * num(this.unit)
@@ -222,7 +260,7 @@ export class Player {
     return this.loopRange ? loopSpanOf(timeline, this.loopRange, this.loopRestBars) : undefined
   }
 
-  private countInFor(score: Score, barIndex: number): CountIn {
+  private countInFor(score: VoiceScore, barIndex: number): CountIn {
     return { clicks: countInClicks(score, barIndex, this.unit), spacing: this.unit }
   }
 
@@ -243,25 +281,35 @@ export class Player {
     this.setState('loading')
     try {
       this.backendPromise ??= this.o.backend(this.instrumentValue)
-      const [audio, score] = await Promise.all([this.backendPromise, Promise.resolve(this.o.loadScore())])
+      const [audio, loaded] = await Promise.all([this.backendPromise, Promise.resolve(this.o.loadScore())])
+      const score = voiceView(loaded, firstVoice(loaded))
       if (run !== this.runId) return
-      // The sound of the instrument in use (it may have been switched since the backend was made, or while this loaded).
+      // The sound of the instrument in use (it may have been switched since the backend was made, or while this loaded),
+      // and of the other instruments the parts need (a piano part is played by the piano), loaded once each.
       let instrument = this.instrumentValue
+      let timeline: Timeline
+      // What the timeline was made for: a change of it while the sounds load (the instrument, your part, what is silent) is made again.
+      const wanted = (): string => JSON.stringify([this.instrumentValue.id, this.partValue ?? null, this.silentValue])
+      let made = wanted()
       for (;;) {
+        timeline = buildTimeline(loaded, instrument, this.timelineOptions())
         try {
+          for (const sound of otherSounds(timeline, instrument)) await audio.useSound?.(sound)
+          // Last, so that it is the sound notes that name none play from.
           await audio.useSound?.(instrument.sound)
         } catch (e) {
           keepBackend = true // the backend is fine; its sound did not load
           throw e
         }
         if (run !== this.runId) return
-        if (this.instrumentValue === instrument) break
+        if (wanted() === made) break
+        made = wanted()
         instrument = this.instrumentValue
       }
       audio.setPitchReference?.(this.reference)
       this.audio = audio
       this.runScore = score
-      const timeline = buildTimeline(score, instrument)
+      this.runLoaded = loaded
       this.runInstrument = instrument
       this.timelineValue = timeline
       const loop = this.loopSpan(timeline)
@@ -276,6 +324,7 @@ export class Player {
         output: audio.output,
         bpm: this.quarterBpm(),
         metronome: this.metronomeOn,
+        ownLine: this.ownLineOn,
         ...(this.o.timer ? { timer: this.o.timer } : {}),
         onEnd: () => {
           if (run === this.runId) this.setState('stopped')
@@ -303,7 +352,7 @@ export class Player {
     let from: PlaybackEvent | undefined = startId ? timeline.eventOfNote(startId) : undefined
     const loop = this.loopSpan(timeline)
     if (!from && loop) from = timeline.eventAtBeat(loop.start)
-    return from ?? timeline.events[0]
+    return from ?? timeline.events.find((e) => e.own) ?? timeline.events[0]
   }
 
   /** Pauses; Play continues at the note that was heard. A pause during the count-in resumes at its start. */
@@ -445,6 +494,69 @@ export class Player {
   }
 
   /**
+   * Your line on or off, also while playing: no restart. Its notes stop from the next event and the other parts
+   * play on; switched on again, it is heard from the next event. The cursor follows it either way (see
+   * `Scheduler.setOwnLine`).
+   */
+  setOwnLine(on: boolean): void {
+    this.ownLineOn = on
+    this.scheduler?.setOwnLine(on)
+  }
+
+  /** Sets your part and hand (absent: the first part, both hands). While playing it is heard at once (see `setPlayAlong`). */
+  setPart(part: TimelineOptions['part'] | undefined): void {
+    this.partValue = part
+    this.swapTimeline()
+  }
+
+  /** Sets the parts and hands that do not sound ('P1', 'P2:left' ...). While playing it is heard at once (see `setPlayAlong`). */
+  setSilent(silent: readonly string[]): void {
+    this.silentValue = silent
+    this.swapTimeline()
+  }
+
+  /**
+   * Sets your part, what is silent and whether your line sounds, in one step (choosing another part changes all three).
+   * Stopped or paused, the next Play uses them. While playing, the music restarts in place: the sounds the new
+   * timeline needs are loaded (the old music goes on meanwhile), then the notes from the time reached on play as the new
+   * timeline says, every part together (`Scheduler.replaceTimeline`).
+   */
+  setPlayAlong(part: TimelineOptions['part'] | undefined, silent: readonly string[], ownLine: boolean): void {
+    this.partValue = part
+    this.silentValue = silent
+    this.ownLineOn = ownLine
+    // With the new timeline, so that no note of the old one is judged by the new switch; at once when nothing plays.
+    if (!this.swapTimeline()) this.scheduler?.setOwnLine(ownLine)
+  }
+
+  /** Counts the swaps of the timeline, so that a swap that is overtaken by a later one does nothing. */
+  private swapId = 0
+
+  /** Plays on with a timeline made for the part and the silent parts now set (only while playing). */
+  private swapTimeline(): boolean {
+    const { audio, scheduler, runLoaded: loaded } = this
+    if (this.stateValue !== 'playing' || !audio || !scheduler || !loaded) return false
+    const id = ++this.swapId
+    void (async () => {
+      const wanted = buildTimeline(loaded, this.runInstrument, this.timelineOptions())
+      try {
+        for (const sound of otherSounds(wanted, this.runInstrument)) await audio.useSound?.(sound)
+        await audio.useSound?.(this.runInstrument.sound)
+      } catch {
+        // The sound did not load: the music goes on as it was, with your line as it was asked.
+        if (id === this.swapId && this.scheduler === scheduler) scheduler.setOwnLine(this.ownLineOn)
+        return
+      }
+      if (id !== this.swapId || this.stateValue !== 'playing' || this.scheduler !== scheduler) return
+      // Made again after the waiting: the instrument or the options may have changed meanwhile.
+      const timeline = buildTimeline(loaded, this.runInstrument, this.timelineOptions())
+      scheduler.replaceTimeline(timeline, this.ownLineOn)
+      this.timelineValue = timeline
+    })()
+    return true
+  }
+
+  /**
    * Silences the metronome on its own and leaves the setting as it is (the app going to the background,
    * the screen being left). It does not start again by itself.
    */
@@ -475,12 +587,13 @@ export class Player {
         if (id !== this.aloneId) return
         throw e
       }
-      const score = await this.o.loadScore()
+      const loaded = await this.o.loadScore()
+      const score = voiceView(loaded, firstVoice(loaded))
       // Switched off, played, stopped or silenced while it loaded: the later wish wins.
       if (id !== this.aloneId || !this.metronomeOn || (this.stateValue !== 'stopped' && this.stateValue !== 'paused')) return
       this.audio = audio
       // The bar Play would start from gives the beats of the bar, as it gives the count-in's.
-      const first = this.startEvent(buildTimeline(score, this.instrumentValue))
+      const first = this.startEvent(buildTimeline(loaded, this.instrumentValue, this.timelineOptions()))
       const barIndex = first?.barIndex ?? 0
       const alone = new FreeMetronome({
         clock: audio,
@@ -518,8 +631,8 @@ export class Player {
   async setInstrument(instrument: Instrument): Promise<void> {
     if (instrument === this.instrumentValue) return
     this.instrumentValue = instrument
-    const { audio, scheduler, runScore: score } = this
-    if (this.stateValue !== 'playing' || !audio || !scheduler || !score) return
+    const { audio, scheduler, runLoaded: loaded } = this
+    if (this.stateValue !== 'playing' || !audio || !scheduler || !loaded) return
     const id = ++this.switchId
     try {
       await audio.useSound?.(instrument.sound)
@@ -529,8 +642,8 @@ export class Player {
     }
     // Overtaken by another switch, or paused, stopped or started again meanwhile: Play uses the instrument in use.
     if (id !== this.switchId || this.stateValue !== 'playing' || this.scheduler !== scheduler) return
-    const timeline = buildTimeline(score, instrument)
-    if (!scheduler.useTimeline(timeline)) return
+    const timeline = buildTimeline(loaded, instrument, this.timelineOptions())
+    if (!scheduler.useTimeline(timeline)) scheduler.replaceTimeline(timeline)
     this.timelineValue = timeline
     this.runInstrument = instrument
   }

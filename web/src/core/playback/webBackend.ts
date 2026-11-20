@@ -16,8 +16,9 @@ export interface WebAudioOptions {
 /**
  * Creates the AudioContext, resumes it and loads the sample set of a sound. Call from a user gesture
  * (Play). The sets are served next to the page (the CSP allows 'self' only; the app works offline), one
- * folder per instrument: `samples/<instrument.sound>/`. `useSound` switches to another instrument's
- * set while playing; it is loaded once, the first time it is wanted.
+ * folder per instrument: `samples/<instrument.sound>/`. `useSound` loads an instrument's set, once, the first
+ * time it is wanted; every set loaded stays available to the notes that name their sound (parts with different
+ * instruments play at once), and the last one asked for is what notes that name none play from.
  */
 export async function createWebAudioBackend(options: WebAudioOptions = {}): Promise<AudioBackend> {
   const ctx = new AudioContext({ latencyHint: 'interactive' })
@@ -25,7 +26,9 @@ export async function createWebAudioBackend(options: WebAudioOptions = {}): Prom
     await ctx.resume()
     const library = new SoundLibrary(ctx, (url) => fetch(url), (sound) => new URL(soundFolder(sound), document.baseURI).href)
     let current = options.sound ?? DEFAULT_SOUND
-    const sampler = new Sampler(ctx as unknown as AudioContextLike, await library.load(current))
+    const first = await library.load(current)
+    const sampler = new Sampler(ctx as unknown as AudioContextLike, first)
+    sampler.addBank(current, first)
     sampler.pitchReference = options.pitchReference ?? PITCH_REFERENCE_DEFAULT
     /** The sound asked for last: of two switches that overlap, the later one wins whichever loads first. */
     let wanted = current
@@ -44,6 +47,8 @@ export async function createWebAudioBackend(options: WebAudioOptions = {}): Prom
         wanted = sound
         if (sound === current) return
         const bank = await library.load(sound)
+        // Notes naming this sound (another part's instrument) play from it from now on, whatever is asked for next.
+        sampler.addBank(sound, bank)
         if (wanted !== sound) return
         sampler.useBank(bank)
         current = sound

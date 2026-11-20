@@ -1,0 +1,17 @@
+{
+  "bar": 3,
+  "tempo": 80,
+  "loop": null,
+  "loopRest": 0,
+  "metronome": false,
+  "part": {
+    "id": "P2",
+    "hand": "left"
+  },
+  "silent": [
+    "P1"
+  ],
+  "ownLine": false,
+  "instrument": "clarinet",
+  "partsHintSeen": true
+}

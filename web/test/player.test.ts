@@ -12,6 +12,7 @@ import { notesOf } from '../src/core/score/model.ts'
 import { frac } from '../src/core/score/rational.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { dyn, n, scoreOf, scoreXml, wedge } from './playbackHelpers.ts'
+import { MELODY_PIANO_FIXTURE, firstLine, read } from './helpers.ts'
 
 function backend() {
   const clock = { currentTime: 0 }
@@ -51,7 +52,7 @@ test('player: a note changed in the model is heard changed on the next play', as
   player.stop()
 
   // The user corrects the first note to B4; the next play must use it.
-  const first = notesOf(score.measures[0]!)[0]!
+  const first = notesOf(firstLine(score).measures[0]!)[0]!
   first.pitch = { step: 'B', octave: 4 }
   b.played.length = 0
   b.clock.currentTime = 10
@@ -836,4 +837,96 @@ test('player: a listener that pauses as Play starts leaves nothing sounding', as
   t.run(5)
   assert.equal(t.notes.length, 0, 'the run that was paused never sounds')
   assert.equal(t.timerRunning(), false)
+})
+
+// ---------------------------------------------------------------------------------------------------
+// Parts and accompaniment (change parts-and-accompaniment, group 4)
+// ---------------------------------------------------------------------------------------------------
+
+const melodyPianoScore = (): Score => parseMusicXml(read(MELODY_PIANO_FIXTURE))
+
+test('player (parts): the sound of the other instruments is loaded once, the instrument in use last, and every note is played with its own', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melodyPianoScore())
+  await player.play()
+  assert.deepEqual(t.made, [TENOR_SAX], 'one backend, made for the instrument in use')
+  assert.deepEqual(t.sounds, ['piano', 'tenor-sax'], 'the piano part needs the piano; the instrument in use is last, so it is what plain notes play from')
+  t.run(2)
+  const bySound = (sound: string) => t.notes.filter((x) => x.sound === sound)
+  assert.deepEqual(bySound('tenor-sax')[0]!.midi, [53])
+  assert.deepEqual(bySound('piano')[0]!.midi, [60, 64, 67])
+  player.stop()
+  // The next Play does not ask for anything twice in one press, and a one-line piece asks for its own sound only.
+  const one = ticking()
+  await one.player(TENOR_SAX, scoreOf([{ body: n({}) }])).play()
+  assert.deepEqual(one.sounds, ['tenor-sax'])
+})
+
+test('player (parts): a silent part is not loaded and not played', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melodyPianoScore(), { silent: ['P2'] })
+  await player.play()
+  t.run(2)
+  assert.deepEqual(t.sounds, ['tenor-sax'])
+  assert.deepEqual([...new Set(t.notes.map((x) => x.sound))], ['tenor-sax'])
+})
+
+test('player (parts): turning your line off while playing stops its notes from the next event and leaves the piano; on again brings it back', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melodyPianoScore(), { ownLine: true })
+  await player.play()
+  t.run(1.2)
+  const before = t.notes.length
+  player.setOwnLine(false)
+  assert.equal(player.ownLine, false)
+  t.run(2.2)
+  const meanwhile = t.notes.slice(before)
+  assert.ok(meanwhile.some((x) => x.sound === 'piano'), 'the piano goes on')
+  // Only what was handed out within the lookahead window when it was switched off can still sound.
+  assert.ok(meanwhile.filter((x) => x.sound === 'tenor-sax' && x.when > t.clock.currentTime - 2.2 + PLAYBACK_TUNING.lookahead + 1e-6).length === 0)
+  player.setOwnLine(true)
+  const resumed = t.notes.length
+  t.run(2)
+  assert.ok(t.notes.slice(resumed).some((x) => x.sound === 'tenor-sax'), 'heard again from the next event')
+  // The cursor followed the melody all through, sound or not.
+  assert.equal(player.positionNow(0)?.events.every((e) => e.own && e.voice.part === 'P1'), true)
+})
+
+test('player (parts): a player made with your line off plays only the other parts, and your part and hand are taken from the options', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melodyPianoScore(), { ownLine: false })
+  await player.play()
+  t.run(2)
+  assert.deepEqual([...new Set(t.notes.map((x) => x.sound))], ['piano'])
+  player.stop()
+
+  const right = ticking()
+  const hand = right.player(TENOR_SAX, melodyPianoScore(), { part: { id: 'P2', hand: 'right' } })
+  await hand.play()
+  right.run(0.5)
+  const events = hand.positionNow(0)!.events
+  assert.deepEqual(events.map((e) => [e.voice.part, e.voice.staff]), [['P2', 0]], 'the cursor follows the right hand only')
+  assert.ok(hand.timeline!.events.some((e) => e.voice.staff === 1 && !e.own), 'the left hand plays along')
+  assert.ok(right.notes.some((x) => x.midi[0] === 48), 'and is heard (C3, the left hand)')
+})
+
+test('player (parts): an instrument switch after a part was switched off still takes effect', async () => {
+  const t = ticking()
+  const player = t.player(TENOR_SAX, melodyPianoScore())
+  await player.play()
+  t.run(0.6)
+  player.setSilent(['P2'])
+  await player.setInstrument(ALTO_SAX)
+  assert.equal(player.instrument, ALTO_SAX)
+  const before = t.notes.length
+  t.run(2)
+  const after = t.notes.slice(before)
+  assert.ok(after.length > 0, 'the melody goes on')
+  const events = player.timeline!.events
+  for (const x of after) {
+    assert.equal(x.sound, 'alto-sax', 'the melody is played with the alto saxophone')
+    const e = events.find((ev) => ev.pitches.join() === x.midi.join())!
+    assert.ok(e, 'a note of the new timeline')
+    assert.equal(x.midi[0], e.written[0]! - 9, 'sounding a major sixth below written, as the alto saxophone, not the tenor (a ninth)')
+  }
 })

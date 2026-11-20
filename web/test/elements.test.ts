@@ -9,6 +9,7 @@ import { loadToolkit, renderScore } from '../src/core/score/render.ts'
 import { parseXml } from '../src/core/score/xml.ts'
 import type { XmlElement } from '../src/core/score/xml.ts'
 import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, read } from './helpers.ts'
+import { firstLine, setAttr } from './helpers.ts'
 
 // Selecting elements other than notes (change select-and-delete-elements, tasks 1.2 and 1.4).
 
@@ -39,7 +40,7 @@ test('elements: describeElement names each kind on the all-elements fixture, wit
     [{ kind: 'articulation', noteId: 'n15', mark: 'fermata' }, { kind: 'articulation', bar: 5, mark: 'fermata', deletable: true }],
     [{ kind: 'barline', bar: 3 }, { kind: 'barline', bar: 3, deletable: false }],
   ]
-  for (const [ref, expected] of cases) assert.deepEqual(describeElement(score, ref), expected, JSON.stringify(ref))
+  for (const [ref, expected] of cases) assert.deepEqual(describeElement(firstLine(score), ref), expected, JSON.stringify(ref))
 })
 
 test('elements: describeElement is undefined for an element that is not there (or is gone)', () => {
@@ -57,16 +58,16 @@ test('elements: describeElement is undefined for an element that is not there (o
     { kind: 'wedge', startId: 'n1' },
     { kind: 'articulation', noteId: 'n1', mark: 'staccato' },
   ]
-  for (const ref of gone) assert.equal(describeElement(score, ref), undefined, JSON.stringify(ref))
+  for (const ref of gone) assert.equal(describeElement(firstLine(score), ref), undefined, JSON.stringify(ref))
 
   // A clef change describes its clef; the first clef of a score without one is treble.
-  score.measures[3]!.clef = { sign: 'F', line: 4 }
-  assert.deepEqual(describeElement(score, { kind: 'clef', bar: 3 }), { kind: 'clef', bar: 3, clef: { sign: 'F', line: 4 }, deletable: true })
-  delete score.measures[0]!.clef
-  assert.deepEqual(describeElement(score, { kind: 'clef', bar: 0 })?.clef, { sign: 'G', line: 2 })
+  setAttr(score, 3, 'clef', { sign: 'F', line: 4 })
+  assert.deepEqual(describeElement(firstLine(score), { kind: 'clef', bar: 3 }), { kind: 'clef', bar: 3, clef: { sign: 'F', line: 4 }, deletable: true })
+  setAttr(score, 0, 'clef', undefined)
+  assert.deepEqual(describeElement(firstLine(score), { kind: 'clef', bar: 0 })?.clef, { sign: 'G', line: 2 })
   // Once removed, the element is gone.
-  notesOf(score.measures[0]!)[0]!.staccato = undefined
-  assert.equal(describeElement(score, { kind: 'articulation', noteId: 'a1', mark: 'staccato' }), undefined)
+  notesOf(firstLine(score).measures[0]!)[0]!.staccato = undefined
+  assert.equal(describeElement(firstLine(score), { kind: 'articulation', noteId: 'a1', mark: 'staccato' }), undefined)
 })
 
 // ---------------------------------------------------------------- mapElements (task 1.4)
@@ -95,7 +96,7 @@ const SELECTABLE = ['clef', 'keySig', 'meterSig', 'dynam', 'tempo', 'dir', 'arti
 async function drawnAndMapped(score: Score, width = 360) {
   const [svg] = await renderScore(score, { width })
   const root = parseXml(svg!)
-  const map = mapElements(root, xmlTree, score)
+  const map = mapElements(root, xmlTree, firstLine(score))
   const selectable: XmlElement[] = []
   const walk = (e: XmlElement): void => {
     if (e.name === 'g' && xmlTree.classes(e).some((c) => SELECTABLE.includes(c))) selectable.push(e)
@@ -138,19 +139,19 @@ test('elements: on the drawn all-elements fixture every selectable element maps 
   ]
   assert.deepEqual([...new Set([...map.values()].map(key))].sort(), expected.map(key).sort())
   // Every element that is mapped is in the score.
-  for (const ref of map.values()) assert.ok(describeElement(score, ref), `${key(ref)} is in the score`)
+  for (const ref of map.values()) assert.ok(describeElement(firstLine(score), ref), `${key(ref)} is in the score`)
 })
 
 test('elements: dynamics, tempo marks and words in one bar map in the order they are written, a tempo of words only included', async () => {
   const score = fixture()
   // Bar 2: "rit." as a tempo mark of words only (drawn as g.dir). Bar 3: p, dolce, then an f at the end.
-  score.measures[1]!.items.unshift({ kind: 'tempo', id: 't9', words: 'rit.' })
-  score.measures[2]!.items.push({ kind: 'dynamic', id: 'f9', mark: 'f' })
-  score.measures[2]!.items.splice(1, 0, { kind: 'dynamic', id: 'pp9', mark: 'pp' })
+  firstLine(score).measures[1]!.items.unshift({ kind: 'tempo', id: 't9', words: 'rit.' })
+  firstLine(score).measures[2]!.items.push({ kind: 'dynamic', id: 'f9', mark: 'f' })
+  firstLine(score).measures[2]!.items.splice(1, 0, { kind: 'dynamic', id: 'pp9', mark: 'pp' })
   const { map, selectable } = await drawnAndMapped(score)
   assert.deepEqual(selectable.filter((e) => !map.has(e)).length, 0)
   const inBar = (bar: number): string[] =>
-    [...map.values()].filter((r) => (r.kind === 'dynamic' || r.kind === 'tempo' || r.kind === 'words') && describeElement(score, r)?.bar === bar).map((r) => `${r.kind}:${'id' in r ? r.id : ''}`)
+    [...map.values()].filter((r) => (r.kind === 'dynamic' || r.kind === 'tempo' || r.kind === 'words') && describeElement(firstLine(score), r)?.bar === bar).map((r) => `${r.kind}:${'id' in r ? r.id : ''}`)
   assert.deepEqual(inBar(1), ['tempo:t9'])
   assert.deepEqual(inBar(2), ['dynamic:d3', 'dynamic:pp9', 'words:d4', 'dynamic:f9'])
 })
@@ -158,13 +159,13 @@ test('elements: dynamics, tempo marks and words in one bar map in the order they
 test('elements: clef, key and time changes map to the change, also where a system starts and at the end of the system before', async () => {
   const score = fixture()
   // A clef change mid-line (bar 3), and a clef, key and time change at bar 4, which starts the second system at 360 px.
-  score.measures[2]!.clef = { sign: 'F', line: 4 }
-  score.measures[3]!.clef = { sign: 'G', line: 2 }
-  score.measures[3]!.key = { fifths: 3 }
-  score.measures[3]!.time = { beats: 3, beatType: 4 }
+  setAttr(score, 2, 'clef', { sign: 'F', line: 4 })
+  setAttr(score, 3, 'clef', { sign: 'G', line: 2 })
+  setAttr(score, 3, 'key', { fifths: 3 })
+  setAttr(score, 3, 'time', { beats: 3, beatType: 4 })
   // A slur from bar 3 into bar 4, over the system break.
-  notesOf(score.measures[2]!)[0]!.slurs.push({ type: 'start', number: 2 })
-  notesOf(score.measures[3]!)[2]!.slurs.push({ type: 'stop', number: 2 })
+  notesOf(firstLine(score).measures[2]!)[0]!.slurs.push({ type: 'start', number: 2 })
+  notesOf(firstLine(score).measures[3]!)[2]!.slurs.push({ type: 'stop', number: 2 })
   const { map, selectable } = await drawnAndMapped(score)
   assert.deepEqual(selectable.filter((e) => !map.has(e)).map((e) => e.attrs.class), [])
   const refs = [...map.values()]
@@ -187,7 +188,7 @@ const homrMarks = (): Score => parseMusicXml(read(HOMR_MARKS_FIXTURE))
 async function drawnExpanded(score: Score, width = 900) {
   const [svg] = await renderScore(score, { width, multiRests: 'expand' })
   const root = parseXml(svg!)
-  const map = mapElements(root, xmlTree, score)
+  const map = mapElements(root, xmlTree, firstLine(score))
   const groups = (cls: string): XmlElement[] => {
     const out: XmlElement[] = []
     const walk = (e: XmlElement): void => {
@@ -220,9 +221,9 @@ test('elements: every new mark of the homr fixture maps to the note it is drawn 
   ]
   const marks = [...map.values()].filter((r) => r.kind === 'articulation')
   assert.deepEqual([...new Set(marks.map(key))].sort(), [...new Set(expected.map(key))].sort())
-  for (const ref of marks) assert.ok(describeElement(score, ref), `${key(ref)} is in the score`)
+  for (const ref of marks) assert.ok(describeElement(firstLine(score), ref), `${key(ref)} is in the score`)
   // Each ornament maps by its own kind.
-  const kindOf = (cls: string): (string | undefined)[] => groups(cls).map((g) => (map.get(g)?.kind === 'articulation' ? describeElement(score, map.get(g)!)?.ornament : undefined))
+  const kindOf = (cls: string): (string | undefined)[] => groups(cls).map((g) => (map.get(g)?.kind === 'articulation' ? describeElement(firstLine(score), map.get(g)!)?.ornament : undefined))
   assert.deepEqual([kindOf('trill'), kindOf('turn'), kindOf('mordent')], [['trill', 'trill'], ['turn'], ['mordent']])
   // Every drawn group of a new kind is mapped; a tremolo is mapped by its strokes (its notes stay notes).
   for (const cls of ['artic', 'trill', 'turn', 'mordent', 'arpeg', 'caesura', 'fermata']) {
@@ -251,7 +252,7 @@ test('elements: a strong accent and a staccatissimo drawn below the note are tol
   tk.setOptions({ scale: 40, pageWidth: 3000, pageHeight: 60000, adjustPageHeight: true, header: 'none', footer: 'none' })
   assert.ok(tk.loadData(xml))
   const root = parseXml(tk.renderToSVG(1))
-  const map = mapElements(root, xmlTree, score)
+  const map = mapElements(root, xmlTree, firstLine(score))
   const arts: XmlElement[] = []
   const walk = (e: XmlElement): void => {
     if (xmlTree.classes(e).includes('artic')) arts.push(e)

@@ -6,10 +6,11 @@ import assert from 'node:assert/strict'
 import type { Page } from 'playwright'
 import { notesOf } from '../../src/core/score/model.ts'
 import { parseMusicXml } from '../../src/core/score/musicxml.ts'
+import { firstLine } from '../helpers.ts'
 
 /** The note ids of each bar of [musicxml], as the app's parser assigns them. */
 export function noteIdsByBar(musicxml: string): string[][] {
-  return parseMusicXml(musicxml).measures.map((m) => notesOf(m).filter((n) => !n.rest).map((n) => n.id))
+  return firstLine(parseMusicXml(musicxml)).measures.map((m) => notesOf(m).filter((n) => !n.rest).map((n) => n.id))
 }
 
 /** Taps the centre of the rendered note [id] with the touchscreen, scrolling it into view first. */

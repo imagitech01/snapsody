@@ -6,7 +6,10 @@ import { loopSpanOf } from '../src/core/playback/timeline.ts'
 import { frac } from '../src/core/score/rational.ts'
 import { ALTO_SAX, PIANO, TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { buildTimeline } from '../src/core/playback/timeline.ts'
-import { n, scoreOf, tenorTimeline } from './playbackHelpers.ts'
+import { n, partsOf, scoreOf, tenorTimeline } from './playbackHelpers.ts'
+import { MELODY_PIANO_FIXTURE, firstLine, read } from './helpers.ts'
+import { parseMusicXml } from '../src/core/score/musicxml.ts'
+import type { Timeline } from '../src/core/playback/timeline.ts'
 
 class FakeClock {
   currentTime = 0
@@ -422,7 +425,7 @@ test('timeline swap: the notes to come use the new pitches at the times they alr
   r.scheduler.start()
   r.run(0.7) // C and D have started
   assert.equal(r.output.notes.length, 2)
-  assert.equal(r.scheduler.useTimeline(buildTimeline(score, PIANO)), true)
+  assert.equal(r.scheduler.useTimeline(buildTimeline(firstLine(score), PIANO)), true)
   assert.equal(r.output.notes.length, 2, 'no note started again')
   r.run(3)
   assert.equal(r.output.notes.length, 4)
@@ -435,8 +438,8 @@ test('timeline swap: the notes to come use the new pitches at the times they alr
   assert.equal(r.ended(), 1)
   // Another score is refused.
   const other = scoreOf([{ body: n({ step: 'C' }) }])
-  assert.equal(r.scheduler.useTimeline(buildTimeline(other, ALTO_SAX)), false)
-  assert.equal(r.scheduler.useTimeline(buildTimeline(scoreOf([{ body: n({ step: 'C', type: 'half' }) + n({}) + n({}) + n({}) }]), TENOR_SAX)), false)
+  assert.equal(r.scheduler.useTimeline(buildTimeline(firstLine(other), ALTO_SAX)), false)
+  assert.equal(r.scheduler.useTimeline(buildTimeline(firstLine(scoreOf([{ body: n({ step: 'C', type: 'half' }) + n({}) + n({}) + n({}) }])), TENOR_SAX)), false)
 })
 
 // --- more-marks group 3: events that carry their own sounds (design D3) ---
@@ -555,4 +558,139 @@ test('sounds: the accent of an event with sounds belongs to the sound on the bea
   const [grace, c] = r.output.notes
   assert.equal(grace!.spec.accent, undefined)
   assert.ok(c!.spec.accent && c!.spec.accent.gain > c!.spec.gain)
+})
+
+// ---------------------------------------------------------------------------------------------------
+// Parts and accompaniment (change parts-and-accompaniment, group 4)
+// ---------------------------------------------------------------------------------------------------
+
+function partsRig(timeline: Timeline, options: { bpm?: number; ownLine?: boolean } = {}) {
+  const clock = new FakeClock()
+  const timer = new FakeTimer()
+  const output = new FakeOutput(clock)
+  const scheduler = new Scheduler(timeline, { clock, output, timer, bpm: options.bpm ?? 120, ...(options.ownLine === undefined ? {} : { ownLine: options.ownLine }) })
+  const run = (seconds: number): void => {
+    for (let i = 0; i < Math.round(seconds / 0.025); i++) {
+      clock.currentTime = Math.round((clock.currentTime + 0.025) * 1e6) / 1e6
+      timer.fn?.()
+    }
+  }
+  return { clock, output, scheduler, run }
+}
+
+const melodyPianoTimeline = (silent: string[] = []): Timeline => buildTimeline(parseMusicXml(read(MELODY_PIANO_FIXTURE)), TENOR_SAX, { silent })
+
+test('scheduler (parts): each note is played with its own instrument, and the two parts sound together', () => {
+  const r = partsRig(melodyPianoTimeline())
+  r.scheduler.start()
+  r.run(30)
+  const notes = r.output.notes.map((x) => x.spec)
+  assert.deepEqual([...new Set(notes.map((s) => s.sound))].sort(), ['piano', 'tenor-sax'])
+  const first = notes.filter((s) => close0(s.when, PLAYBACK_TUNING.startDelay))
+  assert.deepEqual(first.map((s) => [s.sound, s.midi]), [['tenor-sax', [53]], ['piano', [60, 64, 67]], ['piano', [48]]], 'at the first beat: the melody (a ninth below), the chord and the bass')
+  const written = (sound: string) => melodyPianoTimeline().events.filter((e) => e.sound === sound && !e.rest).length
+  assert.equal(notes.filter((s) => s.sound === 'tenor-sax').length, written('tenor-sax'), 'every melody note, bars 1-4 twice')
+  assert.equal(notes.filter((s) => s.sound === 'piano').length, written('piano'))
+})
+const close0 = (a: number, b: number): boolean => Math.abs(a - b) < 1e-9
+
+test('scheduler (parts): a silent part is not scheduled at all', () => {
+  const r = partsRig(melodyPianoTimeline(['P2']))
+  r.scheduler.start()
+  r.run(30)
+  assert.deepEqual([...new Set(r.output.notes.map((x) => x.spec.sound))], ['tenor-sax'])
+})
+
+test('scheduler (parts): turning your line off stops its notes from the next event and leaves the rest; on again, from the next event', () => {
+  const r = partsRig(melodyPianoTimeline())
+  r.scheduler.start()
+  r.run(1.2) // beat 2.3 of bar 1
+  r.scheduler.setOwnLine(false)
+  const off = r.clock.currentTime
+  r.run(2) // up to beat 6.3, bar 2
+  r.scheduler.setOwnLine(true)
+  const on = r.clock.currentTime
+  r.run(2)
+  const at = (sound: string) => r.output.notes.filter((x) => x.spec.sound === sound).map((x) => x.spec.when)
+  const melody = at('tenor-sax')
+  const heardWhileOff = melody.filter((w) => w > off + PLAYBACK_TUNING.lookahead + 1e-9 && w < on)
+  assert.deepEqual(heardWhileOff, [], 'no melody note starts while the line is off (but what was already handed out within the window)')
+  assert.ok(melody.some((w) => w <= off + PLAYBACK_TUNING.lookahead + 1e-9 && w >= PLAYBACK_TUNING.startDelay), 'the notes before it was turned off were heard')
+  assert.ok(melody.some((w) => w >= on - 1e-9), 'and it is heard again after')
+  assert.ok(melody.every((w) => w >= on - 1e-9 || w <= off + PLAYBACK_TUNING.lookahead + 1e-9))
+  const piano = at('piano')
+  assert.ok(piano.filter((w) => w > off && w < on).length >= 3, 'the piano plays on through it')
+  // The cursor still follows your line, sound or not.
+  assert.equal(r.scheduler.positionAt(off + 0.6).events.every((e) => e.own), true)
+  assert.equal(r.scheduler.positionAt(off + 0.6).events[0]!.voice.part, 'P1')
+})
+
+test('scheduler (parts): a slur that your line being off cuts short still ends: the note before it is released', () => {
+  const r = rig(n({ slur: 'start' }) + n({}) + n({ slur: 'stop' }) + n({}))
+  r.scheduler.start()
+  r.run(0.3) // the first note is sounding
+  r.scheduler.setOwnLine(false)
+  r.run(3)
+  assert.equal(r.output.notes.length, 1, 'only the first note was played')
+  assert.equal(r.output.notes[0]!.handle.releases.length, 1, 'the first note ends where the next one would have taken it over')
+})
+
+test('scheduler (parts): a scheduler made with your line off plays only the others; start from a note plays every part from its time', () => {
+  const t = melodyPianoTimeline()
+  const silentOwn = partsRig(t, { ownLine: false })
+  silentOwn.scheduler.start()
+  silentOwn.run(30)
+  assert.deepEqual([...new Set(silentOwn.output.notes.map((x) => x.spec.sound))], ['piano'])
+
+  // A tap on the melody's note on bar 2 beat 3 (written beat 6): the piano's chord at that time plays with it.
+  const note = t.events.find((e) => e.voice.part === 'P1' && e.barIndex === 1 && e.start.n === 6)!
+  const r = partsRig(t)
+  r.scheduler.start(note.index)
+  r.run(0.2)
+  const first = r.output.notes.filter((x) => close0(x.spec.when, PLAYBACK_TUNING.startDelay)).map((x) => [x.spec.sound, x.spec.midi])
+  assert.deepEqual(first, [['piano', [43]], ['tenor-sax', [57]], ['piano', [59, 62, 67]]], 'the bass still held from bar 2 beat 1 is struck again, with the note and the chord')
+})
+
+test('scheduler (parts): a slur joins the notes of its own voice, with the other parts between them', () => {
+  const r = partsRig(melodyPianoTimeline())
+  r.scheduler.start()
+  r.run(30)
+  const slurred = r.output.notes.filter((x) => x.spec.sound === 'tenor-sax' && !x.spec.attack)
+  assert.equal(slurred.length, 2, 'D5 and C5 of the slur in bar 6')
+  for (const x of slurred) {
+    const before = r.output.notes.filter((y) => y.spec.sound === 'tenor-sax' && y.spec.when < x.spec.when).at(-1)!
+    assert.equal(x.spec.join, before.handle, 'crossfades from the melody note before it')
+  }
+})
+
+test('scheduler (parts): a loop plays every part again, with the same timing', () => {
+  const t = melodyPianoTimeline()
+  const r = partsRig(t)
+  const loop = loopSpanOf(t, { start: 1, end: 1 })!
+  r.scheduler.start(t.bars[1]!.firstEvent, { loop })
+  r.run(9) // bar 2 is 8 s... 4 beats at 0.5 s: 2 s a pass
+  const sounds = (sound: string) => r.output.notes.filter((x) => x.spec.sound === sound).length
+  // Per pass: 3 melody notes and 3 piano events of bar 2 (two chords and a bass note held for two beats... counted from the timeline).
+  const perPass = (sound: string) => t.events.filter((e) => e.barIndex === 1 && e.pass === 1 && e.sound === sound && !e.rest).length
+  assert.ok(sounds('tenor-sax') >= perPass('tenor-sax') * 4)
+  assert.ok(sounds('piano') >= perPass('piano') * 4)
+  const chord = r.output.notes.filter((x) => x.spec.sound === 'piano' && x.spec.midi.length === 3 && x.spec.midi[0] === 62).map((x) => x.spec.when)
+  assert.ok(chord.length >= 4)
+  close(chord[1]! - chord[0]!, 2, 'a pass of 4 beats at 120 bpm: the chord comes again exactly 2 s later')
+})
+
+test('scheduler (parts): a restart in mid-bar strikes a held note of another voice again for what is left of it', () => {
+  const score = partsOf([
+    { id: 'P1', bars: [n({ step: 'C', octave: 5 }) + n({ step: 'D', octave: 5 }) + n({ step: 'E', octave: 5 }) + n({ step: 'F', octave: 5 })] },
+    { id: 'P2', bars: [n({ step: 'C', octave: 3, type: 'whole' })] },
+  ])
+  const r = partsRig(buildTimeline(score, TENOR_SAX), { bpm: 60 })
+  r.scheduler.start(0, { delay: 0 })
+  r.run(2.6)
+  r.scheduler.setBpm(80)
+  r.run(4)
+  const bass = r.output.notes.filter((x) => x.spec.midi[0] === 34)
+  assert.equal(bass.length, 2, 'the bass is struck again where the restart is (the third quarter), and not once more')
+  assert.ok(bass[1]!.spec.when > 2 && bass[1]!.spec.when < 3, 'at the start of the quarter that was sounding')
+  assert.equal(bass[1]!.handle.releases.length, 1, 'and it ends with the bar')
 })

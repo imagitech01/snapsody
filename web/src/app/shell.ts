@@ -47,7 +47,7 @@ import type { Settings } from './settings.ts'
  */
 
 /** The texts the notice can be: keys of the catalogue, so the notice is written in the catalogue's words. */
-export type NoticeKey = 'settings.saveFailed' | 'error.generic'
+export type NoticeKey = 'settings.saveFailed' | 'error.generic' | 'add.partDropped'
 
 export interface Shell {
   /** The phone, as the port gives it: a screen that needs the scanner or the reader takes them from here. */
@@ -69,6 +69,8 @@ export interface Shell {
    * notice is the one this kind of action raises.
    */
   run(action: () => Promise<unknown>, failure?: NoticeKey): Promise<boolean>
+  /** Shows [key] as the notice (something to tell, not a failure: a part left out of added pages). It ends when the user leaves the screen it was shown on. */
+  notify(key: NoticeKey): void
   /** Clears the notice. */
   dismissNotice(): void
   /** Stops listening to the router, the back button and the device. Tests call it; the app lives as long as the page. */
@@ -152,6 +154,9 @@ export async function startShell(platform: Platform): Promise<Shell> {
     foreground,
     notice,
     run,
+    notify: (key) => {
+      notice.value = key
+    },
     dismissNotice: () => {
       notice.value = null
     },

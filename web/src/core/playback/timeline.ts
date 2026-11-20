@@ -1,6 +1,7 @@
-import type { Instrument } from '../instruments/instruments.ts'
-import type { Barline, Measure, Note, Pitch, Score, TimeSignature, WedgeItem } from '../score/model.ts'
-import { isNote, isWedge } from '../score/model.ts'
+import { instrumentOfPart } from '../instruments/instruments.ts'
+import type { Instrument, InstrumentId } from '../instruments/instruments.ts'
+import type { Barline, Measure, Note, Pitch, Score, TimeSignature, VoiceRef, VoiceScore, WedgeItem } from '../score/model.ts'
+import { isNote, isWedge, voiceView, voices } from '../score/model.ts'
 import type { Frac } from '../score/rational.ts'
 import { ZERO, add, cmp, div, frac, mul, sub } from '../score/rational.ts'
 import { barQuarters, meterBeatUnit } from './tempo.ts'
@@ -12,6 +13,11 @@ import { barQuarters, meterBeatUnit } from './tempo.ts'
  * produce: repeats and first/second endings unrolled, ties merged, articulation
  * and dynamics applied, written pitch turned into the instrument's sounding pitch.
  * Only the sound is transposed (by the instrument in use); the score's written notes never are.
+ *
+ * Parts (change parts-and-accompaniment, design D6): every voice of every part is built on its own and the events are
+ * merged in time order, each with its voice, its sound (the instrument that plays it), whether it is part of your line
+ * (`own`) and the next event of its voice. The bars are shared, and so is the fermata map: a fermata stretches the note
+ * to twice its value for all parts at once.
  *
  * Expression (practice-app design D10): a fermata stretches its note to twice its value (so the
  * bar, the cursor and everything after it move with it), tenuto takes away the staccato shortening,
@@ -143,6 +149,14 @@ export interface PlaybackEvent {
    * `start` and sound for `sounding`. `start`, `length`, `noteIds` and `index` are those of the written note(s) either way.
    */
   sounds?: Sound[]
+  /** The voice (part, staff, voice) this event is of. */
+  voice: VoiceRef
+  /** The instrument that plays it: its id, which is also its sample folder (`Instrument.sound`). */
+  sound: InstrumentId
+  /** Part of your line: the cursor follows it, and it sounds only while your line is on. */
+  own: boolean
+  /** Index (in `Timeline.events`) of the next event of the same voice; absent for the last. Legato and ties never look at `index + 1`. */
+  nextInVoice?: number
 }
 
 /** One bar as played; a repeated bar appears once per pass. */
@@ -152,7 +166,7 @@ export interface BarSpan {
   pass: number
   start: Frac
   end: Frac
-  /** Index of the first event that starts in this bar (or events.length when none). */
+  /** Index of the first event that starts in this bar, any part (or events.length when none). */
   firstEvent: number
   /** The beat grid of the time signature in force: the metronome's beat and the nominal length of a bar, in beats. */
   meter: Meter
@@ -197,8 +211,15 @@ export interface Timeline {
   clicks: BeatClick[]
   /** The first event of a model note (the head of a tie group), for tap-to-seek. */
   eventOfNote(noteId: string): PlaybackEvent | undefined
-  /** The event sounding at `beat` (or the next one that starts after it); undefined past the end. */
+  /**
+   * The event sounding at `beat` (or the next one that starts after it); undefined past the end. Of several sounding
+   * ones, a line of yours comes first, and of those the one that began last.
+   */
   eventAtBeat(beat: Frac | number): PlaybackEvent | undefined
+  /** Every `own` event sounding at `beat` (its whole `length`, rests too), the one that began last first; empty when none. */
+  ownAt(beat: Frac | number): PlaybackEvent[]
+  /** The bar being played at `beat`: the last one that has started. */
+  barAt(beat: Frac | number): BarSpan | undefined
 }
 
 // --- pitch ---
@@ -430,39 +451,6 @@ interface EventMarks {
   pairSplit?: number
 }
 
-/** Where a note of a bar began, in the bar's own (written) time and on the timeline. */
-interface Segment {
-  written: Frac
-  at: Frac
-  /** The note is held under a fermata. */
-  held: boolean
-}
-
-/**
- * The metronome clicks of one played bar. They lie on the written beats of the bar and are carried
- * onto the timeline with the notes, so a fermata does not throw them off: the clicks inside a held
- * note stop, and the beat after it comes with the next note. A first bar shorter than a full bar is
- * a pickup: its beats are counted back from its end, so beat 1 falls on the bar line that follows.
- */
-function barClicks(span: BarSpan, written: Frac, segments: Segment[], out: BeatClick[]): void {
-  const { beatUnit, barLength } = span.meter
-  const pickup = span.barIndex === 0 && cmp(written, ZERO) > 0 && cmp(written, barLength) < 0
-  const origin = pickup ? sub(written, barLength) : ZERO
-  for (let j = 0; j < 1000; j++) {
-    const m = add(origin, mul(beatUnit, frac(j)))
-    if (cmp(m, written) >= 0) break
-    if (cmp(m, ZERO) < 0) continue
-    let seg: Segment | undefined
-    for (const s of segments) {
-      if (cmp(s.written, m) > 0) break
-      seg = s
-    }
-    if (seg?.held && cmp(m, seg.written) > 0) continue
-    const start = seg ? add(seg.at, sub(m, seg.written)) : add(span.start, m)
-    out.push({ start, accent: j === 0, barIndex: span.barIndex })
-  }
-}
-
 // --- dynamics and hairpins ---
 
 interface DynamicChange {
@@ -627,84 +615,135 @@ function soundsOf(ev: PlaybackEvent, info: EventMarks | undefined, graceEach: Fr
   return out.length > 0 ? out : undefined
 }
 
+// --- the fermata map ---
+
+/** A stretch of written time (in beats of the played order, repeats unrolled) under a fermata. */
+interface Interval {
+  from: Frac
+  to: Frac
+}
+
 /**
- * Expands the score into playback events. `instrument` decides the sounding pitch of every note
- * (`pitches`); `written` keeps the printed pitch, and the score itself is left as it is.
+ * The map from written to played time (design D6.2). Every fermata of every voice is an interval of written
+ * time; the intervals are joined where they touch or overlap (a fermata in two parts at once is one hold, not
+ * two) and each joined interval is stretched by `FERMATA_STRETCH`. The map is piecewise linear and is the
+ * identity when there is no fermata.
  */
-export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transpose'>): Timeline {
-  const { joins, successor } = slurJoins(score.measures)
-  const meters = meterTable(score.measures)
-  const keys = keyTable(score.measures)
-  const events: PlaybackEvent[] = []
-  const bars: BarSpan[] = []
-  const clicks: BeatClick[] = []
-  const changes: DynamicChange[] = []
-  const hairpins: Hairpin[] = []
-  /** Hairpins whose first note is still to come, and those that have begun and wait for their last note. */
-  let pending: WedgeItem[] = []
-  let open: { wedge: WedgeItem; first: number }[] = []
+function fermataMap(intervals: Interval[]): (written: Frac) => Frac {
+  const sorted = intervals.filter((i) => cmp(i.to, i.from) > 0).sort((a, b) => cmp(a.from, b.from))
+  const joined: Interval[] = []
+  for (const iv of sorted) {
+    const last = joined[joined.length - 1]
+    if (last && cmp(iv.from, last.to) <= 0) {
+      if (cmp(iv.to, last.to) > 0) last.to = iv.to
+    } else joined.push({ ...iv })
+  }
+  if (joined.length === 0) return (w) => w
+  const extra = sub(FERMATA_STRETCH, frac(1))
+  return (w) => {
+    let covered = ZERO
+    for (const iv of joined) {
+      if (cmp(w, iv.from) <= 0) break
+      covered = add(covered, sub(cmp(w, iv.to) < 0 ? w : iv.to, iv.from))
+    }
+    return add(w, mul(extra, covered))
+  }
+}
+
+// --- what the builder needs of one voice ---
+
+/** The instrument of a timeline: what its notes are transposed by, and (when known) which sound plays them. */
+export type TimelineInstrument = Pick<Instrument, 'transpose'> & { readonly id?: InstrumentId }
+
+/** What a timeline is built for (design D5, D6): your part and hand, and what is switched off under "Plays along". */
+export interface TimelineOptions {
+  /** Your line: a part, and for a two-staff part possibly one hand (right is its first staff, left its second). Absent: the first part, both hands. */
+  part?: { id: string; hand?: 'right' | 'left' }
+  /** Parts and hands that do not sound: 'P1', 'P2:left', 'P2:right' ... Your own line is never left out by this. */
+  silent?: readonly string[]
+}
+
+/** A note as it was placed in a voice, for the hairpins (which are tied to notes by id). */
+interface Placement {
+  id: string
+  /** The note's own written position. */
+  pos: Frac
+  event: PlaybackEvent
+}
+
+/** One voice on its way to events. */
+interface VoiceRun {
+  ref: VoiceRef
+  partIndex: number
+  view: VoiceScore
+  instrument: TimelineInstrument
+  sound: InstrumentId
+  own: boolean
+  silent: boolean
+  events: PlaybackEvent[]
+  /** The written position of each dynamic mark and hairpin start of the voice, and of every note placed. */
+  dynamics: { at: Frac; mark: string }[]
+  wedges: { item: WedgeItem; at: Frac }[]
+  placed: Placement[]
+  /** Plays one bar of the voice; returns how far into the bar its notes came (written beats). */
+  playBar(played: PlayedBar, barStart: Frac): Frac
+  /** The next event of the same voice, by event. */
+  next: Map<PlaybackEvent, PlaybackEvent>
+  flags: Map<PlaybackEvent, EventFlags>
+  marks: Map<PlaybackEvent, EventMarks>
+  lastId: Map<PlaybackEvent, string>
+  joins: Set<string>
+  successor: Map<string, string>
+}
+
+interface EventFlags {
+  staccato: boolean
+  staccatissimo: boolean
+  tenuto: boolean
+  breath: boolean
+  caesura: boolean
+}
+
+/**
+ * Starts one voice: everything about it that lasts from bar to bar (a tie, grace notes waiting for their note), and
+ * `playBar`, which places the notes of one played bar. Times are WRITTEN beats here (a fermata does not count);
+ * `buildTimeline` puts them through the fermata map when every voice is placed.
+ */
+function startVoice(run: VoiceRun, keys: number[], fermatas: Interval[]): void {
+  const { instrument } = run
+  const { events, flags, marks, lastId } = run
   /** The event a following tied note of the same pitch would extend. */
   let tieOpen: { event: PlaybackEvent; pitch: Pitch } | undefined
-  /** Model id of the last note of each event, for slur adjacency. */
-  const lastIdOf = new Map<PlaybackEvent, string>()
-  let cursor: Frac = ZERO
-  /** Tenuto/breath/staccato flags per event, applied once its final length is known. */
-  const flags = new Map<PlaybackEvent, { staccato: boolean; staccatissimo: boolean; tenuto: boolean; breath: boolean; caesura: boolean }>()
-  /** What each event needs to sound its ornament, tremolo, arpeggio and grace notes. */
-  const marks = new Map<PlaybackEvent, EventMarks>()
   /** Grace notes met, waiting for the note they belong to. */
   let pendingGraces: number[][] = []
 
-  /** A note has been placed in an event: it may start or end a hairpin. */
-  const noteIn = (id: string, event: PlaybackEvent): void => {
-    for (const w of pending.filter((x) => x.start === id)) {
-      pending = pending.filter((x) => x !== w)
-      open = open.filter((o) => o.wedge !== w)
-      open.push({ wedge: w, first: event.index })
-    }
-    for (const o of open.filter((x) => x.wedge.stop === id)) {
-      open = open.filter((x) => x !== o)
-      hairpins.push({ type: o.wedge.type, first: o.first, last: event.index })
-    }
-  }
-
-  for (const played of expandMeasureOrder(score.measures)) {
-    const m = score.measures[played.barIndex]!
-    const span: BarSpan = {
-      barIndex: played.barIndex,
-      bar: m.number,
-      pass: played.pass,
-      start: cursor,
-      end: cursor,
-      firstEvent: events.length,
-      meter: meters[played.barIndex]!,
-    }
-    const segments: Segment[] = []
+  run.playBar = (played, barStart) => {
+    const m = run.view.measures[played.barIndex]!
     /** The alteration of each step and octave as last written in this bar. */
     const barAlters = new Map<string, number>()
     /** The event of a two-note tremolo's first note, waiting for the second. */
     let tremoloOpen: PlaybackEvent | undefined
-    /** How far into the bar the written notes have come (a fermata does not count). */
+    /** How far into the bar the written notes have come. */
     let inBar: Frac = ZERO
-    /** Moves on by a note of written length `len`; a held note takes twice as long. Returns the time it took. */
+    /** Where the note being placed begins (a chord member shares the place of the first note). */
+    let noteAt: Frac = barStart
+    /** Moves on by a note of written length `len`; a note under a fermata is an interval of the shared map. */
     const advance = (len: Frac, held: boolean): Frac => {
-      segments.push({ written: inBar, at: cursor, held })
+      if (held) fermatas.push({ from: add(barStart, inBar), to: add(add(barStart, inBar), len) })
       inBar = add(inBar, len)
-      const took = held ? mul(len, FERMATA_STRETCH) : len
-      cursor = add(cursor, took)
-      return took
+      return len
+    }
+    const placedIn = (id: string, event: PlaybackEvent): void => {
+      run.placed.push({ id, pos: noteAt, event })
     }
 
     for (const [at, item] of m.items.entries()) {
       if (item.kind === 'dynamic') {
-        if (dynamicGain(item.mark) !== undefined) changes.push({ index: events.length, mark: item.mark })
+        if (dynamicGain(item.mark) !== undefined) run.dynamics.push({ at: add(barStart, inBar), mark: item.mark })
         continue
       }
       if (isWedge(item)) {
-        // The same hairpin met again on a repeat starts afresh.
-        pending = pending.filter((x) => x !== item)
-        open = open.filter((o) => o.wedge !== item)
-        pending.push(item)
+        run.wedges.push({ item, at: add(barStart, inBar) })
         continue
       }
       if (isNote(item) && item.grace) {
@@ -727,6 +766,7 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
           if (!isNote(next) || next.grace || !next.chord) break
           if (next.fermata) fermata = true
         }
+        noteAt = add(barStart, inBar)
       }
 
       if (item.chord && events.length > 0 && item.pitch) {
@@ -742,7 +782,7 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
           info.barAlters = new Map(barAlters)
         }
         barAlters.set(`${item.pitch.step}${item.pitch.octave}`, Math.round(item.pitch.alter ?? 0))
-        noteIn(item.id, last)
+        placedIn(item.id, last)
         continue
       }
 
@@ -759,9 +799,9 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
         f.tenuto ||= !!item.tenuto
         f.breath = !!item.breath
         f.caesura = !!item.caesura
-        lastIdOf.set(ev, item.id)
+        lastId.set(ev, item.id)
         tieOpen = item.tieStart ? { event: ev, pitch: item.pitch! } : undefined
-        noteIn(item.id, ev)
+        placedIn(item.id, ev)
         continue
       }
 
@@ -782,15 +822,15 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
         f.tenuto ||= !!item.tenuto
         f.breath = !!item.breath
         f.caesura = !!item.caesura
-        lastIdOf.set(ev, item.id)
+        lastId.set(ev, item.id)
         tieOpen = item.tieStart ? { event: ev, pitch: item.pitch! } : undefined
         barAlters.set(`${item.pitch!.step}${item.pitch!.octave}`, Math.round(item.pitch!.alter ?? 0))
-        noteIn(item.id, ev)
+        placedIn(item.id, ev)
         continue
       }
 
       const writtenMidi = pitched ? midiOf(item.pitch!) : undefined
-      const start = cursor
+      const start = add(barStart, inBar)
       const ev: PlaybackEvent = {
         index: events.length,
         start,
@@ -811,9 +851,12 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
         attackGain: DYNAMIC_GAIN[DEFAULT_DYNAMIC]!,
         attack: true,
         legatoNext: false,
+        voice: run.ref,
+        sound: run.sound,
+        own: run.own,
       }
       flags.set(ev, { staccato: !!item.staccato, staccatissimo: !!item.staccatissimo, tenuto: !!item.tenuto, breath: !!item.breath, caesura: !!item.caesura })
-      lastIdOf.set(ev, item.id)
+      lastId.set(ev, item.id)
       events.push(ev)
       if (pitched) {
         marks.set(ev, {
@@ -828,13 +871,262 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
       }
       pendingGraces = []
       tieOpen = pitched && item.tieStart ? { event: ev, pitch: item.pitch! } : undefined
-      noteIn(item.id, ev)
+      placedIn(item.id, ev)
     }
-    span.end = cursor
-    bars.push(span)
-    barClicks(span, inBar, segments, clicks)
+    return inBar
+  }
+}
+
+/**
+ * The hairpins of a staff as events of each of its voices (design D6.3). A hairpin is tied to notes by id, and its
+ * start and stop notes may lie in different voices of the staff; it runs in time from the event of its start note
+ * to the event of its stop note, and covers the events of every voice of the staff that start within that time.
+ * Written times are compared, so this is done before the events are placed on the played axis.
+ */
+function staffMarks(runs: VoiceRun[]): { changes: DynamicChange[]; hairpins: Hairpin[] }[] {
+  const spans: { type: WedgeItem['type']; from: Frac; to: Frac }[] = []
+  for (const run of runs) {
+    for (const { item, at } of run.wedges) {
+      const start = run.placed.find((p) => p.id === item.start && cmp(p.pos, at) >= 0)
+      if (!start) continue
+      let stop: PlaybackEvent | undefined
+      for (const other of runs) {
+        const p = other.placed.find((q) => q.id === item.stop && cmp(q.pos, start.pos) >= 0)
+        if (p && (!stop || cmp(p.event.start, stop.start) < 0)) stop = p.event
+      }
+      if (stop) spans.push({ type: item.type, from: start.event.start, to: stop.start })
+    }
+  }
+  const dynamics = runs.flatMap((r) => r.dynamics).sort((a, b) => cmp(a.at, b.at))
+  return runs.map((run) => {
+    const evs = run.events
+    const changes: DynamicChange[] = dynamics.map((d) => {
+      const at = evs.findIndex((e) => cmp(e.start, d.at) >= 0)
+      return { index: at < 0 ? evs.length : at, mark: d.mark }
+    })
+    const hairpins: Hairpin[] = []
+    for (const s of spans) {
+      const first = evs.findIndex((e) => cmp(e.start, s.from) >= 0)
+      let last = -1
+      for (let k = evs.length - 1; k >= 0; k--) {
+        if (cmp(evs[k]!.start, s.to) <= 0) {
+          last = k
+          break
+        }
+      }
+      if (first >= 0 && last >= first) hairpins.push({ type: s.type, first, last })
+    }
+    return { changes, hairpins }
+  })
+}
+
+/**
+ * Expands the score into playback events (design D6). Each voice is built by the one-line builder, the bars
+ * (repeats and endings) are worked out once, a fermata anywhere holds every voice, and the events of all the
+ * voices are merged in time order.
+ *
+ * `input` is a whole score, or one voice view (one line, which is your line). `instrument` is the piece's
+ * instrument: every part but a two-staff (piano) part sounds as it, and decides the sounding pitch (`pitches`);
+ * `written` keeps the printed pitch, and the score itself is left as it is. `options` says which line is yours
+ * (`own`) and which parts do not sound; absent, the first part with both hands is yours and all else sounds.
+ */
+export function buildTimeline(input: Score | VoiceScore, instrument: TimelineInstrument, options: TimelineOptions = {}): Timeline {
+  const runs: VoiceRun[] = []
+  const makeRun = (view: VoiceScore, ref: VoiceRef, partIndex: number, voiceInstrument: TimelineInstrument, own: boolean, silent: boolean): void => {
+    const { joins, successor } = slurJoins(view.measures)
+    runs.push({
+      ref,
+      partIndex,
+      view,
+      instrument: voiceInstrument,
+      sound: voiceInstrument.id ?? 'tenor-sax',
+      own,
+      silent,
+      events: [],
+      dynamics: [],
+      wedges: [],
+      placed: [],
+      playBar: () => ZERO,
+      next: new Map(),
+      flags: new Map(),
+      marks: new Map(),
+      lastId: new Map(),
+      joins,
+      successor,
+    })
+  }
+  if ('bars' in input) {
+    const score = input
+    const yours = options.part?.id ?? score.parts[0]?.id
+    const silent = options.silent ?? []
+    score.parts.forEach((part, pi) => {
+      for (const ref of voices(score).filter((r) => r.part === part.id)) {
+        const own = part.id === yours && (part.staves < 2 || options.part?.hand === undefined || ref.staff === (options.part.hand === 'right' ? 0 : 1))
+        const hand = ref.staff === 0 ? 'right' : 'left'
+        const off = !own && (silent.includes(part.id) || silent.includes(`${part.id}:${hand}`))
+        makeRun(voiceView(score, ref), ref, pi, instrumentOfPart(part, instrument), own, off)
+      }
+    })
+  } else {
+    makeRun(input, input.of?.ref ?? { part: 'P1', staff: 0, voice: 0 }, 0, instrument, true, false)
+  }
+  const base = runs[0]!.view.measures
+  const meters = meterTable(base)
+  const keyTables = new Map<number, number[]>()
+  const fermatas: Interval[] = []
+  for (const run of runs) {
+    let keys = keyTables.get(run.partIndex)
+    if (!keys) keyTables.set(run.partIndex, (keys = keyTable(run.view.measures)))
+    startVoice(run, keys, fermatas)
   }
 
+  // First pass, in written time: every bar once per time it is played, every voice from the bar's start.
+  const playedBars: { played: PlayedBar; start: Frac; length: Frac }[] = []
+  let written: Frac = ZERO
+  for (const played of expandMeasureOrder(base)) {
+    let length = ZERO
+    for (const run of runs) {
+      const took = run.playBar(played, written)
+      if (cmp(took, length) > 0) length = took
+    }
+    playedBars.push({ played, start: written, length })
+    written = add(written, length)
+  }
+
+  // The hairpins and dynamics of each staff, as indices of each voice's events (still in written time).
+  const staves = new Map<string, VoiceRun[]>()
+  for (const run of runs) {
+    const key = `${run.partIndex}/${run.ref.staff}`
+    staves.set(key, [...(staves.get(key) ?? []), run])
+  }
+  const marksOf = new Map<VoiceRun, { changes: DynamicChange[]; hairpins: Hairpin[] }>()
+  for (const group of staves.values()) staffMarks(group).forEach((m, k) => marksOf.set(group[k]!, m))
+
+  // One map from written to played time for every voice.
+  const played = fermataMap(fermatas)
+  for (const run of runs) {
+    for (const ev of run.events) {
+      const from = ev.start
+      const to = add(from, ev.length)
+      ev.start = played(from)
+      ev.length = sub(played(to), ev.start)
+    }
+  }
+
+  const bars: BarSpan[] = []
+  const clicks: BeatClick[] = []
+  for (const bar of playedBars) {
+    const span: BarSpan = {
+      barIndex: bar.played.barIndex,
+      bar: base[bar.played.barIndex]!.number,
+      pass: bar.played.pass,
+      start: played(bar.start),
+      end: played(add(bar.start, bar.length)),
+      firstEvent: 0,
+      meter: meters[bar.played.barIndex]!,
+    }
+    bars.push(span)
+    barClicks(span, bar.start, bar.length, played, fermatas, clicks)
+  }
+
+  // Each voice on its own: dynamics, articulation, grace notes, ornaments and slurs.
+  for (const run of runs) {
+    const { changes, hairpins } = marksOf.get(run)!
+    finishVoice(run, changes, hairpins)
+  }
+
+  const merged = runs
+    .filter((r) => !r.silent)
+    .flatMap((r) => r.events.map((ev, k) => ({ ev, k, run: r })))
+    .sort((a, b) => cmp(a.ev.start, b.ev.start) || a.run.partIndex - b.run.partIndex || a.run.ref.staff - b.run.ref.staff || a.run.ref.voice - b.run.ref.voice || a.k - b.k)
+  const events = merged.map((m) => m.ev)
+  events.forEach((ev, i) => {
+    ev.index = i
+  })
+  for (const run of runs) {
+    for (const [ev, after] of run.next) if (!run.silent) ev.nextInVoice = after.index
+  }
+  // The first event of each bar: the first that starts in it, or events.length when none does.
+  let at = 0
+  for (const span of bars) {
+    while (at < events.length && cmp(events[at]!.start, span.start) < 0) at++
+    span.firstEvent = at
+  }
+
+  const byNote = new Map<string, PlaybackEvent>()
+  for (const ev of events) for (const id of ev.noteIds) if (!byNote.has(id)) byNote.set(id, ev)
+
+  // What sounds at a time. Events overlap (a held note in one voice under moving notes in another), so a search
+  // by start finds the last event that began and then looks back for the ones still going.
+  const starts = events.map((e) => num(e.start))
+  const ends = events.map((e) => num(e.start) + num(e.length))
+  const reach: number[] = []
+  ends.forEach((e, i) => reach.push(Math.max(e, reach[i - 1] ?? Number.NEGATIVE_INFINITY)))
+  const lastStarted = (t: number): number => {
+    let lo = 0
+    let hi = events.length - 1
+    let last = -1
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      if (starts[mid]! <= t) {
+        last = mid
+        lo = mid + 1
+      } else hi = mid - 1
+    }
+    return last
+  }
+  /** The events sounding at a time, the one that began last first (the first of the merged order among those beginning together). */
+  const soundingAt = (beat: Frac | number): PlaybackEvent[] => {
+    const t = typeof beat === 'number' ? beat : beat.n / beat.d
+    const out: PlaybackEvent[] = []
+    for (let j = lastStarted(t); j >= 0 && reach[j]! > t; j--) if (ends[j]! > t) out.push(events[j]!)
+    return out.sort((a, b) => cmp(b.start, a.start) || a.index - b.index)
+  }
+  const eventAtBeat = (beat: Frac | number): PlaybackEvent | undefined => {
+    const sounding = soundingAt(beat)
+    const found = sounding.find((e) => e.own) ?? sounding[0]
+    if (found) return found
+    return events[lastStarted(typeof beat === 'number' ? beat : beat.n / beat.d) + 1]
+  }
+  const ownAt = (beat: Frac | number): PlaybackEvent[] => soundingAt(beat).filter((e) => e.own)
+  const barAt = (beat: Frac | number): BarSpan | undefined => {
+    const t = typeof beat === 'number' ? beat : beat.n / beat.d
+    let found: BarSpan | undefined
+    for (const b of bars) {
+      if (num(b.start) <= t) found = b
+      else break
+    }
+    return found
+  }
+
+  const end = bars.length > 0 ? bars[bars.length - 1]!.end : ZERO
+  return { events, bars, end, clicks, eventOfNote: (id) => byNote.get(id), eventAtBeat, ownAt, barAt }
+}
+
+/**
+ * The metronome clicks of one played bar. They lie on the written beats of the bar and are carried onto the
+ * timeline through the fermata map, so a fermata does not throw them off: the clicks inside a held note stop (a
+ * beat strictly inside a fermata of any voice), and the beat after it comes with the next note. A first bar
+ * shorter than a full bar is a pickup: its beats are counted back from its end, so beat 1 falls on the bar line
+ * that follows.
+ */
+function barClicks(span: BarSpan, barStart: Frac, length: Frac, played: (w: Frac) => Frac, fermatas: Interval[], out: BeatClick[]): void {
+  const { beatUnit, barLength } = span.meter
+  const pickup = span.barIndex === 0 && cmp(length, ZERO) > 0 && cmp(length, barLength) < 0
+  const origin = pickup ? sub(length, barLength) : ZERO
+  for (let j = 0; j < 1000; j++) {
+    const m = add(origin, mul(beatUnit, frac(j)))
+    if (cmp(m, length) >= 0) break
+    if (cmp(m, ZERO) < 0) continue
+    const at = add(barStart, m)
+    if (fermatas.some((f) => cmp(f.from, at) < 0 && cmp(at, f.to) < 0)) continue
+    out.push({ start: played(at), accent: j === 0, barIndex: span.barIndex })
+  }
+}
+
+/** What follows once the voice's events are placed in played time: the rest of what the one-line builder did. */
+function finishVoice(run: VoiceRun, changes: DynamicChange[], hairpins: Hairpin[]): void {
+  const { events, flags, marks, lastId, instrument } = run
   applyDynamics(events, changes, hairpins)
 
   // Final lengths are known: articulation timing and slur connections.
@@ -845,7 +1137,7 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
     ev.sounding = ev.rest ? ZERO : soundingLength(ev.length, staccato, f.staccatissimo, gap)
     ev.staccato = staccato || f.staccatissimo
   }
-  // Grace notes take their time from the sound of the event before them, which stays on the beat grid.
+  // Grace notes take their time from the sound of the event before them in the voice, which stays on the beat grid.
   const graceLength = new Map<PlaybackEvent, Frac>()
   for (const ev of events) {
     const graces = marks.get(ev)?.graces ?? []
@@ -867,39 +1159,15 @@ export function buildTimeline(score: Score, instrument: Pick<Instrument, 'transp
   for (let k = 0; k + 1 < events.length; k++) {
     const a = events[k]!
     const b = events[k + 1]!
-    const lastId = lastIdOf.get(a)!
-    if (a.rest || b.rest || !joins.has(lastId) || successor.get(lastId) !== b.noteIds[0]) continue
+    run.next.set(a, b)
+    const lastIdOfA = lastId.get(a)!
+    if (a.rest || b.rest || !run.joins.has(lastIdOfA) || run.successor.get(lastIdOfA) !== b.noteIds[0]) continue
     if (flags.get(a)!.staccato || flags.get(a)!.staccatissimo || flags.get(a)!.breath || flags.get(a)!.caesura) continue
     // An event that carries its own sounds (ornament, grace notes...) is played as separate notes: no slur into or out of it.
     if (a.sounds || b.sounds) continue
     a.legatoNext = true
     b.attack = false
   }
-
-  const byNote = new Map<string, PlaybackEvent>()
-  for (const ev of events) for (const id of ev.noteIds) if (!byNote.has(id)) byNote.set(id, ev)
-
-  const eventAtBeat = (beat: Frac | number): PlaybackEvent | undefined => {
-    const target = typeof beat === 'number' ? beat : beat.n / beat.d
-    let lo = 0
-    let hi = events.length - 1
-    let found: PlaybackEvent | undefined
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1
-      const ev = events[mid]!
-      const start = ev.start.n / ev.start.d
-      const end = start + ev.length.n / ev.length.d
-      if (target < start) hi = mid - 1
-      else if (target >= end) lo = mid + 1
-      else {
-        found = ev
-        break
-      }
-    }
-    return found ?? events[lo]
-  }
-
-  return { events, bars, end: cursor, clicks, eventOfNote: (id) => byNote.get(id), eventAtBeat }
 }
 
 // --- loops ---

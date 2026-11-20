@@ -3,17 +3,19 @@ import { test } from 'node:test'
 import * as ed from '../src/core/score/edit.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { drawnBars, indexScore, renderedNoteIds, unmappedNotes } from '../src/core/score/noteMap.ts'
+import { voiceView, voices } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { renderScore } from '../src/core/score/render.ts'
-import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, LOCAL_EXERCISE_87, read, skipUnless } from './helpers.ts'
+import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, LOCAL_EXERCISE_87, MELODY_PIANO_FIXTURE, read, skipUnless } from './helpers.ts'
 import { n, scoreOf } from './playbackHelpers.ts'
+import { firstLine, setAttr } from './helpers.ts'
 
 async function checkRender(xml: string) {
   const score = parseMusicXml(xml)
   const [svg, ...more] = await renderScore(score, { width: 360 })
   assert.ok(svg)
   assert.equal(more.length, 0, 'one page, scrolled vertically')
-  const index = indexScore(score)
+  const index = indexScore(firstLine(score))
   return { score, svg, index }
 }
 
@@ -84,12 +86,12 @@ const twoBars = (): Score =>
 
 test('render: tenuto, accent, fermata and a crescendo and diminuendo made with the editing operations are drawn', async () => {
   const score = twoBars()
-  ed.toggleTenuto(score, 'a')
-  ed.toggleTenuto(score, 'f')
-  ed.toggleAccent(score, 'b')
-  ed.toggleFermata(score, 'c')
-  ed.addWedge(score, 'crescendo', 'a', 'd')
-  ed.addWedge(score, 'diminuendo', 'e', 'h')
+  ed.toggleTenuto(firstLine(score), 'a')
+  ed.toggleTenuto(firstLine(score), 'f')
+  ed.toggleAccent(firstLine(score), 'b')
+  ed.toggleFermata(firstLine(score), 'c')
+  ed.addWedge(firstLine(score), 'crescendo', 'a', 'd')
+  ed.addWedge(firstLine(score), 'diminuendo', 'e', 'h')
   const [svg] = await renderScore(score, { width: 900 })
   assert.ok(svg)
   assert.deepEqual(glyphsOf(svg, 'artic').filter((g) => TENUTO.test(g)).length, 2, 'two tenuto marks')
@@ -98,14 +100,14 @@ test('render: tenuto, accent, fermata and a crescendo and diminuendo made with t
   assert.equal(glyphsOf(svg, 'fermata').filter((g) => FERMATA.test(g)).length, 1, 'one fermata')
   assert.deepEqual(hairpinShapes(svg), ['crescendo', 'diminuendo'])
   // The marks add no note: every model note is still drawn, in order, and nothing else is taken for one.
-  const index = indexScore(score)
+  const index = indexScore(firstLine(score))
   assert.deepEqual(unmappedNotes(svg, index), [])
   assert.deepEqual(renderedNoteIds(svg), [...index.keys()])
 })
 
 test('render: the same score without the marks draws none of them (staccato is an artic too, and stays apart)', async () => {
   const score = twoBars()
-  ed.toggleStaccato(score, 'a')
+  ed.toggleStaccato(firstLine(score), 'a')
   const [svg] = await renderScore(score, { width: 900 })
   assert.ok(svg)
   assert.deepEqual(glyphsOf(svg, 'artic').filter((g) => STACCATO.test(g)).length, 1, 'the staccato is drawn')
@@ -117,13 +119,13 @@ test('render: the same score without the marks draws none of them (staccato is a
 
 test('render: a hairpin over a barline and a fermata on a rest are drawn', async () => {
   const score = twoBars()
-  ed.noteToRest(score, 'd')
-  ed.toggleFermata(score, 'd')
-  ed.addWedge(score, 'crescendo', 'c', 'f')
+  ed.noteToRest(firstLine(score), 'd')
+  ed.toggleFermata(firstLine(score), 'd')
+  ed.addWedge(firstLine(score), 'crescendo', 'c', 'f')
   const [svg] = await renderScore(score, { width: 900 })
   assert.deepEqual(hairpinShapes(svg!), ['crescendo'])
   assert.equal(glyphsOf(svg!, 'fermata').filter((g) => FERMATA.test(g)).length, 1)
-  assert.deepEqual(unmappedNotes(svg!, indexScore(score)), [])
+  assert.deepEqual(unmappedNotes(svg!, indexScore(firstLine(score))), [])
 })
 
 test('render: the committed fixture shows its tenuto, accent, fermata and hairpins', async () => {
@@ -140,7 +142,7 @@ test('render: the committed fixture shows its tenuto, accent, fermata and hairpi
 
 test('render: clef changes, slurs, ties and hairpins are drawn with drawing ids, which the stored MusicXML never has', async () => {
   const score = parseMusicXml(read(COMMITTED_FIXTURE))
-  score.measures[2]!.clef = { sign: 'F', line: 4 }
+  setAttr(score, 2, 'clef', { sign: 'F', line: 4 })
   const [svg] = await renderScore(score, { width: 360 })
   const drawn = (cls: string, id: string): boolean => new RegExp(`<g[^>]*\\bid="${id}"[^>]*class="${cls}"|<g[^>]*class="${cls}"[^>]*\\bid="${id}"`).test(svg!)
   assert.ok(drawn('clef', 'clef-2'), 'the clef change at bar 3 (index 2)')
@@ -182,27 +184,52 @@ test('render: every mark of the fixture is drawn, collapsed or not', async () =>
 
 test('render: a collapsed run maps its four rests to its one g.multiRest, and none of them is reported unmapped', async () => {
   const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
-  const index = indexScore(score)
+  const index = indexScore(firstLine(score))
   const restIds = [...index].filter(([, info]) => info.barIndex >= 7 && info.barIndex <= 10).map(([id]) => id)
   assert.equal(restIds.length, 4)
   const [practice] = await renderScore(score, { width: 360, multiRests: 'collapse' })
   // Verovio keeps none of the model ids on the symbol: the table is what resolves them.
   for (const id of restIds) assert.ok(!practice!.includes(`id="${id}"`), `${id} is not in the drawing`)
-  assert.deepEqual(unmappedNotes(practice!, index, drawnBars(score, 'collapse')), [])
+  assert.deepEqual(unmappedNotes(practice!, index, drawnBars(firstLine(score), 'collapse')), [])
   assert.deepEqual(unmappedNotes(practice!, index), restIds, 'without the table the rests are reported')
   const [editor] = await renderScore(score, { width: 360, multiRests: 'expand' })
-  assert.deepEqual(unmappedNotes(editor!, index, drawnBars(score, 'expand')), [])
+  assert.deepEqual(unmappedNotes(editor!, index, drawnBars(firstLine(score), 'expand')), [])
 })
 
 test('drawn bars: the table sends each bar to its drawn measure; a collapsed run is one measure, expanding is the identity', () => {
   const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
-  const collapsed = drawnBars(score, 'collapse')
+  const collapsed = drawnBars(firstLine(score), 'collapse')
   assert.deepEqual(collapsed.measureOf, [0, 1, 2, 3, 4, 5, 6, 7, 7, 7, 7, 8])
   assert.deepEqual(collapsed.barsOf[7], { first: 7, count: 4 })
   assert.equal(collapsed.barsOf.length, 9)
   assert.deepEqual(collapsed.runOf(9), { start: 7, length: 4 })
   assert.equal(collapsed.runOf(11), undefined)
-  const expanded = drawnBars(score, 'expand')
+  const expanded = drawnBars(firstLine(score), 'expand')
   assert.deepEqual(expanded.measureOf, Array.from({ length: 12 }, (_, i) => i))
   assert.equal(expanded.runOf(8), undefined)
+})
+
+// ---- Practice draws your part only (change parts-and-accompaniment, task 6.2, design D7) ----------------------
+
+test('render (practice): with your part P2 the piano is drawn as a grand staff, two staves in each measure, and no melody note', async () => {
+  const score = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  const [svg, ...more] = await renderScore(score, { width: 360, parts: ['P2'] })
+  assert.ok(svg)
+  assert.equal(more.length, 0)
+  const measures = svg.match(/class="measure"/g)?.length ?? 0
+  const staves = svg.match(/class="staff"/g)?.length ?? 0
+  assert.ok(measures > 0)
+  assert.equal(staves, measures * 2, 'a grand staff: two staves in every measure')
+  assert.match(svg, /class="grpSym"/, 'joined by a brace')
+
+  const idsOf = (part: string): string[] => voices(score).filter((r) => r.part === part).flatMap((r) => [...indexScore(voiceView(score, r)).keys()])
+  const drawn = new Set(renderedNoteIds(svg))
+  assert.ok(idsOf('P1').length > 0 && idsOf('P2').length > 0)
+  for (const id of idsOf('P1')) assert.ok(!drawn.has(id), `the melody note ${id} is not drawn`)
+  for (const id of idsOf('P2')) assert.ok(drawn.has(id), `the piano note ${id} is drawn`)
+
+  // The melody alone is one staff in each measure, and none of the piano.
+  const [melody] = await renderScore(score, { width: 360, parts: ['P1'] })
+  assert.equal(melody!.match(/class="staff"/g)?.length, melody!.match(/class="measure"/g)?.length)
+  for (const id of idsOf('P2')) assert.ok(!renderedNoteIds(melody!).includes(id))
 })

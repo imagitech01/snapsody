@@ -3,6 +3,7 @@ import { buildTimeline } from '../src/core/playback/timeline.ts'
 import type { Timeline } from '../src/core/playback/timeline.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import type { Score } from '../src/core/score/model.ts'
+import { firstLine } from './helpers.ts'
 
 const TICKS: Record<string, number> = { whole: 48, half: 24, quarter: 12, eighth: 6, '16th': 3 }
 
@@ -78,4 +79,42 @@ export const scoreOf = (bars: Bar[], time: [number, number] = [4, 4], directions
 export const barOf = (step: string, extra: Partial<Bar> = {}): Bar => ({ body: n({ step, type: 'whole' }), ...extra })
 
 /** The timeline of a score as the tenor saxophone, the default instrument, plays it. Most tests do not care about the instrument. */
-export const tenorTimeline = (score: Score): Timeline => buildTimeline(score, TENOR_SAX)
+export const tenorTimeline = (score: Score): Timeline => buildTimeline(firstLine(score), TENOR_SAX)
+
+// --- more than one part (change parts-and-accompaniment) ---
+
+/** A note as written on the second staff of a two-staff part (voice 5, staff 2, as homr writes it). */
+export const onLeftHand = (xml: string, voice = 5): string => xml.replaceAll('<voice>1</voice>', `<voice>${voice}</voice>`).replaceAll('<staff>1</staff>', '<staff>2</staff>')
+
+/** A note in another voice of the same staff. */
+export const inVoice = (xml: string, voice: number): string => xml.replaceAll('<voice>1</voice>', `<voice>${voice}</voice>`)
+
+/** A note that joins the chord of the note before it. */
+export const inChord = (xml: string): string => xml.replace(/<note( id="[^"]*")?>/, (m) => `${m}<chord/>`)
+
+/** A `<backup>` of `quarters` quarter notes (divisions 12), to go back to the start of the bar between staves or voices. */
+export const backup = (quarters: number): string => `<backup><duration>${quarters * 12}</duration></backup>`
+
+export interface PartSpec {
+  id: string
+  name?: string
+  staves?: 1 | 2
+  /** The content of each bar; for two staves the right hand, a `backup(...)` and the left hand. */
+  bars: string[]
+}
+
+/** A score of several parts in 4/4 (divisions 12): the second and later parts are as long as the first. */
+export function partsXml(parts: PartSpec[], time: [number, number] = [4, 4]): string {
+  const list = parts.map((p) => `<score-part id="${p.id}"><part-name>${p.name ?? p.id}</part-name></score-part>`).join('')
+  const body = parts
+    .map((p) => {
+      const staves = p.staves ?? 1
+      const clefs = staves === 2 ? '<clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef>' : '<clef><sign>G</sign><line>2</line></clef>'
+      const first = `<attributes><divisions>12</divisions>${staves === 2 ? '<staves>2</staves>' : ''}<key><fifths>0</fifths></key><time><beats>${time[0]}</beats><beat-type>${time[1]}</beat-type></time>${clefs}</attributes>`
+      return `<part id="${p.id}">${p.bars.map((b, i) => `<measure number="${i + 1}">${i === 0 ? first : ''}${b}</measure>`).join('')}</part>`
+    })
+    .join('')
+  return `<?xml version="1.0"?><score-partwise version="4.0"><part-list>${list}</part-list>${body}</score-partwise>`
+}
+
+export const partsOf = (parts: PartSpec[], time: [number, number] = [4, 4]): Score => parseMusicXml(partsXml(parts, time))

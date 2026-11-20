@@ -4,12 +4,13 @@ import { beamScore } from '../src/core/score/beams.ts'
 import { notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { eighths, note, quarters, score } from './helpers.ts'
+import { firstLine } from './helpers.ts'
 
 /** The level-1..n beam values per note of measure [index], e.g. ['begin', 'end', '-'] ('-' = no beam). */
 function beams(xml: string, index = 0): string[] {
   const s = parseMusicXml(xml)
-  const marks = beamScore(s)
-  return notesOf(s.measures[index]!).map((n) => (marks.get(n.id) ?? []).map((b) => b.value).join('+') || '-')
+  const marks = beamScore(firstLine(s))
+  return notesOf(firstLine(s).measures[index]!).map((n) => (marks.get(n.id) ?? []).map((b) => b.value).join('+') || '-')
 }
 
 test('beams: eighths in 4/4 are joined in pairs, one per beat', () => {
@@ -51,7 +52,7 @@ test('beams: written into the MusicXML for rendering only, in schema order', () 
   const s = parseMusicXml(score([eighths(2) + quarters(2)], [2, 4]))
   const plain = serializeMusicXml(s)
   assert.ok(!plain.includes('<beam'), 'the saved form has no beams')
-  const shown = serializeMusicXml(s, { beams: beamScore(s) })
+  const shown = serializeMusicXml(s, { beams: beamScore(firstLine(s)) })
   assert.match(shown, /<staff>1<\/staff>\s*<beam number="1">begin<\/beam>\s*<\/note>/)
   assert.match(shown, /<beam number="1">end<\/beam>/)
   // Reading it back ignores the beams, so nothing else changes.

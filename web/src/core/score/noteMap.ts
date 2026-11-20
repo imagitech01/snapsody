@@ -1,5 +1,5 @@
-import type { MultiRestRun, Note, Score } from "./model.ts";
-import { isNote, multiRestRuns } from "./model.ts";
+import type { MultiRestRun, Note, VoiceScore } from "./model.ts";
+import { isNote, multiRestRuns, partIndex, partMultiRestRuns } from "./model.ts";
 
 /**
  * Maps rendered notes back to the score model (task 9.2, design D7).
@@ -25,11 +25,12 @@ export interface NoteInfo {
 export type NoteIndex = Map<string, NoteInfo>;
 
 /** Every note and rest of the score by id. */
-export function indexScore(score: Score): NoteIndex {
+export function indexScore(score: VoiceScore): NoteIndex {
   const index: NoteIndex = new Map();
   score.measures.forEach((measure, barIndex) => {
     for (const item of measure.items) {
-      if (isNote(item)) index.set(item.id, { note: item, bar: measure.number, barIndex, index: index.size });
+      // A hidden rest (a `<forward>`) is not drawn, so it is not in the index (parts-and-accompaniment, design D10).
+      if (isNote(item) && !item.hidden) index.set(item.id, { note: item, bar: measure.number, barIndex, index: index.size });
     }
   });
   return index;
@@ -56,8 +57,9 @@ export interface DrawnBars {
   readonly runs: readonly MultiRestRun[];
 }
 
-export function drawnBars(score: Score, multiRests: MultiRests): DrawnBars {
-  const runs = multiRests === "collapse" ? multiRestRuns(score) : [];
+export function drawnBars(score: VoiceScore, multiRests: MultiRests): DrawnBars {
+  // A run holds for the part: every staff and voice of it rests (`partMultiRestRuns`), as the writer decides.
+  const runs = multiRests !== "collapse" ? [] : score.of ? partMultiRestRuns(score.of.score, partIndex(score.of.score, score.of.ref.part)) : multiRestRuns(score);
   const measureOf: number[] = [];
   const barsOf: { first: number; count: number }[] = [];
   let bar = 0;

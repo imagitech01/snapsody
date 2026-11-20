@@ -9,6 +9,7 @@ import { parseXml } from '../src/core/score/xml.ts'
 import type { XmlElement } from '../src/core/score/xml.ts'
 import { PRACTICE_EXERCISE } from './fixtures/make-practice-exercise.ts'
 import { HOMR_MARKS_FIXTURE, read } from './helpers.ts'
+import { firstLine } from './helpers.ts'
 
 // The lines of a drawn score (change simplify-editor-and-name-new-pieces, task 2.1).
 
@@ -26,17 +27,17 @@ test('lines: on the practice exercise at 360px every bar is in exactly one line,
   assert.equal(lines.length, (svg!.match(/class="system"/g) ?? []).length, 'one line per system')
   assert.ok(lines.length > 1, `the 19 bars take more than one line at 360px (${lines.length})`)
   assert.equal(lines[0]!.firstBar, 0)
-  assert.equal(lines.at(-1)!.lastBar, score.measures.length - 1)
+  assert.equal(lines.at(-1)!.lastBar, firstLine(score).measures.length - 1)
   for (const [index, line] of lines.entries()) {
     assert.ok(line.firstBar <= line.lastBar, `line ${index} holds a bar`)
     if (index > 0) assert.equal(line.firstBar, lines[index - 1]!.lastBar + 1, `line ${index} starts after the one before`)
   }
-  for (let bar = 0; bar < score.measures.length; bar++) {
+  for (let bar = 0; bar < firstLine(score).measures.length; bar++) {
     assert.equal(lines.filter((line) => line.firstBar <= bar && bar <= line.lastBar).length, 1, `bar ${bar + 1} is in exactly one line`)
   }
   assert.equal(lineOfBar(lines, 0), 0)
-  assert.equal(lineOfBar(lines, score.measures.length - 1), lines.length - 1)
-  assert.equal(lineOfBar(lines, score.measures.length), -1)
+  assert.equal(lineOfBar(lines, firstLine(score).measures.length - 1), lines.length - 1)
+  assert.equal(lineOfBar(lines, firstLine(score).measures.length), -1)
 })
 
 test('lines: a wider page holds more bars in a line', async () => {
@@ -62,7 +63,7 @@ test('lines: a collapsed run counts for all its bars, so the bar after it is on 
   const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
   const [svg] = await renderScore(score, { width: 360, multiRests: 'collapse' })
   const root = parseXml(svg!)
-  const bars = drawnBars(score, 'collapse')
+  const bars = drawnBars(firstLine(score), 'collapse')
   const lines = linesOf(root, xmlTree, bars)
   assert.equal(lines[0]!.firstBar, 0)
   assert.equal(lines.at(-1)!.lastBar, 11, 'the 12 bars, though 9 measures are drawn')
@@ -73,7 +74,7 @@ test('lines: a collapsed run counts for all its bars, so the bar after it is on 
   assert.equal(linesOf(root, xmlTree).at(-1)!.lastBar, 8)
   // Expanded: the identity.
   const [expanded] = await renderScore(score, { width: 360, multiRests: 'expand' })
-  assert.equal(linesOf(parseXml(expanded!), xmlTree, drawnBars(score, 'expand')).at(-1)!.lastBar, 11)
+  assert.equal(linesOf(parseXml(expanded!), xmlTree, drawnBars(firstLine(score), 'expand')).at(-1)!.lastBar, 11)
 })
 
 test('lines: a synthetic drawing with a measure that holds three bars', () => {

@@ -10,8 +10,9 @@ import { drawnBars, indexScore } from '../src/core/score/noteMap.ts'
 import { renderScore } from '../src/core/score/render.ts'
 import { parseXml } from '../src/core/score/xml.ts'
 import type { XmlElement } from '../src/core/score/xml.ts'
-import { HOMR_MARKS_FIXTURE, read } from './helpers.ts'
-import { n, scoreOf, tenorTimeline } from './playbackHelpers.ts'
+import { HOMR_MARKS_FIXTURE, MELODY_PIANO_FIXTURE, read } from './helpers.ts'
+import { backup, n, onLeftHand, partsOf, scoreOf, tenorTimeline } from './playbackHelpers.ts'
+import { firstLine } from './helpers.ts'
 
 const silent: NoteOutput = { noteOn: (): VoiceHandle => ({ release() {}, cancel() {} }) }
 
@@ -93,16 +94,16 @@ test('cursor driver: highlights on change, scrolls only when the line is off scr
 test('cursor: through a collapsed run every bar stays on the one symbol, and the note after it is highlighted on time', async () => {
   const score = parseMusicXml(read(HOMR_MARKS_FIXTURE))
   const [svg] = await renderScore(score, { width: 360, multiRests: 'collapse' })
-  const bars = drawnBars(score, 'collapse')
+  const bars = drawnBars(firstLine(score), 'collapse')
   const measures = (function find(node: XmlElement): XmlElement[] {
     const own = (node.attrs.class ?? '').split(/\s+/).includes('measure') ? [node] : []
     return own.length ? own : node.children.flatMap(find)
   })(parseXml(svg!))
   assert.equal(measures.length, 9)
   const hasSymbol = (m: XmlElement): boolean => (m.attrs.class ?? '').split(/\s+/).includes('multiRest') || m.children.some(hasSymbol)
-  const drawnMeasure = (noteId: string) => measures[bars.measureOf[indexScore(score).get(noteId)!.barIndex]!]!
+  const drawnMeasure = (noteId: string) => measures[bars.measureOf[indexScore(firstLine(score)).get(noteId)!.barIndex]!]!
 
-  const timeline = buildTimeline(score, TENOR_SAX)
+  const timeline = buildTimeline(firstLine(score), TENOR_SAX)
   const clock = { currentTime: 0 }
   const scheduler = new Scheduler(timeline, { clock, output: silent, timer: { set: () => 1, clear() {} }, bpm: 120 })
   scheduler.start() // anchored at 0.06 s; 0.5 s per beat
@@ -133,4 +134,60 @@ test('cursor: through a collapsed run every bar stays on the one symbol, and the
   assert.notEqual(next, [...shown][0])
   assert.equal(hasSymbol(next), false)
   assert.equal(measures.indexOf(next), 8)
+})
+
+// Both hands (change parts-and-accompaniment, design D6.7): every event of your line that sounds is highlighted.
+
+function twoHands() {
+  const bar = (id: string, rh: string[]) => rh.map((step, k) => n({ step, id: `${id}r${k}` })).join('') + backup(4) + onLeftHand(n({ step: 'C', octave: 3, type: 'whole', id: `${id}l` }))
+  const score = partsOf([{ id: 'P1', staves: 2, bars: [bar('a', ['C', 'D', 'E', 'F']), bar('b', ['G', 'A', 'B', 'C'])] }])
+  // Both hands are your line (a two-staff part without a hand); the piano plays them, so the instrument given is not heard.
+  const timeline = buildTimeline(score, TENOR_SAX, { part: { id: 'P1' } })
+  const clock = { currentTime: 0 }
+  const scheduler = new Scheduler(timeline, { clock, output: silent, timer: { set: () => 1, clear() {} }, bpm: 120 })
+  scheduler.start() // anchored at 0.06 s; 0.5 s per beat
+  return { clock, timeline, scheduler }
+}
+
+test('cursor: Both hands highlighted - each right-hand quarter in turn, and the left-hand whole note for the whole bar', () => {
+  const { clock, scheduler } = twoHands()
+  const log: string[] = []
+  const view = {
+    elementsFor: () => [{ getBoundingClientRect: () => ({ top: 100, bottom: 150 }) }],
+    highlight: (ids: string[], bar?: number) => log.push(`hl ${ids.join(',')} bar ${bar}`),
+    clearHighlight: () => log.push('clear'),
+  }
+  const tracker = new CursorTracker((t) => scheduler.positionAt(t), () => clock.currentTime)
+  const driver = new CursorDriver({ view, tracker, viewportHeight: () => 800, scrollBy: () => undefined })
+  for (const beat of [0.5, 0.9, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]) {
+    clock.currentTime = 0.06 + beat * 0.5
+    driver.step()
+  }
+  clock.currentTime = 10
+  driver.step()
+  assert.deepEqual(log, [
+    'hl ar0,al bar 0',
+    'hl ar1,al bar 0',
+    'hl ar2,al bar 0',
+    'hl ar3,al bar 0',
+    'hl br0,bl bar 1',
+    'hl br1,bl bar 1',
+    'hl br2,bl bar 1',
+    'hl br3,bl bar 1',
+    'clear',
+  ])
+})
+
+test('cursor: the position carries every sounding event of your line, and the bar from the bar spans', () => {
+  const { scheduler } = twoHands()
+  const at = scheduler.positionAt(0.06 + 2.5 * 0.5)
+  assert.deepEqual(at.events.map((e) => e.noteIds[0]), ['ar2', 'al'], 'the quarter that began last, then the whole note')
+  assert.equal(at.event, at.events[0])
+  assert.equal(at.barIndex, 0)
+  assert.equal(scheduler.positionAt(0.06 + 4.5 * 0.5).barIndex, 1)
+  // A line that is not yours is not highlighted, but it is what sounds when yours is a hand.
+  const left = buildTimeline(parseMusicXml(read(MELODY_PIANO_FIXTURE)), TENOR_SAX, { part: { id: 'P2', hand: 'left' } })
+  assert.deepEqual(left.ownAt(0.5).map((e) => [e.voice.part, e.voice.staff, e.pitches]), [['P2', 1, [48]]], 'only the left hand is your line')
+  assert.equal(left.eventAtBeat(0.5)!.own, true)
+  assert.equal(left.events.find((e) => e.voice.part === 'P1')!.own, false)
 })
