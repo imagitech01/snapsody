@@ -333,7 +333,7 @@ export class Scheduler {
       if (this.timeOf(action.beat) < now) break
       if (action.kind === 'tick' && !action.sounded) due.push(action)
     }
-    for (const action of due.reverse()) this.perform(action, this.timeOf(action.beat), now)
+    for (const action of due.reverse()) this.performSafely(action, this.timeOf(action.beat), now)
   }
 
   /**
@@ -446,13 +446,26 @@ export class Scheduler {
       // The end marker waits for the audio clock, so `onEnd` fires when the last note is over.
       if (action.kind === 'end' ? when > now : when >= horizon) break
       this.next++
-      this.perform(action, Math.max(when, now), now)
+      this.performSafely(action, Math.max(when, now), now)
     }
     if (!this.loop && this.next >= this.actions.length) {
       this.timer.clear(this.timerHandle)
       this.timerHandle = undefined
       this.active = false
       this.onEnd?.()
+    }
+  }
+
+  /**
+   * One sound that the output cannot start (a note or a click that throws) is left out and the music
+   * goes on: an error escaping here would leave the run half started, sounding while its owner thinks
+   * it failed, so nothing follows it on the screen.
+   */
+  private performSafely(action: Action, when: number, now: number): void {
+    try {
+      this.perform(action, when, now)
+    } catch (error) {
+      console.error(`scheduler: a ${action.kind} could not be played`, error)
     }
   }
 

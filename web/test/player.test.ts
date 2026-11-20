@@ -790,3 +790,50 @@ test('player: a beat unit made shorter while the metronome sounds on its own giv
     'a new bar: four quarters, the first accented',
   )
 })
+
+// A run that sounds is one the player owns: the music never plays on while the screen cannot follow it.
+
+test('player: a note the output cannot start is left out; the loop plays on and the heard position follows it', async () => {
+  const t = ticking()
+  const bars = scoreOf(['C', 'D', 'E', 'F'].map((step) => ({ body: n({ step, type: 'whole' }) })))
+  const output = t.audio.output
+  let failed = 0
+  const noteOn = output.noteOn.bind(output)
+  output.noteOn = (spec) => {
+    if (failed++ === 0) throw new Error('the output could not start this note')
+    return noteOn(spec)
+  }
+  const errors: unknown[] = []
+  const consoleError = console.error
+  console.error = (...args: unknown[]) => void errors.push(args)
+  try {
+    const player = t.player(TENOR_SAX, bars, { bpm: 60, loop: { start: 1, end: 2 } })
+    await player.play() // the first note of the run (bar 2) fails, on the first tick
+    assert.equal(player.state, 'playing')
+    t.run(2)
+    assert.equal(player.positionNow(0)?.event?.barIndex, 1, 'bar 2 is heard (its note left out)')
+    t.run(4)
+    assert.equal(player.positionNow(0)?.event?.barIndex, 2, 'then bar 3')
+    t.run(4)
+    assert.equal(player.positionNow(0)?.event?.barIndex, 1, 'the second pass: bar 2 again')
+    assert.deepEqual(t.notes.map((x) => x.midi[0]! + 14), [64, 62], 'bar 3, then the next pass sounds')
+    assert.equal(errors.length, 1, 'the failure is logged once')
+  } finally {
+    console.error = consoleError
+  }
+})
+
+test('player: a listener that pauses as Play starts leaves nothing sounding', async () => {
+  const t = ticking()
+  let player!: Player
+  player = t.player(TENOR_SAX, melody(), {
+    onState: (state) => {
+      if (state === 'playing') player.pause()
+    },
+  })
+  await player.play()
+  assert.equal(player.state, 'paused')
+  t.run(5)
+  assert.equal(t.notes.length, 0, 'the run that was paused never sounds')
+  assert.equal(t.timerRunning(), false)
+})

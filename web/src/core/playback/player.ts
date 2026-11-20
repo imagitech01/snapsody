@@ -283,9 +283,15 @@ export class Player {
       })
       this.scheduler = scheduler
       this.setState('playing')
+      // Paused, stopped or played again by a listener of the state: that run wins, this one never sounds.
+      if (run !== this.runId) return
       scheduler.start(first?.index ?? 0, start)
     } catch (e) {
-      if (run === this.runId) this.setState('stopped')
+      if (run === this.runId) {
+        // A run that failed leaves nothing sounding: the music would play on with the player stopped and the screen not following it.
+        this.scheduler?.stop()
+        this.setState('stopped')
+      }
       if (!keepBackend) this.backendPromise = undefined
       throw e
     }
