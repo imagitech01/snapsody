@@ -70,6 +70,7 @@ OPUS_KBPS = 80
 # Steady notes (config "steady"): the recorded vibrato is taken out.
 STEADY_TRACK_HZ = 30.0                  # the pitch and the level of a harmonic are followed up to this rate
 STEADY_WIDE = 0.06                      # the first pass follows the pitch this far (a share of the frequency): a semitone either side
+STEADY_DIP_DB = -15                     # the pitch is not followed on a harmonic that falls this far below its mean level in the loop, at any point of the held note
 STEADY_PITCH_IN = (0.03, 0.10)          # seconds over which the pitch correction comes in (the attack keeps its own pitch)
 STEADY_LEVEL_IN = (0.08, 0.20)          # the same for the level of the harmonics (the attack keeps its own rise)
 STEADY_FLOOR_DB = -60                   # harmonics weaker than this, against the strongest, are left alone
@@ -380,14 +381,27 @@ def pitch_estimate(x, rate, near):
 
 def steady_pitch(x, rate, f_est, h, track, held):
     """x read at a varying speed so that its pitch stays at its mean over the samples held[0]..held[1]. The pitch
-    is followed on harmonic h of f_est Hz, up to `track` Hz either side of it. Returns the steady sound, a function
+    is followed on harmonic h of f_est Hz, up to `track` Hz either side of it (or on a list of harmonics, each
+    with its own `track`). Returns the steady sound, a function
     that says where a sample position of x lands in it, the pitch in Hz and how wide the pitch moved (cents)."""
     n = len(x)
     t = np.arange(n) / rate
     a0, a1 = held
     for _ in range(2):                                                # the second round starts from the measured pitch
-        z = low_pass(x * np.exp(-2j * math.pi * h * f_est * t), track, rate)
-        ratio = 1 + np.gradient(np.unwrap(np.angle(z))) * rate / (2 * math.pi * h * f_est)     # pitch against f_est
+        if isinstance(h, int):
+            z = low_pass(x * np.exp(-2j * math.pi * h * f_est * t), track, rate)
+            ratio = 1 + np.gradient(np.unwrap(np.angle(z))) * rate / (2 * math.pi * h * f_est)     # pitch against f_est
+        else:
+            # Several harmonics, each weighed by its power at that moment: one that vanishes for a moment
+            # (where its phase means nothing) has no say there.
+            turn, power = np.zeros(n), np.zeros(n)
+            for q, width in zip(h, track):
+                z = low_pass(x * np.exp(-2j * math.pi * q * f_est * t), width, rate)
+                step = z[1:] * np.conj(z[:-1])                        # the turn of the phase from one sample to the next, times the power
+                turn[:-1] += np.abs(step) * np.angle(step) / q
+                power[:-1] += np.abs(step)
+            turn[-1], power[-1] = turn[-2], power[-2]
+            ratio = 1 + turn / (power + 1e-30) * rate / (2 * math.pi * f_est)
         f_ref = f_est * float(ratio[a0:a1].mean())
         ratio, f_est = ratio * f_est / f_ref, f_ref
     width = float(1200 * np.log2(ratio[a0:a1].max() / ratio[a0:a1].min()))
@@ -401,8 +415,9 @@ def steady_note(x, ls, le, step, rate, near, target, info):
     """A looped note with its recorded vibrato taken out (the config's "steady"): the same note at a constant
     pitch, each harmonic at a constant level, looped where the SoundFont loops it.
 
-    1. The pitch is followed on the strongest of the first harmonics (its phase, STEADY_TRACK_HZ wide), and the
-       sample is read at a varying speed so that the pitch stays at the mean pitch of the loop.
+    1. The pitch is followed on the strongest of the first harmonics (its phase, STEADY_TRACK_HZ wide; on all
+       four when the strongest fades out somewhere, see STEADY_DIP_DB), and the sample is read at a varying
+       speed so that the pitch stays at the mean pitch of the loop.
     2. The harmonics are then at fixed frequencies, so each can be followed on its own; it is brought to its
        mean level and phase in the loop. What is not a harmonic (breath, bow) is not touched.
     3. The pitch is now known, so the note is resampled to `target` Hz, the pitch of its key, instead of by the
@@ -421,11 +436,18 @@ def steady_note(x, ls, le, step, rate, near, target, info):
     f_ref = pitch_estimate(ext[held][:int(0.5 * rate)], rate, near)
     harmonics = [h for h in (1, 2, 3, 4) if h * f_ref < 0.4 * rate]
     t = np.arange(n) / rate
-    amps = [np.abs(low_pass(ext * np.exp(-2j * math.pi * h * f_ref * t), min(STEADY_TRACK_HZ, 0.45 * f_ref), rate)[held]).mean() for h in harmonics]
-    h = harmonics[int(np.argmax(amps))]
+    levels = [np.abs(low_pass(ext * np.exp(-2j * math.pi * h * f_ref * t), min(STEADY_TRACK_HZ, 0.45 * f_ref), rate)) for h in harmonics]
+    # The strongest harmonic in the loop, unless it nearly vanishes at some point of the vibrato, in the loop or
+    # before it: its phase turns there without the pitch moving, and the correction would follow it (heard as a
+    # tick; the tenor's B4, where every harmonic does this somewhere). The pitch is then followed on all of them.
+    sounding = slice(min(ls, int(STEADY_LEVEL_IN[1] * rate)), held.stop)
+    best = max(range(len(harmonics)), key=lambda i: levels[i][held].mean())
+    info['dip_db'] = round(float(20 * math.log10(levels[best][sounding].min() / levels[best][held].mean())), 1)
+    h = harmonics[best] if info['dip_db'] >= STEADY_DIP_DB else harmonics
     v, ls_v, le_v = ext, float(ls), float(ls + k * length)
     for wide in (STEADY_WIDE, 0.0):
-        track = min(max(STEADY_TRACK_HZ, wide * h * f_ref), 0.45 * f_ref)
+        width = lambda q: min(max(STEADY_TRACK_HZ, wide * q * f_ref), 0.45 * f_ref)
+        track = width(h) if isinstance(h, int) else [width(q) for q in h]
         v, at, f_ref, width = steady_pitch(v, rate, f_ref, h, track, (int(ls_v), int(le_v)))
         ls_v, le_v = at(ls_v), at(le_v)
         info.setdefault('vibrato_ct', round(width, 1))
@@ -471,7 +493,7 @@ def steady_note(x, ls, le, step, rate, near, target, info):
     xf = min(int(CROSSFADE_S * SR), ls_i, n_loop // 3)
     fade = (np.arange(xf) + 0.5) / xf
     y[le_i - xf:le_i] = y[le_i - xf:le_i] * (1 - fade) + y[ls_i - xf:ls_i] * fade
-    info.update(loop_src=(ls, le, length), repeats=k, loop_out=n_loop, harmonic=h, steady_hz=round(f_ref, 2))
+    info.update(loop_src=(ls, le, length), repeats=k, loop_out=n_loop, harmonic=h if isinstance(h, int) else 'all', steady_hz=round(f_ref, 2))
     return finish_loop(y, ls_i, le_i, info, allow_bake=False), ls_i, le_i
 
 
@@ -604,7 +626,7 @@ def convert_instrument(sf, name, cfg, defaults, soundfont, out_dir, report_dir):
         notes[str(key)] = {'file': fname, 'sustainStart': round(ls_i / SR, 9), 'sustainEnd': round(le_i / SR, 9), 'gain': round(gain, 4)}
         lines.append(f'{lead}loop {ls_i / SR:6.3f}-{le_i / SR:6.3f} ({(le_i - ls_i) / SR:5.3f}s'
                      f'{" x" + str(info["repeats"]) if "repeats" in info else ""})  seam {info["seam"]}'
-                     f'{" steady at " + str(info["steady_hz"]) + " Hz (was " + str(info["vibrato_ct"]) + " ct wide, retuned " + str(info["retuned_ct"]) + " ct, harmonic " + str(info["harmonic"]) + ")" if "steady_hz" in info else ""}'
+                     f'{" steady at " + str(info["steady_hz"]) + " Hz (was " + str(info["vibrato_ct"]) + " ct wide, retuned " + str(info["retuned_ct"]) + " ct, harmonic " + str(info["harmonic"]) + ", dip " + str(info["dip_db"]) + " dB)" if "steady_hz" in info else ""}'
                      f'{" -> " + str(info["seam_after"]) if "seam_after" in info else ""}'
                      f'{" entry " + str(info["entry_db"]) + " dB, decay " + str(info["decay_db"]) + " dB, end shift " + str(info["shift"]) if "shift" in info else ""}  '
                      f'gain {gain:.3f} (rms {rms:.3f})  {size} B')

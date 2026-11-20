@@ -117,6 +117,15 @@ second lossy generation before our Opus. D9's "SF2 or SF3" is therefore SF2 only
   the attack's bend) and 0.5 dB after; trumpet 11 ct (16) and 0.5 dB before, 0.4 ct (1.8) and 0.2 dB after.
   Brightness (the range of the spectral centre below 8 kHz, as a share of its mean) went from a median of 34 %
   to 5 % on the alto, 35 % to 7 % on the tenor and 8 % to 4 % on the trumpet.
+  The pitch is followed on the strongest of the first four harmonics, unless that one falls more than 15 dB
+  below its loop level at some point of the held note, in the loop or before it (`STEADY_DIP_DB`): its phase
+  turns there without the pitch moving, and the correction follows it, which is heard as a tick. The pitch is
+  then followed on all four together, each weighed by its power at that moment. This is the case for the
+  tenor's B4 (71) and the alto's G5 (79), the two notes with the widest vibrato. The B4 was first followed on
+  its fourth harmonic alone: a tick twice per loop and one at 1.67 s in the attack, heard by the user on
+  2026-11-20 as a choppy long note. The other 34 files are unchanged by this rule. A check for it: the waveform
+  of one period against the next, through the note from 0.2 s on (at most 0.2 of the level on every steady
+  note now; 1.1 in the attack and 0.5 in the loop of that B4 before).
   The user compared both by ear on 2026-11-19 and chose these three; the clarinet has no vibrato, and the violin
   keeps its own (the pitch tracking does not hold on its high notes, where the vibrato is widest).
 - **Piano and guitar** are different (a deviation from D9, see below): they decay, and the SoundFont's loops sit
