@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """Draws the Snapsody app icon from one set of shapes and writes every file that needs it.
 
-The mark: a staff on the app's deep green, with the note being played on the soft box the practice screen draws behind
-the playing bar. Shapes live on Android's 108 x 108 adaptive-icon canvas; everything the launcher may mask
+The mark: a staff on the app's ink, with the note being played on the blue box the practice screen draws behind the
+playing bar (paper and ink, change paper-and-ink-and-about D12: variant A of the icon preview). Shapes live on Android's 108 x 108 adaptive-icon canvas; everything the launcher may mask
 stays inside its 66-unit safe circle.
 
-    python3 tools/icon/make_icon.py            # writes docs/design/icon/, the Android resources and web/public/favicon.svg
-    python3 tools/icon/make_icon.py --preview DIR   # also renders PNG previews into DIR
+    python3 tools/icon/make_icon.py            # writes docs/design/icon/, the Android resources (with the splash colour in
+                                               # styles.xml) and web/public/favicon.svg
+    python3 tools/icon/make_icon.py --preview DIR   # also renders PNG previews into DIR: the round, squircle and
+                                                    # monochrome launcher masks
 
 Needs rsvg-convert and ImageMagick (`magick`) for the PNGs.
 """
-import math, os, subprocess, sys, tempfile
+import math, os, re, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Colours from web/src/ui/styles/tokens.css
-GROUND = '#203C36'   # --surface-dark / --ink
-BAR = '#33645A'      # the playing bar's box, a lighter step of the ground
-NOTE = '#F7F6F1'     # --bg (cream)
-PAPER = '#F7F6F1'    # splash background
+GROUND = '#1C2433'   # --ink
+BAR = '#2C5BBF'      # --primary: the playing bar's box
+NOTE = '#FFFFFF'     # the note being played
+PAPER = '#F1F3F6'    # --bg: the splash background
 
 def ellipse(cx, cy, rx, ry, deg):
     t = math.radians(deg)
@@ -39,8 +41,8 @@ def rrect(x, y, w, h, r):
 # A five-line staff, a barline, a quiet note in the bar before, and the note being played on the soft box the practice
 # screen draws behind the playing bar. The staff runs on past the safe circle on purpose: a round mask cuts it off like
 # a stave going on beyond the page.
-LINE = '#7A9A91'     # staff lines and barline
-PAST = '#A9C0B8'     # the note already played
+LINE = '#7F8BA0'     # staff lines and barline
+PAST = '#B3BDCD'     # the note already played
 LINE_W = 2.2
 staff_y = [37.0, 45.0, 53.0, 61.0, 69.0]
 
@@ -115,6 +117,14 @@ def main():
         png(svg(rounded=True), os.path.join(d, 'ic_launcher.png'), int(48 * scale))
         png(svg(rounded=True), os.path.join(d, 'ic_launcher_round.png'), int(48 * scale))
     png(svg(rounded=False), os.path.join(ROOT, 'docs/design/icon/snapsody-icon-512.png'), 512)
+    # The Android 12+ splash screen draws its own background: the same paper colour, in the launch theme.
+    styles = os.path.join(ROOT, res, 'values', 'styles.xml')
+    with open(styles) as f:
+        theme = f.read()
+    theme, n = re.subn(r'(<item name="windowSplashScreenBackground">)#[0-9A-Fa-f]{6}(</item>)', rf'\g<1>{PAPER}\g<2>', theme)
+    if n != 1:
+        sys.exit('styles.xml: expected one windowSplashScreenBackground item')
+    write(f'{res}/values/styles.xml', theme)
     # The launch screen: the icon in the middle of the app's paper colour.
     icon = os.path.join(tempfile.gettempdir(), 'snapsody-splash-icon.png')
     png(svg(rounded=True), icon, 288)
@@ -132,6 +142,18 @@ def main():
         os.makedirs(out, exist_ok=True)
         png(svg(rounded=True), os.path.join(out, 'icon-512.png'), 512)
         png(svg(rounded=True), os.path.join(out, 'icon-48.png'), 48)
+        # What launchers show: the middle 72 units of the canvas under their mask.
+        for name, clip in [('round', '<circle cx="54" cy="54" r="36"/>'),
+                           ('squircle', '<path d="M54,18 C84,18 90,24 90,54 C90,84 84,90 54,90 C24,90 18,84 18,54 C18,24 24,18 54,18 Z"/>')]:
+            png(masked(clip, layers, GROUND), os.path.join(out, f'mask-{name}.png'), 192)
+        # A themed (monochrome) icon: the launcher tints the shapes and picks the ground.
+        png(masked('<circle cx="54" cy="54" r="36"/>', [(d, '#1C2433') for d in mono], '#D6DBE3'),
+            os.path.join(out, 'mask-monochrome.png'), 192)
+
+def masked(clip, paths, ground):
+    body = ''.join(f'<path d="{d}" fill="{c}"/>' for d, c in paths)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72"><defs><clipPath id="m">{clip}</clipPath></defs>'
+            f'<g clip-path="url(#m)"><rect width="108" height="108" fill="{ground}"/>{body}</g></svg>\n')
 
 if __name__ == '__main__':
     main()

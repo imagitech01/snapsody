@@ -498,3 +498,22 @@ test('connectBackButton: in the editor with unsaved edits the device back button
   assert.deepEqual(names(router), ['home'])
   assert.equal(device.pressBack(), false)
 })
+
+// Change paper-and-ink-and-about D6 (task 6.1): About, Credits and Licence are pushed over Settings, with no tab bar.
+test('router: about, credits and licence push and pop over Settings with the tab bar hidden', () => {
+  const router = createRouter('settings')
+  const screens: Screen[] = [{ name: 'about' }, { name: 'credits' }, { name: 'licence', componentId: 'homr' }]
+  for (const screen of screens) {
+    assert.equal(isStartScreen(screen), false)
+    router.push(screen)
+    assert.deepEqual(router.screen.value, screen)
+    assert.equal(router.tabBarVisible.value, false, `no tab bar on ${screen.name}`)
+  }
+  assert.deepEqual(names(router), ['settings', 'about', 'credits', 'licence'])
+  assert.equal(router.back(), true, 'the system back goes back one screen')
+  assert.deepEqual(names(router), ['settings', 'about', 'credits'])
+  assert.equal(router.pop(), true)
+  assert.equal(router.pop(), true)
+  assert.deepEqual(names(router), ['settings'])
+  assert.equal(router.tabBarVisible.value, true)
+})

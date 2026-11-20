@@ -5,7 +5,7 @@ import { PHONE, PHONE_LANDSCAPE, withApp } from './app.ts'
 import { ID } from './pieces.ts'
 
 // The density guard (practice-app design D18, task 11.4): the app at the S24's WebView size (360 x 780 CSS px, and on its
-// side 780 x 360), in English and in Dutch, shows every main screen and sheet without sideways scroll, and every control
+// side 780 x 360), shows every main screen and sheet without sideways scroll, and every control
 // that is tapped has a touch box of at least 44 x 44. The screens are opened through the router, as the journeys of the
 // edit tests do; what each screen does is tested in its own journey.
 
@@ -19,10 +19,6 @@ const EXCEPTIONS: readonly { selector: string; reason: string }[] = []
 const VIEWPORTS = [
   { name: 'portrait 360 x 780', size: PHONE },
   { name: 'landscape 780 x 360', size: PHONE_LANDSCAPE },
-] as const
-const LANGUAGES = [
-  { name: 'English', code: 'en-GB' },
-  { name: 'Dutch', code: 'nl-BE' },
 ] as const
 
 interface Finding {
@@ -90,13 +86,25 @@ const go = (page: Page, method: RouterMethod, arg: unknown): Promise<void> =>
   page.evaluate(([m, a]) => (window.__test!.shell.router as unknown as Record<string, (x: unknown) => void>)[m as string]!(a), [method, arg] as const)
 const settle = (page: Page): Promise<void> => page.waitForTimeout(450) // a sheet's slide-in is 220 ms; the score lays out after 150
 
+// Public Sans is bundled (design D4): once the app has started, the font has loaded from the app's own origin.
+test('the bundled Public Sans loads from the app itself', async () => {
+  await withApp({ seed: 'library', viewport: PHONE }, async ({ page }) => {
+    await page.locator('.home-rotation .list-row').first().waitFor()
+    const loaded = await page.evaluate(async () => {
+      await document.fonts.ready
+      return document.fonts.check('16px "Public Sans"')
+    })
+    assert.equal(loaded, true)
+  })
+})
+
 for (const viewport of VIEWPORTS) {
-  for (const language of LANGUAGES) {
-    test(`density: every screen and sheet at ${viewport.name} in ${language.name} has no sideways scroll and no touch box under 44 x 44`, async () => {
-      const at = (screen: string): string => `${screen} (${viewport.name}, ${language.name})`
+  {
+    test(`density: every screen and sheet at ${viewport.name} has no sideways scroll and no touch box under 44 x 44`, async () => {
+      const at = (screen: string): string => `${screen} (${viewport.name})`
       const problems: string[] = []
 
-      await withApp({ seed: 'library', language: language.code, viewport: viewport.size }, async ({ page }) => {
+      await withApp({ seed: 'library', viewport: viewport.size }, async ({ page }) => {
         await page.locator('.home-rotation .list-row').first().waitFor()
         await check(page, at('home'), problems)
 
@@ -119,8 +127,8 @@ for (const viewport of VIEWPORTS) {
         await go(page, 'selectTab', 'settings')
         await page.locator('.settings-section').first().waitFor()
         await check(page, at('settings'), problems)
-        // Its two lists, one sheet each (design D19).
-        for (const sheet of ['instrument', 'language'] as const) {
+        // Its list, one sheet (design D19).
+        for (const sheet of ['instrument'] as const) {
           await go(page, 'openSheet', sheet)
           await page.getByRole('dialog').waitFor()
           await settle(page)
@@ -161,7 +169,7 @@ for (const viewport of VIEWPORTS) {
       })
 
       // A phone with no music yet: the invitation, the empty library, and the hint before the scanner.
-      await withApp({ seed: '', language: language.code, viewport: viewport.size }, async ({ page }) => {
+      await withApp({ seed: '', viewport: viewport.size }, async ({ page }) => {
         await page.locator('.invite-title').waitFor()
         await check(page, at('first launch'), problems)
         await go(page, 'selectTab', 'library')

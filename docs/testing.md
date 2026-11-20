@@ -45,7 +45,7 @@ and is the one list to change when a screen is built (practice-app groups 14 and
     `PlatformError` with that code);
   - reader: `read(pages, onEvent)` is one job for the ordered pages, with per-page `progress`,
     `done`, `no-music` and `failed` events, a final `finished`, and `cancel()`;
-  - device: keep awake, app pause and resume, the back button, and the language.
+  - device: keep awake, app pause and resume, and the back button.
 - **Adapters:**
 
   | Adapter | Folder | Used by | What it is |
@@ -106,7 +106,7 @@ stands in for the back button, and a hidden tab for the app going to the backgro
   remove, the scripted scanner, per-page reader events, the device) and `web/test/layers.test.ts`
   (the import rules above).
 - **The shell (`app/shell.ts`):** `web/test/shell.test.ts` runs the start-up against the fake platform: the order (settings,
-  sweep, first list), a piece recovered from a temp file, the language from the settings and the device, the list read
+  sweep, first list), a piece recovered from a temp file, the list read
   again when a screen that shows it comes back or the app returns from the background, the back button, and the
   notice for a rejected save or an unreadable library.
 - **Storage and settings (`app/`):** `web/test/library.test.ts` (the pieces on the fake files: the
@@ -186,9 +186,9 @@ library in headless Chromium, one file at a time.
   metronome on), "C major warm-up" (a favorite, practised yesterday), "Even eighths" and "Étude in D", made by the real
   `createLibrary(files).create(...)`; `unpractised` is one piece nobody practised; `v2` is the pieces of the
   committed format 2 store (`fixtures/stores/v2/`, "Waltz study in G") and `v2-settings` its `settings.json` (clarinet,
-  442 Hz, Dutch); `settings-unreadable` makes `settings.json` fail to read, so the settings are read-only. Pieces and
-  settings are separate parts on purpose: a settings journey must not start from the fixture's Dutch. An unknown part
-  throws. `language` (`withApp({ seed, language: 'nl-BE' })`) is what the fake device says the phone's language is.
+  442 Hz, and a language the app ignores); `settings-unreadable` makes `settings.json` fail to read, so the settings are read-only. Pieces and
+  settings are separate parts on purpose: a settings journey must not start from the fixture's settings. An unknown part
+  throws. The app is English only, so the journeys have no language option.
   `reader: 'manual'` (`withApp({ seed, reader: 'manual' })`) makes the fake reader's jobs send their events only when the journey
   steps them (`platform.reader.jobs.at(-1)`: `step()`, `flush()`), so a journey can look at the reading screen and cancel it; by
   default a job runs through at once. The page the fake reader gives without its own score is four bars.
@@ -204,18 +204,18 @@ library in headless Chromium, one file at a time.
   served as `application/wasm`, other hosts are refused, the test audio clock follows `page.clock`, and the component gallery,
   `web/dev/gallery.tsx`), `samples.test.ts` (every bundled sample decodes), and the journeys, one file per main flow, each
   growing as its screens are built:
-  - `practice.test.ts`: the home (task 12.1): continue card, rotation, shortcuts, first launch, refresh on return, Dutch;
+  - `practice.test.ts`: the home (task 12.1): continue card, rotation, shortcuts, first launch, refresh on return;
     and practising (task 13): continue, Play and Pause with the real sound, the screen kept awake, the tempo and metronome,
     tap to start from a note, loop with a rest, the count-in (a general setting) and its visible count, scroll away and
     return to playing, the tools sheet (edit, favorite, back), the screen reopened after the editor, the landscape
-    layout and turning the phone while playing, a missing piece and a sound that will not load, Dutch;
+    layout and turning the phone while playing, a missing piece and a sound that will not load;
   - `library.test.ts` (task 12.2): the list and its summary lines, search, star and favorites, delete with the question,
     empty library;
-  - `settings.test.ts` (task 12.3): the default instrument and the language as lines that open sheets, Dutch and English with a reload, the
+  - `settings.test.ts` (task 12.3): the default instrument as a line that opens a sheet, no Language row, the old `language` of a stored file ignored, the
     credits, the notice for settings that cannot be saved;
   - `addMusic.test.ts` (task 14.1): the hint, a scan of two pages stepped through the reading screen to one piece that opens in
     practice, no music on page 2 and scanning again, a page that fails, cancel (the button and Back) creating nothing, the
-    scanner not available, pages added to a piece, Dutch;
+    scanner not available, pages added to a piece;
   - `edit.test.ts` (tasks 15.1 to 15.4): the editor, opened by pushing it on the router (the tools sheet's Edit does the same):
     select, the photo strip (a piece made through the library with staff positions and a drawn picture), preview, the Note, Marks and Score tabs, warnings and their marks, saving (the stored score changes, the raw
     reading does not), Save & practice back to the practice screen or in its place, the discard question, Add pages, rename and a
@@ -261,7 +261,7 @@ eye in the app itself and is named as manual in its tasks:
 
 - Run the app in browser-dev (`cd web && npm run dev`, see "Running the app in browser-dev") in desktop Chrome, with the
   device toolbar at 360 × 780 (the S24's WebView size; 780 × 360 for landscape).
-- Look at the screen in English and in Dutch (Settings, Language).
+- Look at the screen in English. The app is English only (there is no language setting).
 - `docs/design/deviations.md` records how the screens differed from the last Figma design on 2026-11-19. It is not
   added to.
 
@@ -299,7 +299,7 @@ AGP 8.13.2, Gradle 8.14.3, Kotlin 2.2.20, Chaquopy 17.2.0, compileSdk 36, minSdk
   | `AtomicFiles` | ours | the port's `writeTextAtomic` and a file `rename`: fsync and `Os.rename` (design D4) |
   | `@capacitor/filesystem` | npm | all other file operations |
   | `@capacitor/app` | npm | pause, resume and the back button |
-  | `@capacitor/device` | npm | the language |
+  | `@capacitor/device` | npm | installed, but nothing in the web layer uses it any more |
   | `@capacitor-community/keep-awake` | npm | keeps the screen on |
 
   The plugin examples are in `fixtures/bridge/`. `web/src/main.tsx` picks the Capacitor adapter

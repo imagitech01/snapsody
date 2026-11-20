@@ -189,7 +189,6 @@ const COLOURS = [
   '--bg',
   '--surface',
   '--surface-muted',
-  '--surface-dark',
   '--ink',
   '--ink-muted',
   '--primary',
@@ -294,7 +293,7 @@ function Components() {
       <section class="gallery-section" aria-labelledby="cards-title">
         <h2 id="cards-title">Cards</h2>
         <div class="gallery-stack">
-          <Card tone="dark" label="Dark card">
+          <Card tone="light" label="Continue card">
             <p>Ode to Joy</p>
           </Card>
           <Card>

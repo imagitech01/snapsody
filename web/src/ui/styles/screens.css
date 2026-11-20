@@ -38,7 +38,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--danger-tint);
   color: var(--danger);
   font-size: var(--fs-13);
@@ -89,7 +89,8 @@
 /* The invitation of an empty home or library, and the card of an empty favorites list. */
 .invite-title {
   font-size: var(--fs-18);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
   line-height: var(--lh-tight);
 }
 .invite-body {
@@ -113,7 +114,7 @@
 .note-icon {
   flex: none;
   margin-top: 0.0625rem;
-  color: var(--primary);
+  color: var(--ink);
 }
 .note-title {
   font-size: var(--fs-14);
@@ -133,17 +134,25 @@
 }
 .card--muted:has(> .note-title) {
   padding: var(--space-3);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
 }
 .card--muted:has(> .note-card) {
   padding: var(--space-3);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
+}
+/* Info notes in sheets: a 3px accent rule on the left instead of a tinted box (design D3). */
+.sheet .card--muted {
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border: 0;
+  border-left: 3px solid var(--primary);
+  border-radius: 0;
+  background: none;
 }
 
 /* ---- Home (frame 01) ------------------------------------------------------------------------- */
 
 .continue-eyebrow {
-  color: var(--ink-on-dark-muted);
+  color: var(--ink-muted);
   font-size: var(--fs-10);
   font-weight: var(--fw-semibold);
   line-height: 1.2;
@@ -152,7 +161,8 @@
 .continue-title {
   margin-top: var(--space-2);
   font-size: var(--fs-20);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -164,7 +174,7 @@
 }
 .continue-note {
   margin-top: var(--space-1);
-  color: var(--ink-on-dark-muted);
+  color: var(--ink-muted);
   font-size: var(--fs-12);
   line-height: 1.25;
 }
@@ -205,8 +215,10 @@
   gap: var(--space-3);
   height: var(--tap);
   padding: 0 var(--space-3);
-  border-radius: var(--radius-button);
-  background: var(--surface-muted);
+  /* A line drawn inside, not a border: the input in it keeps its 44px touch box. */
+  box-shadow: inset 0 0 0 1px var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
   color: var(--ink-muted);
 }
 .search-input {
@@ -281,31 +293,81 @@
 .settings-section {
   margin-top: var(--gap-block);
 }
-.credits {
-  margin-top: var(--space-2);
+
+/* ---- About, Credits and Licence (change paper-and-ink-and-about D6, D10) ------------------------ */
+
+.about-card {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
   padding: var(--space-3);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--surface);
 }
-.credits-line {
-  margin-top: var(--space-2);
+.about-icon {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius);
+}
+.about-name {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+}
+.about-line {
   color: var(--ink-muted);
   font-size: var(--fs-12);
   line-height: 1.4;
-  overflow-wrap: anywhere;
 }
-.credits-name {
-  margin-top: var(--space-2);
-  font-size: var(--fs-14);
-  font-weight: var(--fw-semibold);
+.about-note {
+  margin-top: var(--space-3);
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+  line-height: 1.45;
 }
-.credits-notices {
-  margin: var(--space-2) 0 0;
+.credits-intro {
+  margin-bottom: var(--space-4);
+  color: var(--ink-muted);
+  font-size: var(--fs-13);
+  line-height: 1.45;
+}
+.credits-group {
+  margin-top: var(--gap-block);
+}
+.credits-intro + .credits-group {
+  margin-top: 0;
+}
+.credits-group > .t-eyebrow,
+.licence-block > .t-eyebrow {
+  margin-bottom: var(--space-2);
+}
+.licence-block {
+  margin-top: var(--space-4);
+}
+.licence-notes {
+  margin: 0;
   padding-left: var(--space-4);
   color: var(--ink-muted);
-  font-size: var(--fs-11);
+  font-size: var(--fs-12);
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+.licence-text {
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.licence-text p + p {
+  margin-top: var(--space-2);
+}
+.licence-error {
+  color: var(--ink-muted);
+  font-size: var(--fs-13);
+  line-height: 1.45;
 }
 .settings-offline {
   margin-top: var(--space-4);

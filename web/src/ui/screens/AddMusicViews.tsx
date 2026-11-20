@@ -27,7 +27,7 @@ function Frame({
 }: {
   step: string
   title: string
-  eyebrow?: string
+  eyebrow?: string | null
   onBack?: () => void
   actions?: ComponentChildren
   children?: ComponentChildren
@@ -41,7 +41,7 @@ function Frame({
         </div>
       ) : null}
       <header class="screen-header">
-        <p class="t-eyebrow">{eyebrow ?? t('add.title')}</p>
+        {eyebrow === null ? null : <p class="t-eyebrow">{eyebrow ?? t('add.title')}</p>}
         <h1 class="t-title">{title}</h1>
       </header>
       <div class="screen-body">{children}</div>
@@ -215,7 +215,7 @@ export function BusyView({ step }: { step: 'idle' | 'scanning' | 'saving' | 'can
   if (step === 'idle' || step === 'cancelled') return <div class="screen" data-screen="add-music" data-step={step} />
   const saving = step === 'saving'
   return (
-    <Frame step={saving ? 'saving' : 'scanning'} eyebrow={t('app.name')} title={t('add.title')}>
+    <Frame step={saving ? 'saving' : 'scanning'} eyebrow={null} title={t('add.title')}>
       <p class="t-subtitle" role="status">
         {saving ? t('add.saving') : t('add.scanning')}
       </p>

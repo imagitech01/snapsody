@@ -12,6 +12,6 @@ export function createCapacitorPlatformWith(plugins: CapacitorPlugins): Platform
     files: new CapacitorFiles(plugins.filesystem, plugins.atomicFiles, paths, plugins.convertFileSrc),
     scanner: new CapacitorScanner(plugins.scanner),
     reader: new CapacitorReader(plugins.reader, paths),
-    device: new CapacitorDevice(plugins.app, plugins.device, plugins.keepAwake),
+    device: new CapacitorDevice(plugins.app, plugins.keepAwake),
   }
 }

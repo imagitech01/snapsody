@@ -5,15 +5,9 @@ export class FakeDevice implements Device {
   /** Whether the screen is being kept on, and every change so far. */
   keepAwake = false
   readonly keepAwakeLog: boolean[] = []
-  /** What `language()` answers. */
-  languageTag: string
   private readonly pauseListeners: Array<() => void> = []
   private readonly resumeListeners: Array<() => void> = []
   private readonly backHandlers: Array<() => boolean> = []
-
-  constructor(languageTag: string) {
-    this.languageTag = languageTag
-  }
 
   async setKeepAwake(on: boolean): Promise<void> {
     this.keepAwake = on
@@ -30,10 +24,6 @@ export class FakeDevice implements Device {
 
   onBackButton(handler: () => boolean): () => void {
     return subscribe(this.backHandlers, handler)
-  }
-
-  async language(): Promise<string> {
-    return this.languageTag
   }
 
   /** The app goes to the background. */

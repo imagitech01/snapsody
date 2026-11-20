@@ -4,11 +4,10 @@
 //
 //   (nothing)      an empty phone: no pieces, default settings
 //   v2             the pieces of the committed format 2 store (web/test/fixtures/stores/v2/): "Waltz study in G"
-//   v2-settings    that store's settings.json (clarinet, 442 Hz, Dutch)
+//   v2-settings    that store's settings.json (clarinet, 442 Hz, language "nl": both ignored)
 //   library        the pieces of the spec's scenarios, made by the library itself (pieces.ts, `LIBRARY`)
 //   unpractised    one piece that was never practised and is not a favorite (`UNPRACTISED`)
-//   store-en       the pieces of the Play Store screenshots in English names (storePieces.ts, tools/store/); needs /store-photo.jpg in the build
-//   store-nl       the same with Dutch names
+//   store          the pieces of the Play Store screenshots (storePieces.ts, tools/store/); needs /store-photo.jpg in the build
 //   settings-unreadable  settings.json cannot be read (the platform fails), so the settings are read-only for the run
 //
 // Never imported by the app: only the test entry uses it.
@@ -21,7 +20,6 @@ import { LIBRARY, UNPRACTISED } from './pieces.ts'
 import type { SeedPiece } from './pieces.ts'
 import { barsScore } from './scores.ts'
 import { STORE_PIECES, odeScore } from './storePieces.ts'
-import type { StoreLanguage } from './storePieces.ts'
 
 const V2 = import.meta.glob('../fixtures/stores/v2/**/*', { query: '?url', import: 'default', eager: true }) as Record<string, string>
 const V2_ROOT = '../fixtures/stores/v2/'
@@ -56,7 +54,7 @@ async function seedPieces(platform: FakePlatform, pieces: readonly SeedPiece[]):
 }
 
 /** The Play Store pieces (storePieces.ts); every page's photo is /store-photo.jpg, which tools/store/capture.ts puts in the build. */
-async function seedStore(platform: FakePlatform, language: StoreLanguage): Promise<void> {
+async function seedStore(platform: FakePlatform): Promise<void> {
   const response = await fetch('/store-photo.jpg')
   if (!response.ok) throw new Error('seed store: /store-photo.jpg is not in the build (run tools/store/capture.ts)')
   platform.files.seed(PHOTO, new Uint8Array(await response.arrayBuffer()))
@@ -70,7 +68,7 @@ async function seedStore(platform: FakePlatform, language: StoreLanguage): Promi
       return { source: PHOTO, recognised, firstBar, lastBar: firstBar + count - 1 }
     })
     const library = createLibrary(platform.files, { newId: () => piece.id, now: () => new Date(piece.created) })
-    await library.create({ name: piece.name[language], musicxml: piece.ode ? odeScore() : barsScore(bars, 72), bars, repairs: [], pages })
+    await library.create({ name: piece.name, musicxml: piece.ode ? odeScore() : barsScore(bars, 72), bars, repairs: [], pages })
     if (piece.favorite || piece.lastPracticed !== null) await library.update(piece.id, { favorite: piece.favorite, lastPracticed: piece.lastPracticed })
     if (piece.practice) await library.writePractice(piece.id, { ...DEFAULT_PRACTICE, ...piece.practice })
   }
@@ -82,7 +80,7 @@ export async function applySeed(platform: FakePlatform, spec: string): Promise<v
     else if (part === 'v2-settings') await seedV2(platform, 'settings')
     else if (part === 'library') await seedPieces(platform, LIBRARY)
     else if (part === 'unpractised') await seedPieces(platform, UNPRACTISED)
-    else if (part === 'store-en' || part === 'store-nl') await seedStore(platform, part === 'store-en' ? 'en' : 'nl')
+    else if (part === 'store') await seedStore(platform)
     else if (part === 'settings-unreadable') {
       platform.files.fault = (operation, paths) => {
         if (operation === 'read' && paths.includes('settings.json')) throw new PlatformError('failed', 'settings.json cannot be read')

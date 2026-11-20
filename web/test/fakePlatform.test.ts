@@ -324,9 +324,8 @@ test('reader: cancel before the first event, with autoRun on, ends with finished
 
 // ---- device ------------------------------------------------------------------------------
 
-test('device: keep awake, pause and resume, back button and language', async () => {
-  const { device } = createFakePlatform({ language: 'nl-BE' })
-  assert.equal(await device.language(), 'nl-BE')
+test('device: keep awake, pause and resume, back button', async () => {
+  const { device } = createFakePlatform()
 
   await device.setKeepAwake(true)
   await device.setKeepAwake(false)

@@ -12,10 +12,7 @@ export type { FakePageOutcome, FakeReaderJob, FakeReaderOptions } from './reader
 export { FakeScanner } from './scanner.ts'
 export type { FakeScannedPage } from './scanner.ts'
 
-export interface FakePlatformOptions extends FakeReaderOptions {
-  /** What the device says its language is; English by default. */
-  language?: string
-}
+export type FakePlatformOptions = FakeReaderOptions
 
 /** The platform of the quick and mac layers (practice-app design D2): in-memory files, a scripted scanner and a scripted reader. */
 export interface FakePlatform extends Platform {
@@ -31,6 +28,6 @@ export function createFakePlatform(options: FakePlatformOptions = {}): FakePlatf
     files,
     scanner: new FakeScanner(files),
     reader: new FakeReader(options),
-    device: new FakeDevice(options.language ?? 'en'),
+    device: new FakeDevice(),
   }
 }

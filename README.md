@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
-  <img alt="Platform: Android" src="https://img.shields.io/badge/platform-Android%2010%2B%20(arm64)-3ddc84">
-  <img alt="Status: early" src="https://img.shields.io/badge/status-early%20development-orange">
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-2c5bbf"></a>
+  <img alt="Platform: Android" src="https://img.shields.io/badge/platform-Android%2010%2B%20(arm64)-1c2433">
+  <img alt="Status: early" src="https://img.shields.io/badge/status-early%20development-1c2433">
   <a href="https://buymeacoffee.com/benvanmierloo"><img alt="Buy me a coffee" src="https://img.shields.io/badge/buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black"></a>
 </p>
 
@@ -50,7 +50,7 @@ hear how it goes, play along with it slowly, and loop the hard bars. Snapsody do
 - **Editor:** pitch, accidentals, lengths (dotted, triplets), rests, ties, slurs, staccato,
   tenuto, accent, fermata, crescendo and diminuendo, plus key, time signature and tempo. It has
   undo and redo, and warns gently about bars that don't add up or notes the reader doubted.
-- **Languages:** English and Dutch.
+- **Language:** English only. There is no language setting.
 - **Private by design:** the app has no internet permission. Your pieces, photos and settings
   stay on the device.
 

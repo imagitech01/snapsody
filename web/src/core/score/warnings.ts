@@ -76,7 +76,7 @@ export function computeWarnings(score: Score, instrument: Instrument): ScoreWarn
         noteId: item.id,
         pitch,
         instrument: instrument.id,
-        message: `Bar ${m.number}: ${pitch} is outside the written range of the instrument (${instrument.names.en}, ${midiName(low)}–${midiName(high)}); it may be a misread`,
+        message: `Bar ${m.number}: ${pitch} is outside the written range of the instrument (${instrument.name}, ${midiName(low)}–${midiName(high)}); it may be a misread`,
       })
     }
   })

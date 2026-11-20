@@ -4,7 +4,6 @@ import { effect, signal } from '@preact/signals'
 import { barExcerpt, openEditor } from '../src/app/editorSession.ts'
 import type { EditorDeps, EditorSession } from '../src/app/editorSession.ts'
 import { createI18n } from '../src/app/i18n/index.ts'
-import type { Language } from '../src/app/i18n/index.ts'
 import { DEFAULT_PRACTICE, createLibrary } from '../src/app/library.ts'
 import { createRouter } from '../src/app/router.ts'
 import { loadSettings } from '../src/app/settings.ts'
@@ -32,7 +31,7 @@ async function setup(options: { practiceTempo?: number; isNew?: boolean } = {}) 
   const platform = createFakePlatform()
   const library = createLibrary(platform.files, { newId: () => 'piece-1' })
   const settings = await loadSettings(platform.files)
-  const i18n = createI18n(signal<Language | null>('en'))
+  const i18n = createI18n()
   const router = createRouter('library')
   platform.files.seed('scans/1/page-1.jpg', Uint8Array.of(1))
   platform.files.seed('scans/1/page-2.jpg', Uint8Array.of(2))

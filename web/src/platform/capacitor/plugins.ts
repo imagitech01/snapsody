@@ -85,11 +85,6 @@ export interface AppPlugin {
   minimizeApp(): Promise<void>
 }
 
-/** @capacitor/device. */
-export interface DevicePlugin {
-  getLanguageTag(): Promise<{ value: string }>
-}
-
 /** @capacitor-community/keep-awake. */
 export interface KeepAwakePlugin {
   keepAwake(): Promise<void>
@@ -102,7 +97,6 @@ export interface CapacitorPlugins {
   scanner: ScannerPlugin
   reader: ReaderPlugin
   app: AppPlugin
-  device: DevicePlugin
   keepAwake: KeepAwakePlugin
   /** `Capacitor.convertFileSrc`: a file:// URI as a URL the WebView can load. */
   convertFileSrc(uri: string): string

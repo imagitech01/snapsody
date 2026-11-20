@@ -10,7 +10,8 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-radius: var(--radius-surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
@@ -41,7 +42,7 @@
 .score-bar {
   position: absolute;
   z-index: 0;
-  border-radius: var(--radius-thumb);
+  border-radius: var(--radius);
   background: var(--primary-tint);
   pointer-events: none;
 }

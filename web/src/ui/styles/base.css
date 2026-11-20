@@ -99,7 +99,8 @@ button:disabled {
 }
 .t-title {
   font-size: var(--fs-22);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
   line-height: var(--lh-tight);
   color: var(--ink);
 }
@@ -110,7 +111,8 @@ button:disabled {
 }
 .t-section {
   font-size: var(--fs-16);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
   line-height: var(--lh-tight);
   color: var(--ink);
 }
@@ -134,9 +136,14 @@ button:disabled {
   padding-bottom: 0;
 }
 
-/* The block at the top of a start screen: eyebrow, title, subtitle (frames 01, 03.1, 07). */
+/* The block at the top of a screen: an optional eyebrow, title, subtitle (frames 01, 03.1, 07). The start screens
+   show no app name above the title (it takes room from practising), so their title gets a little air under the
+   status bar instead; a screen opened over another has its Back button there. */
 .screen-header {
   padding: var(--space-1) var(--gutter) var(--space-4);
+}
+.screen--tabs .screen-header {
+  padding-top: var(--space-3);
 }
 .screen-header .t-eyebrow {
   margin-bottom: var(--space-2);

@@ -12,7 +12,6 @@ import type {
   AppPlugin,
   AtomicFilesPlugin,
   CapacitorPlugins,
-  DevicePlugin,
   FilesystemPlugin,
   KeepAwakePlugin,
   ListenerHandle,
@@ -406,13 +405,6 @@ export class MockApp implements AppPlugin {
   }
 }
 
-export class MockDevice implements DevicePlugin {
-  tag = 'nl-BE'
-  async getLanguageTag(): Promise<{ value: string }> {
-    return { value: this.tag }
-  }
-}
-
 export class MockKeepAwake implements KeepAwakePlugin {
   readonly log: string[] = []
   async keepAwake(): Promise<void> {
@@ -431,7 +423,6 @@ export interface MockPlugins extends CapacitorPlugins {
   scanner: MockScanner
   reader: MockReader
   app: MockApp
-  device: MockDevice
   keepAwake: MockKeepAwake
 }
 
@@ -444,7 +435,6 @@ export function mockPlugins(): MockPlugins {
     scanner: new MockScanner(),
     reader: new MockReader(),
     app: new MockApp(),
-    device: new MockDevice(),
     keepAwake: new MockKeepAwake(),
     convertFileSrc: (uri) => uri.replace('file://', 'https://localhost/_capacitor_file_'),
   }

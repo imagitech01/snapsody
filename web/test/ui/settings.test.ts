@@ -2,12 +2,13 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Page } from 'playwright'
 import { withApp } from './app.ts'
-import { tab, tabBar, textOf } from './journey.ts'
+import { tab, textOf } from './journey.ts'
 
-// The settings journey (practice-app design D15 and D19, "settings: default instrument, language"; tasks 12.3, 13.6; specs
-// `app-shell` "English and Dutch" and "General settings", `instruments` "Default instrument" and "Recorded instrument
-// sounds"): the Settings tab on an empty phone, and on the committed store's settings (clarinet, Dutch, and an old
-// pitchReference that is ignored). The default instrument and the language are one line each that opens a sheet.
+// The settings journey (practice-app design D15 and D19, "settings: default instrument"; tasks 12.3, 13.6; specs
+// `app-shell` "General settings", `instruments` "Default instrument" and "Recorded instrument
+// sounds"): the Settings tab on an empty phone, and on the committed store's settings (clarinet, and an old
+// pitchReference and language that are ignored). The default instrument is one line that opens a sheet. There is no language
+// setting: the app is English only (`paper-and-ink-and-about` D11).
 
 const choice = (page: Page, group: string, name: string) => page.getByRole('radiogroup', { name: group }).getByRole('radio', { name, exact: true })
 /** The one-line row of a setting on the Settings screen ("Default instrument  B♭ clarinet ›"). */
@@ -56,7 +57,7 @@ test('settings: the default instrument is one line that opens a sheet with all i
     await page.getByRole('radio', { name: /^B♭ clarinet/ }).click()
     await page.getByRole('dialog').waitFor({ state: 'detached' })
     assert.match(await textOf(line(page, 'Default instrument')), /B♭ clarinet/)
-    assert.deepEqual(await saved(app), { defaultInstrument: 'clarinet', countIn: false, language: null, scanHintSeen: false })
+    assert.deepEqual(await saved(app), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: false })
     assert.ok(!('pitchReference' in ((await saved(app)) as object)), 'the pitch reference is not written')
     // It is what every practice session starts with: the setting is read from the shell, no restart needed.
     assert.equal(await app.page.evaluate(() => window.__test!.shell.settings.defaultInstrument.value), 'clarinet')
@@ -68,137 +69,170 @@ test('settings: the default instrument is one line that opens a sheet with all i
   })
 })
 
-test('settings: switching to Dutch changes the texts at once, and it persists across a reload', async () => {
+test('settings: there is no Language row and no language sheet', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
-    await page.getByRole('heading', { name: 'Let’s practise' }).waitFor()
     await tab(page, 'Settings').click()
-    assert.match(await textOf(line(page, 'Language')), /Same as the phone/, 'no choice yet')
-    await line(page, 'Language').click()
-    assert.equal(await choice(page, 'Language', 'Same as the phone (English)').getAttribute('aria-checked'), 'true', 'the phone is English: no choice yet')
-    await page.waitForTimeout(450)
-    // Back closes the sheet and changes nothing.
-    assert.equal(await app.back(), true)
-    await page.getByRole('dialog').waitFor({ state: 'detached' })
-    assert.equal(await saved(app), undefined)
-
-    await line(page, 'Language').click()
-    await choice(page, 'Language', 'Nederlands').click()
-    // No restart: the heading, the tab bar and the page language follow.
-    await page.getByRole('heading', { name: 'Instellingen', level: 1 }).waitFor()
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Oefenen' }).waitFor()
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Bibliotheek' }).waitFor()
-    assert.equal(await page.locator('html').getAttribute('lang'), 'nl')
-    await page.getByRole('dialog').waitFor({ state: 'detached' })
-    assert.match(await textOf(line(page, 'Taal')), /Nederlands/)
-    assert.equal(((await saved(app)) as { language: string }).language, 'nl')
-    await line(page, 'Standaardinstrument').waitFor()
-
-    // Every screen speaks Dutch, a piece is a "muziekstuk".
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Oefenen' }).click()
-    await page.getByRole('heading', { name: 'Laten we oefenen', level: 1 }).waitFor()
-    await page.getByRole('region', { name: 'Voeg je eerste muziek toe' }).waitFor()
-
-    // The activity is recreated: the phone is still English, the app is still Dutch.
-    await app.reload()
-    await page.getByRole('heading', { name: 'Laten we oefenen', level: 1 }).waitFor()
-    assert.equal(await page.locator('html').getAttribute('lang'), 'nl')
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Instellingen' }).click()
-    assert.match(await textOf(line(page, 'Taal')), /Nederlands/)
-
-    // "Same as the phone" gives the phone's language back.
-    await line(page, 'Taal').click()
-    await choice(page, 'Taal', 'Zoals de telefoon (English)').click()
     await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
-    assert.equal(((await saved(app)) as { language: string | null }).language, null)
+    assert.equal(await line(page, 'Language').count(), 0, 'no Language row')
+    assert.equal(await page.getByText(/Language|Nederlands|Same as the phone/).count(), 0)
+    assert.equal(await page.locator('html').getAttribute('lang'), 'en')
+    await page.getByRole('switch', { name: /Count-in/ }).click()
+    await page.waitForFunction(() => window.__test!.shell.settings.countIn.value === true)
+    assert.ok(!('language' in ((await saved(app)) as object)), 'a language is never written')
   })
 })
 
-test('settings: on a Dutch phone the app is Dutch until the user chooses English, which stays after a restart', async () => {
-  await withApp({ seed: '', language: 'nl-BE' }, async (app) => {
-    const { page } = app
-    await page.getByRole('heading', { name: 'Laten we oefenen', level: 1 }).waitFor()
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Instellingen' }).click()
-    assert.match(await textOf(line(page, 'Taal')), /Zoals de telefoon/)
-    await line(page, 'Taal').click()
-    assert.equal(await choice(page, 'Taal', 'Zoals de telefoon (Nederlands)').getAttribute('aria-checked'), 'true')
-    await choice(page, 'Taal', 'English').click()
-    await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
-    await app.reload()
-    await page.getByRole('heading', { name: 'Let’s practise', level: 1 }).waitFor()
-  })
-})
-
-test('settings: they are read at start and kept across a reload (the committed store: clarinet, Dutch; its old pitch reference is ignored)', async () => {
+test('settings: they are read at start and kept across a reload (the committed store: clarinet; its old pitch reference and language are ignored)', async () => {
   await withApp({ seed: 'v2-settings' }, async (app) => {
     const { page } = app
-    await page.getByRole('heading', { name: 'Laten we oefenen', level: 1 }).waitFor()
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Instellingen' }).click()
-    assert.match(await textOf(line(page, 'Standaardinstrument')), /B♭-klarinet/)
-    assert.match(await textOf(line(page, 'Taal')), /Nederlands/)
-    assert.equal(await page.getByText('Stemtoon').count(), 0)
+    await page.getByRole('heading', { name: 'Let’s practise', level: 1 }).waitFor()
+    await tab(page, 'Settings').click()
+    assert.match(await textOf(line(page, 'Default instrument')), /B♭ clarinet/)
+    assert.equal(await line(page, 'Language').count(), 0, 'no Language row')
+    assert.equal(await page.getByText('Pitch reference').count(), 0)
 
-    await line(page, 'Standaardinstrument').click()
-    await choice(page, 'Standaardinstrument', 'Altsaxofoon Houtblazers').click()
+    await line(page, 'Default instrument').click()
+    await choice(page, 'Default instrument', 'Alto saxophone Woodwind').click()
     await page.getByRole('dialog').waitFor({ state: 'detached' })
     await app.reload()
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Instellingen' }).click()
-    assert.match(await textOf(line(page, 'Standaardinstrument')), /Altsaxofoon/, 'the new choice is still set after a restart')
+    await tab(page, 'Settings').click()
+    assert.match(await textOf(line(page, 'Default instrument')), /Alto saxophone/, 'the new choice is still set after a restart')
     const stored = (await saved(app)) as Record<string, unknown>
     assert.equal(stored.defaultInstrument, 'alto-sax')
     assert.ok(!('pitchReference' in stored), 'the old pitch reference is dropped by the next save')
+    assert.ok(!('language' in stored), 'the old language is dropped by the next save')
   })
 })
 
-test('settings: the credits name the source and licence of the instrument sounds', async () => {
+const PLAY = 'https://play.google.com/store/apps/details?id=be.imagitech.snapsody'
+/** The one pushed screen's heading; the tab bar is gone on it. */
+const heading = (page: Page, name: string) => page.getByRole('heading', { name, level: 1, exact: true })
+const back = (page: Page) => page.getByRole('button', { name: 'Back', exact: true })
+
+test('settings: after the count-in come Rate on Google Play (a link) and About Snapsody (the version); no credits, privacy or source rows', async () => {
+  // The links are not clicked: in the harness that would really load the pages (every other host is refused anyway).
   await withApp({ seed: '' }, async ({ page }) => {
     await tab(page, 'Settings').click()
-    const credits = page.getByRole('button', { name: 'Credits' })
-    assert.equal(await credits.getAttribute('aria-expanded'), 'false')
-    assert.equal(await page.getByRole('region', { name: 'Credits' }).count(), 0)
-
-    await credits.click()
-    assert.equal(await credits.getAttribute('aria-expanded'), 'true')
-    const panel = page.getByRole('region', { name: 'Credits' })
-    const text = await textOf(panel)
-    assert.match(text, /Instrument sounds/)
-    assert.match(text, /MuseScore_General 0\.2/)
-    assert.match(text, /Licence: MIT License/)
-    assert.match(text, /Source: https:\/\/ftp\.osuosl\.org\/pub\/musescore\/soundfont\/MuseScore_General\//)
-    // The licence's own acknowledgements, as it asks.
-    assert.match(text, /FluidR3 \(original version\) by Frank Wen Copyright \(c\) 2000-02/)
-    assert.match(text, /Adaptation for MuseScore_General\.sf2 by S\. Christian Collins Copyright \(c\) 2018-19/)
-
-    await credits.click()
-    assert.equal(await page.getByRole('region', { name: 'Credits' }).count(), 0)
+    await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
+    const rate = page.getByRole('link', { name: 'Rate on Google Play', exact: true })
+    assert.equal(await rate.count(), 1)
+    assert.equal(await rate.getAttribute('href'), PLAY)
+    assert.equal(await rate.getAttribute('target'), '_blank', 'never replaces the app')
+    assert.equal(await rate.getAttribute('rel'), 'noopener noreferrer')
+    const about = page.getByRole('button', { name: /^About Snapsody/ })
+    assert.match(await textOf(about), /0\.1\.2/)
+    const order = await page.locator('.screen-body').innerText()
+    assert.ok(order.indexOf('Count-in') < order.indexOf('Rate on Google Play') && order.indexOf('Rate on Google Play') < order.indexOf('About Snapsody'))
+    for (const gone of ['Credits', 'Privacy policy', 'Source code', 'Language']) {
+      assert.equal(await page.getByText(gone, { exact: false }).count(), 0, `no ${gone} on Settings`)
+    }
   })
 })
 
-test('settings: the privacy policy and the source code are links that open outside the app, in English and in Dutch', async () => {
-  // Spec `app-shell` "Privacy policy and source code" (change add-privacy-policy). The links are not clicked: in the
-  // harness that would really load the pages. On the phone, Capacitor hands them to the browser (design D4).
-  const check = async (page: Page, privacy: string, source: RegExp): Promise<void> => {
+test('settings: About Snapsody shows the version and licence, links to the privacy policy and the source, and Back returns to Settings', async () => {
+  await withApp({ seed: '' }, async ({ page }) => {
+    await tab(page, 'Settings').click()
+    await page.getByRole('button', { name: /^About Snapsody/ }).click()
+    await heading(page, 'About Snapsody').waitFor()
+    assert.equal(await tab(page, 'Settings').count(), 0, 'no tab bar on About')
+    const text = await textOf(page.locator('.screen'))
+    assert.match(text, /Version 0\.1\.2/)
+    assert.match(text, /Snapsody 0\.1\.2/)
+    assert.match(text, /Free and open source \(AGPL-3\.0\)/)
+    assert.match(text, /© 2026 the Snapsody authors/)
+    assert.equal(await page.locator('.about-icon').getAttribute('alt'), '', 'the icon is decorative')
     const rows = [
-      { link: page.getByRole('link', { name: privacy, exact: true }), href: 'https://imagitech.be/snapsody/privacy/' },
-      { link: page.getByRole('link', { name: source }), href: 'https://github.com/imagitech01/snapsody' },
+      { link: page.getByRole('link', { name: 'Privacy policy', exact: true }), href: 'https://imagitech.be/snapsody/privacy/' },
+      { link: page.getByRole('link', { name: /^Source code/ }), href: 'https://github.com/imagitech01/snapsody' },
     ]
     for (const { link, href } of rows) {
       assert.equal(await link.count(), 1)
       assert.equal(await link.getAttribute('href'), href)
-      assert.equal(await link.getAttribute('target'), '_blank', 'never replaces the app')
+      assert.equal(await link.getAttribute('target'), '_blank')
       assert.equal(await link.getAttribute('rel'), 'noopener noreferrer')
     }
-  }
-  await withApp({ seed: '' }, async ({ page }) => {
-    await tab(page, 'Settings').click()
+    assert.match(await textOf(rows[1]!.link), /github\.com\/imagitech01\/snapsody/)
+    assert.equal(await page.getByRole('button', { name: /^Credits and licences/ }).count(), 1)
+
+    await back(page).click()
     await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
-    await check(page, 'Privacy policy', /^Source code/)
-    assert.match(await textOf(page.getByRole('link', { name: /^Source code/ })), /AGPL-3\.0/)
+    assert.equal(await tab(page, 'Settings').count(), 1)
   })
-  await withApp({ seed: '', language: 'nl-BE' }, async ({ page }) => {
-    await tabBar(page, 'Hoofdonderdelen').getByRole('button', { name: 'Instellingen' }).click()
-    await page.getByRole('heading', { name: 'Instellingen', level: 1 }).waitFor()
-    await check(page, 'Privacybeleid', /^Broncode/)
+})
+
+test('settings: Credits lists the components, Licence shows homr and the SoundFont offline, ML Kit is not open source, and Back walks back', async () => {
+  // Every host but the app's own is refused by the harness (app.ts), so reading a licence here is reading it offline.
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    await tab(page, 'Settings').click()
+    await page.getByRole('button', { name: /^About Snapsody/ }).click()
+    await page.getByRole('button', { name: /^Credits and licences/ }).click()
+    await heading(page, 'Credits and licences').waitFor()
+    const entry = (name: string) => page.getByRole('button', { name: new RegExp(`^${name}\\b`) })
+    assert.match(await textOf(entry('homr')), /0\.7\.1 · AGPL-3\.0/)
+    assert.match(await textOf(entry('Verovio')), /6\.4\.0 · LGPL-3\.0/)
+    assert.match(await textOf(entry('MuseScore_General')), /0\.2 · MIT/)
+    const mlkit = entry('Google ML Kit Document Scanner')
+    assert.match(await textOf(mlkit), /16\.0\.0 · ML Kit Terms of Service · Not open source/)
+    assert.equal(await page.getByText('Not open source').count(), 1, 'only ML Kit says it')
+    for (const group of ['Reading the music', 'Showing the music', 'Instrument sounds', 'Running the models', 'Python on the phone', 'The app itself', 'Android libraries', 'Scanning pages']) {
+      await page.getByRole('heading', { name: group, level: 2 }).waitFor()
+    }
+
+    await entry('homr').click()
+    await heading(page, 'homr').waitFor()
+    const licence = page.locator('.licence-text')
+    await licence.getByText('GNU AFFERO GENERAL PUBLIC LICENSE').first().waitFor()
+    const text = await textOf(page.locator('.screen'))
+    assert.match(text, /Version 0\.7\.1 · AGPL-3\.0/)
+    assert.match(text, /trained on datasets with non-commercial terms/, 'the training-data note')
+    const source = page.getByRole('link', { name: /^Source/ })
+    assert.equal(await source.getAttribute('href'), 'https://github.com/liebharc/homr')
+    assert.equal(await source.getAttribute('target'), '_blank')
+    assert.equal(await source.getAttribute('rel'), 'noopener noreferrer')
+    assert.equal(await page.locator('.licence-text pre, .licence-text').evaluate((el) => getComputedStyle(el).overflowY), 'visible', 'no scroll area inside the screen')
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll')
+
+    assert.equal(await app.back(), true)
+    await heading(page, 'Credits and licences').waitFor()
+    await entry('MuseScore_General').click()
+    await heading(page, 'MuseScore_General').waitFor()
+    await page.locator('.licence-text').getByText(/Permission is hereby granted/).waitFor()
+    const sound = await textOf(page.locator('.screen'))
+    for (const line of [
+      'FluidR3 (original version) by Frank Wen Copyright (c) 2000-02',
+      'Mono conversion (FluidR3Mono) by Michael Cowgill Copyright (c) 2014-17',
+      'Adaptation for MuseScore_General.sf2 by S. Christian Collins Copyright (c) 2018-19',
+      'Temple Blocks instrument provided by Ethan Winer Copyright (c) 2002',
+      'Drumline Cymbals provided by Michael Schorsch Copyright (c) 2016',
+    ]) assert.ok(sound.includes(line), `missing: ${line}`)
+
+    await back(page).click()
+    await entry('Google ML Kit Document Scanner').click()
+    await heading(page, 'Google ML Kit Document Scanner').waitFor()
+    await page.locator('.licence-text').getByText(/is not open source/).waitFor()
+    assert.match(await textOf(page.locator('.screen')), /Not open source/)
+    assert.equal(await page.getByRole('link', { name: /^Source/ }).getAttribute('href'), 'https://developers.google.com/ml-kit/terms')
+
+    await back(page).click()
+    await back(page).click()
+    await heading(page, 'About Snapsody').waitFor()
+    await back(page).click()
+    await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
+    assert.equal(await app.back(), false, 'back at Settings leaves the app')
+  })
+})
+
+test('settings: a licence text that cannot be read leaves the rest of the screen and one line saying so', async () => {
+  await withApp({ seed: '' }, async ({ page }) => {
+    await page.route('**/licences/*', (route) => route.abort('failed'))
+    await tab(page, 'Settings').click()
+    await page.getByRole('button', { name: /^About Snapsody/ }).click()
+    await page.getByRole('button', { name: /^Credits and licences/ }).click()
+    await page.getByRole('button', { name: /^homr\b/ }).click()
+    await page.getByRole('alert').filter({ hasText: 'The licence text could not be read.' }).waitFor()
+    assert.equal(await page.getByRole('link', { name: /^Source/ }).count(), 1)
   })
 })
 
@@ -206,12 +240,12 @@ test('settings: when they could not be read at start a change works for this run
   await withApp({ seed: 'settings-unreadable' }, async (app) => {
     const { page } = app
     await tab(page, 'Settings').click()
-    await line(page, 'Language').click()
-    await choice(page, 'Language', 'Nederlands').click()
-    // The change is in effect (the app is Dutch) ...
-    await page.getByRole('heading', { name: 'Instellingen', level: 1 }).waitFor()
+    const countIn = page.getByRole('switch', { name: /Count-in/ })
+    await countIn.click()
+    // The change is in effect ...
+    assert.equal(await countIn.getAttribute('aria-checked'), 'true')
     // ... and the notice says it is lost when the app is closed.
-    const notice = page.getByRole('status').filter({ hasText: 'Deze instelling kon niet worden bewaard en gaat verloren als je de app sluit.' })
+    const notice = page.getByRole('status').filter({ hasText: 'This setting could not be saved, so it will be lost when you close the app.' })
     await notice.waitFor()
     assert.equal(await app.file('settings.json'), undefined, 'nothing was written over the file that could not be read')
     await notice.getByRole('button', { name: 'OK' }).click()

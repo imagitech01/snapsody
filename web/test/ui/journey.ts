@@ -27,7 +27,7 @@ export const highlighted = (page: Page): Promise<string | null> =>
 
 // ---- The shell: tabs ----------------------------------------------------------------------------
 
-/** The tab bar, in English (`app.language` nl: "Hoofdonderdelen"). */
+/** The tab bar, in English. */
 export const tabBar = (page: Page, name = 'Main areas') => page.getByRole('navigation', { name })
 
 /** One tab of the tab bar. */

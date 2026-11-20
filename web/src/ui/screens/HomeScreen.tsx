@@ -18,7 +18,6 @@ export function HomeScreen() {
   return (
     <div class="screen screen--tabs">
       <header class="screen-header">
-        <p class="t-eyebrow">{t('app.name')}</p>
         <h1 class="t-title">{t('home.title')}</h1>
         {first ? null : <p class="t-subtitle">{card ? t('home.subtitle') : t('home.subtitle.pick')}</p>}
       </header>
@@ -36,7 +35,7 @@ export function HomeScreen() {
         ) : (
           <>
             {card ? (
-              <Card tone="dark" label={t('home.continue.title')}>
+              <Card tone="light" label={t('home.continue.title')}>
                 <p class="continue-eyebrow">{t('home.continue.title')}</p>
                 <h2 class="continue-title">{card.piece.name}</h2>
                 <p class="continue-meta">

@@ -28,7 +28,7 @@ test('ui harness: the app starts on its own entry, with signals and the shell ru
   await withApp({}, async ({ page }) => {
     await started(page)
     assert.equal(page.url(), START_URL)
-    assert.equal(await page.locator('html').getAttribute('lang'), 'en', 'the page language follows the app')
+    assert.equal(await page.locator('html').getAttribute('lang'), 'en', 'the page is English')
     await page.getByRole('region', { name: 'Add your first music' }).waitFor()
     // A tap on a tab changes what the signals of the router show (Preact and signals run in the real build).
     await page.getByRole('navigation', { name: 'Main areas' }).getByRole('button', { name: 'Settings' }).click()

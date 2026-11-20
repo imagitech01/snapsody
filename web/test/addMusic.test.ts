@@ -4,7 +4,6 @@ import { signal } from '@preact/signals'
 import { MAX_PAGES, createAddMusic, pageLayoutOf, scanFolderOf, stavesForPiece } from '../src/app/addMusic.ts'
 import type { AddMusicDeps, AddMusicFlow, AddMusicState, ReadingProgress } from '../src/app/addMusic.ts'
 import { createI18n } from '../src/app/i18n/index.ts'
-import type { Language } from '../src/app/i18n/index.ts'
 import { LibraryError, createLibrary } from '../src/app/library.ts'
 import type { Library, Staff } from '../src/app/library.ts'
 import { loadSettings } from '../src/app/settings.ts'
@@ -38,7 +37,7 @@ async function setup(options: { hintSeen?: boolean; autoRun?: boolean } = {}) {
   const library = createLibrary(platform.files, { newId: () => `piece-${++ids}`, now: () => ADDED })
   const settings = await loadSettings(platform.files)
   if (options.hintSeen ?? true) await settings.setScanHintSeen(true)
-  const i18n = createI18n(signal<Language | null>('en'))
+  const i18n = createI18n()
   const deps: AddMusicDeps = {
     scanner: platform.scanner,
     reader: platform.reader,

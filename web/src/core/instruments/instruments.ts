@@ -19,8 +19,8 @@ export type InstrumentFamily = 'woodwind' | 'keyboard' | 'string' | 'brass'
 
 export interface Instrument {
   readonly id: InstrumentId
-  /** The name as the user sees it, in each language the app has. */
-  readonly names: { readonly en: string; readonly nl: string }
+  /** The name as the user sees it. */
+  readonly name: string
   readonly family: InstrumentFamily
   /** Semitones from written to sounding pitch (tenor saxophone: -14, a major ninth lower). */
   readonly transpose: number
@@ -41,7 +41,7 @@ const TREBLE: Clef = { sign: 'G', line: 2 }
 
 export const TENOR_SAX: Instrument = {
   id: 'tenor-sax',
-  names: { en: 'Tenor saxophone', nl: 'Tenorsaxofoon' },
+  name: 'Tenor saxophone',
   family: 'woodwind',
   transpose: -14,
   writtenRange: { low: 58, high: 90 }, // B♭3–F♯6
@@ -51,7 +51,7 @@ export const TENOR_SAX: Instrument = {
 
 export const ALTO_SAX: Instrument = {
   id: 'alto-sax',
-  names: { en: 'Alto saxophone', nl: 'Altsaxofoon' },
+  name: 'Alto saxophone',
   family: 'woodwind',
   transpose: -9,
   writtenRange: { low: 58, high: 90 }, // B♭3–F♯6
@@ -61,7 +61,7 @@ export const ALTO_SAX: Instrument = {
 
 export const CLARINET: Instrument = {
   id: 'clarinet',
-  names: { en: 'B♭ clarinet', nl: 'B♭-klarinet' },
+  name: 'B♭ clarinet',
   family: 'woodwind',
   transpose: -2,
   writtenRange: { low: 52, high: 96 }, // E3–C7
@@ -71,7 +71,7 @@ export const CLARINET: Instrument = {
 
 export const PIANO: Instrument = {
   id: 'piano',
-  names: { en: 'Piano', nl: 'Piano' },
+  name: 'Piano',
   family: 'keyboard',
   transpose: 0,
   writtenRange: { low: 21, high: 108 }, // A0–C8
@@ -81,7 +81,7 @@ export const PIANO: Instrument = {
 
 export const GUITAR: Instrument = {
   id: 'guitar',
-  names: { en: 'Guitar', nl: 'Gitaar' },
+  name: 'Guitar',
   family: 'string',
   transpose: -12,
   writtenRange: { low: 52, high: 83 }, // E3–B5
@@ -91,7 +91,7 @@ export const GUITAR: Instrument = {
 
 export const VIOLIN: Instrument = {
   id: 'violin',
-  names: { en: 'Violin', nl: 'Viool' },
+  name: 'Violin',
   family: 'string',
   transpose: 0,
   writtenRange: { low: 55, high: 100 }, // G3–E7
@@ -101,7 +101,7 @@ export const VIOLIN: Instrument = {
 
 export const TRUMPET: Instrument = {
   id: 'trumpet',
-  names: { en: 'Trumpet', nl: 'Trompet' },
+  name: 'Trumpet',
   family: 'brass',
   transpose: -2,
   writtenRange: { low: 54, high: 86 }, // F♯3–D6

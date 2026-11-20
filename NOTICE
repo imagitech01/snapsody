@@ -21,15 +21,20 @@ homr 0.7.1 - AGPL-3.0
 
 Score rendering
 ---------------
-Verovio - LGPL-3.0 (GNU Lesser General Public License v3, with the GPL-3.0 text
+Verovio 6.4.0 - LGPL-3.0 (GNU Lesser General Public License v3, with the GPL-3.0 text
   it refers to)
   https://github.com/rism-digital/verovio
+  Includes third-party code (pugixml, jsonxx, miniz-cpp, midifile, Tuning
+  Library, CRC-32, base64, libmei); their notices are in the licence text the
+  app shows (web/public/licences/verovio.txt).
+Leipzig 5.2.102 - OFL-1.1 (SIL Open Font License 1.1), the music font embedded in Verovio
+  https://github.com/rism-digital/leipzig
 
 Model inference
 ---------------
-LiteRT (formerly TensorFlow Lite), including its GPU delegate - Apache-2.0
+LiteRT 1.4.2 (formerly TensorFlow Lite), including its GPU delegate - Apache-2.0
   https://github.com/google-ai-edge/LiteRT
-ONNX Runtime - MIT
+ONNX Runtime 1.31.1 - MIT
   https://github.com/microsoft/onnxruntime
 
 Playback samples
@@ -88,34 +93,49 @@ MuseScore_General 0.2 (MuseScore_General.sf2, SHA-256
 
 Python on Android
 -----------------
-Chaquopy - MIT
+Chaquopy 17.2.0 - MIT
   https://github.com/chaquo/chaquopy
 Python (CPython) 3.10 - PSF-2.0 (Python Software Foundation License Version 2)
   https://www.python.org/
-numpy 1.26.2 - BSD-3-Clause
+NumPy 1.26.2 - BSD-3-Clause
   https://numpy.org/
 OpenCV 4.5.1 - Apache-2.0; opencv-python packaging - MIT
   https://opencv.org/ , https://github.com/opencv/opencv-python
-Pillow - MIT-CMU (HPND)
+Pillow 11.0.0 - MIT-CMU (HPND)
   https://python-pillow.org/
-typing_extensions - PSF-2.0
+typing_extensions 4.16.0 - PSF-2.0
   https://github.com/python/typing_extensions
+
+User interface
+--------------
+Preact 11.1.1 - MIT
+  https://github.com/preactjs/preact
+Preact Signals 2.11.4 (with signals-core 1.14.5) - MIT
+  https://github.com/preactjs/signals
+Capacitor 8.6.2 (core, android; App 8.1.2, Device 8.0.3, Filesystem 8.1.5) - MIT
+  https://github.com/ionic-team/capacitor
+Capacitor Keep Awake 8.0.1 - MIT
+  https://github.com/capacitor-community/keep-awake
+Apache Cordova Android 14.0.1 - Apache-2.0
+  https://github.com/apache/cordova-android
+Public Sans 2.001 - OFL-1.1 (SIL Open Font License 1.1), by the U.S. Web Design System
+  https://github.com/uswds/public-sans
 
 Android runtime libraries
 -------------------------
 All Apache-2.0 (licences read from their published Maven POMs):
-  - Kotlin standard library and kotlinx (coroutines, serialization)
+  - Kotlin and kotlinx 2.2.20 (standard library, coroutines, serialization)
     https://kotlinlang.org/
-  - AndroidX: core, activity, webkit, lifecycle, savedstate, collection,
+  - AndroidX (various versions): core, activity, webkit, lifecycle, savedstate, collection,
     annotation, arch-core, startup, tracing, profileinstaller,
     versionedparcelable, interpolator, navigationevent, concurrent-futures,
     compose runtime-annotation
     https://developer.android.com/jetpack/androidx
-  - Guava listenablefuture, JetBrains annotations, JSpecify
+  - Guava listenablefuture 1.0, JetBrains annotations 23.0.0, JSpecify 1.0.0
 
 Page capture
 ------------
-Google ML Kit Document Scanner - proprietary, closed source, distributed through
+Google ML Kit Document Scanner 16.0.0 - proprietary, closed source, distributed through
   Google Play services under the ML Kit Terms of Service
   https://developers.google.com/ml-kit/terms
   This component is not free software. It sits behind the PageSource interface

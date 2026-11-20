@@ -104,7 +104,7 @@ async function viewWith(names: string[]) {
     })
   }
   const settings = await loadSettings(files)
-  const view = createLibraryView({ library, i18n: createI18n(settings.language, 'en'), now: () => new Date(2026, 10, 18, 14, 5) })
+  const view = createLibraryView({ library, i18n: createI18n(), now: () => new Date(2026, 10, 18, 14, 5) })
   await view.refresh()
   return { view, library, settings }
 }

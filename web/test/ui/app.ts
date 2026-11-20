@@ -75,8 +75,6 @@ export interface AppOptions {
    * The fake files survive `reload()`; they are gone with the app.
    */
   seed?: string
-  /** What the fake device says its language is (the seeded entry only); English by default. */
-  language?: string
   /** `manual`: the fake reader's jobs send their events only when the journey steps them (the seeded entry only). */
   reader?: 'manual'
   /** Viewport; the S24's by default. */
@@ -140,7 +138,6 @@ export class App {
     const app = new App(browser, context, page, pageErrors, seeded)
     if (seeded) {
       const query = new URLSearchParams({ seed: options.seed! })
-      if (options.language) query.set('language', options.language)
       if (options.reader) query.set('reader', options.reader)
       await page.goto(`${START_URL}${options.path ?? SEEDED}?${query}`)
       await page.waitForFunction(() => window.__test !== undefined)

@@ -49,11 +49,11 @@ async function play(instrument: Instrument, phrase: Phrase): Promise<void> {
     player.setTempo(phrase.bpm ?? tempo.value)
     player.setMetronome(metronome.value)
     reference.value = player.setPitchReference(reference.value)
-    playing.value = `${instrument.names.en}: ${phrase.label}`
+    playing.value = `${instrument.name}: ${phrase.label}`
     await player.play()
   } catch (error) {
     playing.value = ''
-    failure.value = `${instrument.names.en}, ${phrase.label}: ${describe(error)}`
+    failure.value = `${instrument.name}, ${phrase.label}: ${describe(error)}`
   }
 }
 
@@ -134,7 +134,7 @@ function Row({ instrument }: { instrument: Instrument }) {
   return (
     <tr data-instrument={instrument.id}>
       <th scope="row">
-        {instrument.names.en}
+        {instrument.name}
         {instrument.hidden ? <span class="tag">hidden until it passes this check</span> : null}
       </th>
       <td>

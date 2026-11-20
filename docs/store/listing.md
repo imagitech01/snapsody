@@ -1,6 +1,6 @@
 # Google Play listing
 
-The texts of the Play Store listing, in English (en-US) and Dutch (nl-NL). The screenshots and the
+The texts of the Play Store listing, in English (en-US). The app and the listing are English only. The screenshots and the
 feature graphic are made by `tools/store/` (see its README). Play's limits: app name 30 characters,
 short description 80, full description 4000.
 
@@ -45,7 +45,6 @@ YOUR MUSIC, YOUR PHONE
 • Works fully offline: the app has no internet permission.
 • No account, no ads, no tracking.
 • Your pieces, photos and settings stay on your device.
-• In English and Dutch.
 • Open source (AGPL-3.0).
 
 GOOD TO KNOW
@@ -68,72 +67,13 @@ Feature graphic: "Snap your sheet music. Play along."
 
 ---
 
-## Nederlands (nl-NL)
-
-### App-naam
-
-Snapsody: bladmuziek oefenen
-
-### Korte beschrijving
-
-Fotografeer je bladmuziek, hoor hoe het klinkt en speel mee in je eigen tempo.
-
-### Volledige beschrijving
-
-Oefen je uit een lesboek en heeft de oefening geen opname? Maak een foto van de pagina. Snapsody leest de noten, speelt ze af met een echte instrumentklank en volgt mee in de partituur. Zo hoor je hoe het moet klinken en speel je mee in je eigen tempo.
-
-FOTOGRAFEREN, LEZEN, SPELEN
-• Fotografeer een of meer pagina's met de documentscanner van je telefoon.
-• Snapsody leest de muziek op je telefoon zelf. Er wordt niets geüpload en je hebt geen account nodig.
-• De pagina's worden één muziekstuk met doorlopende maatnummers, klaar om te oefenen.
-
-OEFENEN ZOALS JIJ WIL
-• De partituur licht mee op, zodat je altijd ziet waar je bent.
-• Zet het tempo lager en versnel weer naarmate het beter gaat.
-• Metronoom en één maat aftellen.
-• Herhaal de moeilijke maten, met desgewenst een rust tussen de herhalingen.
-• Elk muziekstuk onthoudt zijn maat, tempo, herhaling en metronoom.
-
-ZEVEN INSTRUMENTKLANKEN
-Tenorsax, altsax, klarinet, piano, gitaar, viool en trompet, met gesamplede klanken die in de app zitten. De geschreven noten blijven zoals ze zijn; alleen de klank wordt getransponeerd voor jouw instrument.
-
-VERBETER WAT DE LEZER MISTE
-Herkenning is nooit perfect, daarom is er een partituureditor. Pas noten, rusten, lengtes, overbindingen, legatobogen, articulaties, dynamiek, toonsoort, maatsoort en tempo aan, regel per regel, en beluister een maat voor je bewaart. Snapsody wijst je vriendelijk op maten die niet kloppen en noten waarover het twijfelde.
-
-JOUW MUZIEK, JOUW TELEFOON
-• Werkt volledig offline: de app heeft geen internettoestemming.
-• Geen account, geen advertenties, geen tracking.
-• Je muziekstukken, foto's en instellingen blijven op je toestel.
-• In het Nederlands en het Engels.
-• Open source (AGPL-3.0).
-
-GOED OM TE WETEN
-• Snapsody leest melodieën op één notenbalk, zoals de oefeningen in een lesboek voor sax, klarinet, trompet of viool. Akkoorden en pianopartituren met twee notenbalken leest het niet.
-• Het scannen gebeurt met de documentscanner van Google, die bij Google Play-services hoort.
-
-### Bijschriften bij de screenshots
-
-| # | Scherm | Kop | Onderregel |
-|---|---|---|---|
-| 1 | play-along | Speel mee met je eigen bladmuziek | De partituur volgt de muziek, noot voor noot. |
-| 2 | reading | Maak een foto. Snapsody leest de noten. | Op je telefoon zelf. Er wordt niets geüpload. |
-| 3 | loop | Trager spelen, lastige maten herhalen | Tempo, metronoom, aftellen en herhaling. |
-| 4 | editor | Een noot aanpassen in een paar tikken | Noten, lengtes, tekens, toonsoort en tempo. |
-| 5 | home | Ga verder waar je gebleven was | Elk stuk onthoudt zijn maat, tempo en herhaling. |
-| 6 | instruments | Zeven echte instrumentklanken | Sax, klarinet, piano, gitaar, viool en trompet. |
-| 7 | library | Al je muziek op één plek | Zoeken, favorieten en je oefenrotatie. |
-
-Feature graphic: "Fotografeer je bladmuziek. Speel mee."
-
----
-
 ## Privacy policy
 
 Play Console → Policy and programs → App content → Privacy policy:
 
     https://imagitech.be/snapsody/privacy/
 
-The page is [`docs/privacy/index.html`](../privacy/index.html) (English and Dutch). ImagiTech hosts it;
+The page is [`docs/privacy/index.html`](../privacy/index.html) (English only, like the app). ImagiTech hosts it;
 upload it again whenever it changes. The same URL is `PRIVACY_POLICY_URL` in `web/src/app/links.ts`,
 behind the Privacy policy row in Settings.
 

@@ -1,0 +1,10 @@
+Google ML Kit Document Scanner 16.0.0 (com.google.android.gms:play-services-mlkit-document-scanner)
+
+This component is not open source. It is proprietary software from Google,
+delivered through Google Play services, and its use is governed by the ML Kit
+Terms of Service:
+
+https://developers.google.com/ml-kit/terms
+
+Snapsody uses it only to capture and crop pages of sheet music. It sits behind
+a replaceable interface in the app, so an open implementation can take its place.

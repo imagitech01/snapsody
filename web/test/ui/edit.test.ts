@@ -580,22 +580,6 @@ test('edit: the Marks tab sets how a bar starts and ends, and the passes of an e
   })
 })
 
-test('edit: the bar-line group speaks Dutch', async () => {
-  await withApp({ seed: 'library', language: 'nl' }, async (app) => {
-    const { page } = app
-    await page.evaluate((id) => window.__test!.shell.router.push({ name: 'editor', pieceId: id }), ID.ode)
-    await page.locator('.score-view[data-rendered="true"]').waitFor()
-    await page.getByRole('radio', { name: 'Tekens' }).click()
-    await tapNote(page, ODE[2]![1]!)
-    const group = page.getByRole('region', { name: 'Maatstrepen' })
-    await group.getByRole('heading', { name: 'Maat 3' }).waitFor()
-    await group.getByRole('combobox', { name: 'Begint met' }).selectOption('repeat')
-    await group.getByRole('combobox', { name: 'Eindigt met' }).selectOption('repeat')
-    assert.equal(await textOf(group.getByRole('group', { name: 'Gespeeld' }).getByRole('status')), '2×')
-    assert.match(await textOf(group), /Begin herhaling ‖:/)
-  })
-})
-
 test('edit: the Score tab changes the key and the time signature, which draws the score again and checks the bars, and the written tempo', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
@@ -1019,17 +1003,3 @@ test('edit: a tap on a bar line selects its bar and shows the bar-line controls 
   })
 })
 
-test('edit: the element panel speaks Dutch', async () => {
-  await withApp({ seed: '', language: 'nl' }, async (app) => {
-    const { page } = app
-    const id = await makeElementsPiece(page)
-    await page.evaluate((pieceId) => window.__test!.shell.router.push({ name: 'editor', pieceId }), id)
-    await page.locator('.score-view[data-rendered="true"]').waitFor()
-    const at = await centre(page, '.score-view g.clef[id="clef-2"]')
-    await page.touchscreen.tap(at.x, at.y)
-    const dutch = panel(page, 'Gekozen onderdeel')
-    await dutch.waitFor()
-    assert.equal(await textOf(dutch.locator('.editor-element-title')), 'Sleutel · bas · maat 3')
-    assert.equal(await dutch.getByRole('button', { name: 'Verwijderen' }).count(), 1)
-  })
-})

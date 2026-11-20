@@ -194,8 +194,6 @@ export interface Device {
    * removes the handler.
    */
   onBackButton(handler: () => boolean): () => void
-  /** The device language as a BCP 47 tag, like "nl-BE" or "en". */
-  language(): Promise<string>
 }
 
 // ---- The whole port ------------------------------------------------------------------------

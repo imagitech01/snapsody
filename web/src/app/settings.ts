@@ -8,10 +8,10 @@ import { isJson, settleTemps } from './strayTemps.ts'
 
 /*
  * The general settings (practice-app design D4, D8, D13; spec `app-shell`, "General settings"):
- * the default instrument, the count-in (design D17), the language and whether
+ * the default instrument, the count-in (design D17) and whether
  * the scan hint was seen, kept in `settings.json` at the root of the app's files.
  *
- *   { "defaultInstrument": "tenor-sax", "countIn": false, "language": null, "scanHintSeen": false }
+ *   { "defaultInstrument": "tenor-sax", "countIn": false, "scanHintSeen": false }
  *
  * - Each setting is a signal. A setter changes the signal at once, so the app follows without a
  *   restart, and returns the promise of the save. Saves go through one queue, each writing the
@@ -19,13 +19,12 @@ import { isJson, settleTemps } from './strayTemps.ts'
  *   last value set is the one that stays. When a save fails, the value stays set for this run and
  *   the promise rejects, so the caller can tell the user it will not be kept.
  * - Playback is always tuned to A4 = 440 Hz (design D19): an older file may still have a
- *   `pitchReference`; it is ignored when read and not written again.
+ *   `pitchReference`; it is ignored when read and not written again. So is a `language` (the app is
+ *   English only, `paper-and-ink-and-about` D11).
  * - What is read is never trusted. A missing file, a file that is not JSON or a wrongly shaped one
  *   gives the defaults, and so does each value that is not valid: an instrument id that is unknown
  *   or hidden (none is, today) gives the tenor
- *   saxophone, a language other than "en" or
- *   "nl" gives null (the device's language, design D13), and a count-in or scan hint flag that is not
- *   true gives false.
+ *   saxophone, and a count-in or scan hint flag that is not true gives false.
  * - A file that is there but cannot be read (the platform reports anything other than "not found")
  *   is not replaced: the app runs with the defaults, the settings are `readOnly`, and every save
  *   rejects without writing, until a later start reads the file. The user's settings may still be
@@ -35,18 +34,11 @@ import { isJson, settleTemps } from './strayTemps.ts'
  *   JSON becomes settings.json (it may be the only copy).
  */
 
-/** The languages the app has (design D13). */
-export type Language = 'en' | 'nl'
-
-export const LANGUAGES: readonly Language[] = ['en', 'nl']
-
 /** The settings as stored. */
 export interface SettingsData {
   defaultInstrument: InstrumentId
   /** One bar of clicks before the music starts, for every piece. */
   countIn: boolean
-  /** The language the user chose, or null to follow the device. */
-  language: Language | null
   /** The hint before the first scan has been shown. */
   scanHintSeen: boolean
 }
@@ -54,7 +46,6 @@ export interface SettingsData {
 export const DEFAULT_SETTINGS: Readonly<SettingsData> = {
   defaultInstrument: DEFAULT_INSTRUMENT.id,
   countIn: false,
-  language: null,
   scanHintSeen: false,
 }
 
@@ -79,7 +70,6 @@ export function normaliseSettings(value: unknown): SettingsData {
   return {
     defaultInstrument: offeredInstrument(o.defaultInstrument) ?? DEFAULT_SETTINGS.defaultInstrument,
     countIn: o.countIn === true,
-    language: o.language === 'en' || o.language === 'nl' ? o.language : null,
     scanHintSeen: o.scanHintSeen === true,
   }
 }
@@ -88,7 +78,6 @@ export class Settings {
   private readonly files: Files
   private readonly instrument: Signal<InstrumentId>
   private readonly count: Signal<boolean>
-  private readonly lang: Signal<Language | null>
   private readonly hint: Signal<boolean>
   /** The end of the queue of saves; it never rejects. */
   private tail: Promise<unknown> = Promise.resolve()
@@ -104,7 +93,6 @@ export class Settings {
     this.readOnly = options.readOnly ?? false
     this.instrument = signal(data.defaultInstrument)
     this.count = signal(data.countIn)
-    this.lang = signal(data.language)
     this.hint = signal(data.scanHintSeen)
   }
 
@@ -118,11 +106,6 @@ export class Settings {
     return this.count
   }
 
-  /** The language the user chose, or null for the device's. */
-  get language(): ReadonlySignal<Language | null> {
-    return this.lang
-  }
-
   get scanHintSeen(): ReadonlySignal<boolean> {
     return this.hint
   }
@@ -132,7 +115,6 @@ export class Settings {
     return {
       defaultInstrument: this.instrument.value,
       countIn: this.count.value,
-      language: this.lang.value,
       scanHintSeen: this.hint.value,
     }
   }
@@ -147,13 +129,6 @@ export class Settings {
 
   setCountIn(on: boolean): Promise<void> {
     this.count.value = on
-    return this.save()
-  }
-
-  /** `null` follows the device's language. */
-  setLanguage(language: Language | null): Promise<void> {
-    if (language !== null && !LANGUAGES.includes(language)) return Promise.reject(new Error(`not a language of the app: ${String(language)}`))
-    this.lang.value = language
     return this.save()
   }
 

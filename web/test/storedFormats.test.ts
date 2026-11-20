@@ -111,8 +111,8 @@ for (const version of versions) {
     if (files.text('settings.json') !== undefined) {
       const settings = await loadSettings(files)
       // A setting added since the store was written (the count-in, design D17) reads as its default.
-      // A pitchReference from before design D19 is ignored.
-      const { pitchReference: _ignored, ...stored } = JSON.parse(files.text('settings.json')!) as Record<string, unknown>
+      // A pitchReference from before design D19 and a language from before the app was English only are ignored.
+      const { pitchReference: _ignored, language: _language, ...stored } = JSON.parse(files.text('settings.json')!) as Record<string, unknown>
       assert.deepEqual(settings.snapshot(), { ...DEFAULT_SETTINGS, ...stored }, `${version}: settings.json is read as it was written`)
     }
   })
@@ -145,8 +145,8 @@ test('stored formats: v2 holds the piece the app wrote, with every field read ba
   // The fixture's practice.json still has countIn and follow, from before they left it (design D17): they are ignored.
   assert.deepEqual(await library.readPractice(info.id), { bar: 10, tempo: 72, loop: { start: 9, end: 12 }, loopRest: 1, metronome: true })
   const settings = await loadSettings(files)
-  // Its settings.json has no countIn yet (off), and still has a pitchReference from before design D19: ignored.
-  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: false, language: 'nl', scanHintSeen: true })
+  // Its settings.json has no countIn yet (off), and still has a pitchReference from before design D19 and a language "nl" from before the app was English only: both ignored.
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: true })
 })
 
 test('stored formats: a piece saved before dynamics, tempo marks and words had ids loads, and gets unique ones (change select-and-delete-elements, design D1)', async () => {

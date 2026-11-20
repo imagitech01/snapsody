@@ -17,15 +17,11 @@ export async function mount(platform: Platform, root: HTMLElement): Promise<Shel
   try {
     shell = await startShell(platform)
   } catch {
-    // Nothing in the start-up is expected to throw; if it does, say so in the phone's language and do not stay blank.
-    const t = createI18n(signal(null), globalThis.navigator?.language).t
+    // Nothing in the start-up is expected to throw; if it does, say so and do not stay blank.
+    const t = createI18n().t
     render(<p class="fatal">{t('error.generic')}</p>, root)
     throw new Error('the app could not start')
   }
-  // The page's language follows the app's (screen readers pick their voice from it).
-  effect(() => {
-    document.documentElement.lang = shell.i18n.language.value
-  })
   render(<App shell={shell} />, root)
   return shell
 }

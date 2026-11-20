@@ -1,15 +1,13 @@
-// The pieces for the Google Play Store screenshots (tools/store/capture.ts), seeded by the `store-en` and
-// `store-nl` parts of seeds.ts. "Ode to Joy" (Beethoven, public domain) is typed in note by note; the other
+// The pieces for the Google Play Store screenshots (tools/store/capture.ts), seeded by the `store`
+// part of seeds.ts. "Ode to Joy" (Beethoven, public domain) is typed in note by note; the other
 // pieces are only list items, so they are placeholder bars. Nothing here comes from a method book.
 // The clock of the harness is 18 Nov 2026 10:00 UTC (`CLOCK_START`).
 
 import type { PracticeState } from '../../src/app/library.ts'
 
-export type StoreLanguage = 'en' | 'nl'
-
 export interface StorePiece {
   id: string
-  name: Record<StoreLanguage, string>
+  name: string
   /** The bars of each page, in order. */
   pages: number[]
   created: string
@@ -21,11 +19,11 @@ export interface StorePiece {
 }
 
 export const STORE_PIECES: readonly StorePiece[] = [
-  { id: '00000000-0000-4000-8000-0000000005a1', name: { en: 'Ode to Joy', nl: 'Ode aan de vreugde' }, pages: [8, 8], created: '2026-11-16T08:00:00.000Z', lastPracticed: '2026-11-18T09:30:00.000Z', favorite: false, practice: { bar: 5, tempo: 72, metronome: true }, ode: true },
-  { id: '00000000-0000-4000-8000-0000000005a2', name: { en: 'Greensleeves', nl: 'Greensleeves' }, pages: [8, 8], created: '2026-11-05T08:00:00.000Z', lastPracticed: '2026-11-17T17:00:00.000Z', favorite: true },
-  { id: '00000000-0000-4000-8000-0000000005a3', name: { en: 'Frère Jacques', nl: 'Vader Jacob' }, pages: [8], created: '2026-11-08T08:00:00.000Z', lastPracticed: '2026-11-16T18:00:00.000Z', favorite: false },
-  { id: '00000000-0000-4000-8000-0000000005a4', name: { en: 'Amazing Grace', nl: 'Amazing Grace' }, pages: [8, 8], created: '2026-11-14T08:00:00.000Z', lastPracticed: null, favorite: false },
-  { id: '00000000-0000-4000-8000-0000000005a5', name: { en: 'Scarborough Fair', nl: 'Scarborough Fair' }, pages: [12], created: '2026-11-12T08:00:00.000Z', lastPracticed: null, favorite: true },
+  { id: '00000000-0000-4000-8000-0000000005a1', name: 'Ode to Joy', pages: [8, 8], created: '2026-11-16T08:00:00.000Z', lastPracticed: '2026-11-18T09:30:00.000Z', favorite: false, practice: { bar: 5, tempo: 72, metronome: true }, ode: true },
+  { id: '00000000-0000-4000-8000-0000000005a2', name: 'Greensleeves', pages: [8, 8], created: '2026-11-05T08:00:00.000Z', lastPracticed: '2026-11-17T17:00:00.000Z', favorite: true },
+  { id: '00000000-0000-4000-8000-0000000005a3', name: 'Frère Jacques', pages: [8], created: '2026-11-08T08:00:00.000Z', lastPracticed: '2026-11-16T18:00:00.000Z', favorite: false },
+  { id: '00000000-0000-4000-8000-0000000005a4', name: 'Amazing Grace', pages: [8, 8], created: '2026-11-14T08:00:00.000Z', lastPracticed: null, favorite: false },
+  { id: '00000000-0000-4000-8000-0000000005a5', name: 'Scarborough Fair', pages: [12], created: '2026-11-12T08:00:00.000Z', lastPracticed: null, favorite: true },
 ]
 
 // Ode to Joy, 16 bars of 4/4 in C major. q = quarter, h = half, Q = dotted quarter, e = eighth.

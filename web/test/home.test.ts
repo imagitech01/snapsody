@@ -31,7 +31,7 @@ async function setup() {
   let clock = new Date(2026, 10, 10, 9, 0).getTime()
   const library = createLibrary(files, { newId: () => `piece-${++counter}`, now: () => new Date(clock) })
   const settings = await loadSettings(files)
-  const i18n = createI18n(settings.language, 'en')
+  const i18n = createI18n()
   const view = createLibraryView({ library, i18n, now: () => NOW })
   const home = createHome({ view, library, i18n })
 
@@ -326,19 +326,4 @@ test('the summary line: pages (above one), bars, and when it was practised or ad
   assert.equal(rows.get('Ode to Joy')!.summary, '2 pages · 24 bars · Practised yesterday')
   assert.equal(rows.get('Even eighths')!.summary, '8 bars · Added last week', 'one page: no pages, and never practised: when it was added')
   assert.equal(rows.get('Ode to Joy')!.length, '24 bars')
-})
-
-test('the summary line and the length follow the language, and "yesterday" the day of the refresh', async () => {
-  const s = await setup()
-  const ode = await s.add('Ode to Joy', { bars: 24, pages: 2 })
-  await s.practise(ode.id, local(2026, 10, 17, 9, 0))
-  await s.home.refresh()
-  const summaries: string[] = []
-  const stop = effect(() => {
-    summaries.push(s.view.rows.value[0]!.summary)
-  })
-  await s.settings.setLanguage('nl')
-  stop()
-  assert.deepEqual(summaries, ['2 pages · 24 bars · Practised yesterday', '2 pagina\'s · 24 maten · Gisteren geoefend'])
-  assert.equal(s.view.rows.value[0]!.length, '24 maten')
 })

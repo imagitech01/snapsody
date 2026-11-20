@@ -17,7 +17,7 @@ import { matchesSearch } from './search.ts'
  *   A refresh that is overtaken by a later one is dropped, so a slow read never overwrites a newer list.
  * - The list is in the library's order: the most recently practised or added piece first.
  * - A row carries the text the screens show, made with `i18n`: the summary line ("2 pages · 24 bars
- *   · Practised yesterday") and the length ("24 bars"). Rows follow the language, and are made again
+ *   · Practised yesterday") and the length ("24 bars"). Rows are made again
  *   on every refresh, so "yesterday" is right the next time the screen is shown.
  * - Search matches the name, ignoring case and accents (`search.ts`). It filters the library list
  *   (`visible`); the favorites list is not filtered.

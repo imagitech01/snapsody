@@ -62,28 +62,6 @@ test('shell: a piece whose piece.json only survived as a temp file is recovered 
   }
 })
 
-test('shell: the language is the settings\' choice, else the device\'s, and follows the settings at once', async () => {
-  const platform = createFakePlatform({ language: 'nl-BE' })
-  const shell = await startShell(platform)
-  try {
-    assert.equal(shell.i18n.language.value, 'nl', 'a Dutch phone')
-    assert.equal(shell.i18n.t('tab.library'), 'Bibliotheek')
-    assert.equal(await shell.run(() => shell.settings.setLanguage('en'), 'settings.saveFailed'), true)
-    assert.equal(shell.i18n.t('tab.library'), 'Library', 'no restart')
-    assert.match(platform.files.text('settings.json') ?? '', /"language": "en"/)
-  } finally {
-    shell.stop()
-  }
-
-  // A later start reads the saved choice before the translator is made.
-  const again = await startShell(platform)
-  try {
-    assert.equal(again.i18n.language.value, 'en')
-  } finally {
-    again.stop()
-  }
-})
-
 test('shell: it starts on the Practice tab, and an empty phone is a first launch', async () => {
   const shell = await startShell(createFakePlatform())
   try {
@@ -178,7 +156,7 @@ test('shell: it follows the background, and reads the list when the app comes ba
 test('shell: a save that is rejected is the notice, the value stays set for this run, and the notice ends with the screen', async () => {
   const platform = createFakePlatform()
   // settings.json is there but cannot be read: the settings are read-only for this run.
-  platform.files.seed('settings.json', '{"language":"en"}')
+  platform.files.seed('settings.json', '{"countIn":false}')
   platform.files.fault = (operation, paths) => {
     if (operation === 'read' && paths[0] === 'settings.json') throw new PlatformError('failed', 'cannot read')
   }
@@ -186,16 +164,16 @@ test('shell: a save that is rejected is the notice, the value stays set for this
   try {
     assert.equal(shell.settings.readOnly, true)
     shell.router.selectTab('settings')
-    assert.equal(await shell.run(() => shell.settings.setLanguage('nl'), 'settings.saveFailed'), false, 'run never throws')
+    assert.equal(await shell.run(() => shell.settings.setCountIn(true), 'settings.saveFailed'), false, 'run never throws')
     assert.equal(shell.notice.value, 'settings.saveFailed')
-    assert.equal(shell.i18n.t('settings.saveFailed'), 'Deze instelling kon niet worden bewaard en gaat verloren als je de app sluit.', 'in the language now in effect')
-    assert.equal(shell.settings.language.value, 'nl', 'still in effect')
-    assert.equal(platform.files.text('settings.json'), '{"language":"en"}', 'not written over')
+    assert.equal(shell.i18n.t('settings.saveFailed'), 'This setting could not be saved, so it will be lost when you close the app.')
+    assert.equal(shell.settings.countIn.value, true, 'still in effect')
+    assert.equal(platform.files.text('settings.json'), '{"countIn":false}', 'not written over')
 
     shell.dismissNotice()
     assert.equal(shell.notice.value, null)
 
-    await shell.run(() => shell.settings.setLanguage('en'), 'settings.saveFailed')
+    await shell.run(() => shell.settings.setCountIn(false), 'settings.saveFailed')
     assert.equal(shell.notice.value, 'settings.saveFailed')
     shell.router.selectTab('practice')
     assert.equal(shell.notice.value, null, 'going to another screen ends it')

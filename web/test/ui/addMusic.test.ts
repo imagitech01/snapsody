@@ -319,16 +319,3 @@ test('add music: pages added to a piece follow its last bar and the screen under
     assert.deepEqual(await scanFiles(app), [])
   })
 })
-
-test('add music: the screens speak Dutch', async () => {
-  await withApp({ seed: '', reader: 'manual', language: 'nl-BE' }, async (app) => {
-    const { page } = app
-    await page.getByRole('button', { name: 'Muziek toevoegen' }).click()
-    await page.getByRole('heading', { name: 'Voor je scant', level: 1 }).waitFor()
-    await scanReturns(page, 2)
-    await page.getByRole('button', { name: 'Scanner openen' }).click()
-    await page.getByRole('heading', { name: 'Pagina 1 van 2 wordt gelezen', level: 2 }).waitFor()
-    await page.getByRole('button', { name: 'Annuleren' }).click()
-    await page.getByRole('heading', { name: 'Laten we oefenen', level: 1 }).waitFor()
-  })
-})

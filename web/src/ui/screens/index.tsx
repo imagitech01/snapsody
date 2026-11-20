@@ -1,14 +1,17 @@
 import type { ComponentType } from 'preact'
 import type { Screen, ScreenName, SheetName } from '../../app/router.ts'
+import { AboutScreen } from './AboutScreen.tsx'
 import { AddMusicScreen } from './AddMusicScreen.tsx'
+import { CreditsScreen } from './CreditsScreen.tsx'
 import { EditorScreen } from './editor/EditorScreen.tsx'
 import { FavoritesScreen } from './FavoritesScreen.tsx'
 import { HomeScreen } from './HomeScreen.tsx'
 import { LibraryScreen } from './LibraryScreen.tsx'
+import { LicenceScreen } from './LicenceScreen.tsx'
 import { LoopSheet } from './LoopSheet.tsx'
 import { PracticeScreen } from './PracticeScreen.tsx'
 import { SettingsScreen } from './SettingsScreen.tsx'
-import { InstrumentSheet, LanguageSheet } from './SettingsSheets.tsx'
+import { InstrumentSheet } from './SettingsSheets.tsx'
 import { ToolsSheet } from './ToolsSheet.tsx'
 
 /*
@@ -35,6 +38,9 @@ export const SCREENS: { readonly [N in ScreenName]: ScreenView<N> } = {
   library: LibraryScreen,
   favorites: FavoritesScreen,
   settings: SettingsScreen,
+  about: AboutScreen,
+  credits: CreditsScreen,
+  licence: LicenceScreen,
   practice: PracticeScreen,
   editor: EditorScreen,
   // one component for both: the route stays `add-music` while the pages are read (see AddMusicScreen.tsx)
@@ -47,5 +53,4 @@ export const SHEETS: { readonly [N in SheetName]?: ComponentType } = {
   tools: ToolsSheet,
   loop: LoopSheet,
   instrument: InstrumentSheet,
-  language: LanguageSheet,
 }

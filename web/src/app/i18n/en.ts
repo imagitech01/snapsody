@@ -1,19 +1,17 @@
 /*
- * The English catalogue (practice-app design D13, spec `app-shell` "English and Dutch").
+ * The English catalogue (practice-app design D13; the app is English only, `paper-and-ink-and-about` D11).
  *
- * Every text the app shows is a key here. `nl.ts` is typed from this file, so TypeScript fails the
- * build when Dutch lacks a key (or has one more), and when a message is plural in one language and
- * not in the other. The values are written as constants so that `index.ts` can read each
+ * Every text the app shows is a key here. The values are written as constants so that `index.ts` can read each
  * message's `{placeholder}` names from its type and ask for exactly those parameters:
  *
  *   t('library.summary.bars', { count: 24 })     // "24 bars"
  *   t('bar.position', { bar: 2, bars: 12 })      // "Bar 2 of 12"
  *
  * - A plural message is `{ one, other }`; `index.ts` picks the form with `Intl.PluralRules` from the
- *   `count` parameter, and it is the only plural rule English and Dutch need.
+ *   `count` parameter, and it is the only plural rule English needs.
  * - Keys are `area.name`, flat. Instrument names are not here: they live in `core/instruments`.
  * - The words are the plain ones of the spec ("piece", "bar", "reading pages"). None of them may be a
- *   technical term (`app-shell` "Name and words"); `i18n.test.ts` scans both catalogues for them.
+ *   technical term (`app-shell` "Name and words"); `i18n.test.ts` scans the catalogue for them.
  * - Screens that have no exported Figma frame yet (settings, the add-music screens, the editor's
  *   Marks and Score tabs, the sheets) use strings taken from the specs and are provisional: the UI
  *   groups 12-15 add or reword keys when they build those screens.
@@ -26,9 +24,6 @@ export interface PluralForms {
 }
 
 export const en = {
-  // ---- The app ------------------------------------------------------------------------------
-  'app.name': 'Snapsody',
-
   // ---- Shared -------------------------------------------------------------------------------
   'common.back': 'Back',
   'common.cancel': 'Cancel',
@@ -328,23 +323,38 @@ export const en = {
   'settings.title': 'Settings',
   'settings.instrument': 'Default instrument',
   'settings.subtitle': 'A familiar sound makes learning easier.',
-  'settings.language': 'Language',
-  'settings.language.device': 'Same as the phone',
-  'settings.language.deviceIs': 'Same as the phone ({language})',
-  'settings.credits': 'Credits',
-  'settings.privacy': 'Privacy policy',
-  'settings.source': 'Source code',
-  'settings.source.hint': 'Free and open source (AGPL-3.0)',
+  'settings.rate': 'Rate on Google Play',
+  'settings.about': 'About Snapsody',
   'settings.offline': 'Snapsody works without a network. Your photos, music and practice stay on this phone.',
   'settings.saveFailed': 'This setting could not be saved, so it will be lost when you close the app.',
-  'language.en': 'English',
-  'language.nl': 'Nederlands',
-  'credits.title': 'Credits',
-  'credits.sounds': 'Instrument sounds',
-  'credits.intro': 'The instrument sounds in Snapsody are recordings shared under open licences:',
-  'credits.licence': 'Licence: {licence}',
-  'credits.source': 'Source: {source}',
-  'credits.notices': 'The licence asks that these credits are included:',
+  'about.title': 'About Snapsody',
+  'about.version': 'Version {version}',
+  'about.name': 'Snapsody {version}',
+  'about.licence': 'Free and open source (AGPL-3.0)',
+  'about.copyright': '© 2026 the Snapsody authors',
+  'about.note': 'Snapsody reads your music on the phone itself, with no account and no upload. It is built on the open-source projects listed under Credits and licences.',
+  'about.credits': 'Credits and licences',
+  'about.credits.hint': 'The projects Snapsody is built on',
+  'about.privacy': 'Privacy policy',
+  'about.source': 'Source code',
+  'about.source.hint': 'github.com/imagitech01/snapsody',
+  'credits.title': 'Credits and licences',
+  'credits.intro': 'Snapsody is built on these projects. Tap one to read its licence.',
+  'credits.notOpenSource': 'Not open source',
+  'licence.version': 'Version',
+  'licence.source': 'Source',
+  'licence.notices': 'Notices',
+  'licence.text': 'Licence text',
+  'licence.missing': 'This component is not in the list.',
+  'licence.error': 'The licence text could not be read.',
+  'credits.group.reading': 'Reading the music',
+  'credits.group.showing': 'Showing the music',
+  'credits.group.sounds': 'Instrument sounds',
+  'credits.group.models': 'Running the models',
+  'credits.group.python': 'Python on the phone',
+  'credits.group.app': 'The app itself',
+  'credits.group.android': 'Android libraries',
+  'credits.group.scanning': 'Scanning pages',
 
   // ---- Errors -------------------------------------------------------------------------------
   'error.generic': 'Something went wrong. Please try again.',
@@ -354,11 +364,3 @@ export const en = {
 
 /** The key of every message. */
 export type MessageKey = keyof typeof en
-
-/**
- * What a catalogue of any language must be: every key of `en`, a plural message exactly where `en`
- * has one. `nl.ts` is declared with this type, so a missing or extra key does not compile.
- */
-export type Catalogue = {
-  readonly [K in MessageKey]: (typeof en)[K] extends string ? string : PluralForms
-}

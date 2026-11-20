@@ -18,7 +18,6 @@ export function FavoritesScreen() {
         <IconButton label={t('common.back')} icon="back" onPress={() => void router.back()} />
       </div>
       <header class="screen-header">
-        <p class="t-eyebrow">{t('app.name')}</p>
         <h1 class="t-title">{t('favorites.title')}</h1>
         <p class="t-subtitle">{t('favorites.subtitle')}</p>
       </header>

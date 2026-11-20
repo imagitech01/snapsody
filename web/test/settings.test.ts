@@ -11,14 +11,13 @@ import { PlatformError } from '../src/platform/port.ts'
 // settings" and `instruments` "Default instrument"; the pitch reference setting is gone, design D19) against the fake
 // platform. A "restart" is a new settings object on the same files.
 
-test('defaults: tenor saxophone, the device language, the scan hint not seen', async () => {
+test('defaults: tenor saxophone, no count-in, the scan hint not seen', async () => {
   const { files } = createFakePlatform()
   const settings = await loadSettings(files)
   assert.equal(settings.defaultInstrument.value, 'tenor-sax')
-  assert.equal(settings.language.value, null)
   assert.equal(settings.scanHintSeen.value, false)
   assert.equal(settings.countIn.value, false)
-  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'tenor-sax', countIn: false, language: null, scanHintSeen: false })
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'tenor-sax', countIn: false, scanHintSeen: false })
   assert.deepEqual(settings.snapshot(), DEFAULT_SETTINGS)
   assert.deepEqual(files.paths(), [], 'loading writes nothing')
 })
@@ -28,23 +27,20 @@ test('a value survives a reload, each setting and all together', async () => {
   const settings = await loadSettings(files)
   await settings.setDefaultInstrument('clarinet')
   await settings.setCountIn(true)
-  await settings.setLanguage('nl')
   await settings.setScanHintSeen()
   assert.deepEqual(files.paths(), ['settings.json'], 'one file, no temp left over')
-  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'clarinet', countIn: true, language: 'nl', scanHintSeen: true })
+  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true })
 
   const reloaded = await loadSettings(files)
   assert.equal(reloaded.defaultInstrument.value, 'clarinet')
   assert.equal(reloaded.countIn.value, true)
-  assert.equal(reloaded.language.value, 'nl')
   assert.equal(reloaded.scanHintSeen.value, true)
 
-  // back to the device language, and the hint can be reset
-  await reloaded.setLanguage(null)
+  // the hint can be reset
   await reloaded.setScanHintSeen(false)
   await reloaded.setCountIn(false)
   const again = await loadSettings(files)
-  assert.deepEqual(again.snapshot(), { defaultInstrument: 'clarinet', countIn: false, language: null, scanHintSeen: false })
+  assert.deepEqual(again.snapshot(), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: false })
 })
 
 test('a change takes effect at once, before it is saved', async () => {
@@ -59,20 +55,27 @@ test('a change takes effect at once, before it is saved', async () => {
   assert.deepEqual(seen, [false, true])
   await saved
   stop()
-  const other = settings.setLanguage('en')
-  assert.equal(settings.language.value, 'en')
-  await other
 })
 
 test('the pitch reference is gone: an old file that has one loads, and it is not written back', async () => {
   const { files } = createFakePlatform()
   files.seed('settings.json', JSON.stringify({ defaultInstrument: 'clarinet', pitchReference: 442, countIn: true, language: 'nl', scanHintSeen: true }))
   const settings = await loadSettings(files)
-  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: true, language: 'nl', scanHintSeen: true })
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true })
   assert.ok(!('pitchReference' in settings.snapshot()))
   assert.ok(!('pitchReference' in normaliseSettings({ pitchReference: 442 })))
   await settings.setCountIn(false)
   assert.ok(!('pitchReference' in JSON.parse(files.text('settings.json')!)), 'the next save drops it')
+})
+
+test('the language is gone: an old file that has one loads, and it is not written back', async () => {
+  const { files } = createFakePlatform()
+  files.seed('settings.json', JSON.stringify({ defaultInstrument: 'clarinet', countIn: true, language: 'nl', scanHintSeen: true }))
+  const settings = await loadSettings(files)
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true })
+  assert.ok(!('language' in normaliseSettings({ language: 'nl' })))
+  await settings.setCountIn(false)
+  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: true }, 'the next save has no language')
 })
 
 test('a missing, broken or wrongly shaped file gives the defaults and the app starts', async () => {
@@ -94,7 +97,7 @@ test('an unknown or invalid instrument id falls back to the default, and so does
     files.seed('settings.json', JSON.stringify({ defaultInstrument: id, pitchReference: 441, language: 'nl', scanHintSeen: true }))
     const settings = await loadSettings(files)
     assert.equal(settings.defaultInstrument.value, 'tenor-sax', JSON.stringify(id))
-    assert.deepEqual([settings.language.value, settings.scanHintSeen.value], ['nl', true], 'the valid values stay')
+    assert.equal(settings.scanHintSeen.value, true, 'the valid values stay')
   }
   // every instrument the user is offered is kept
   for (const instrument of INSTRUMENTS.filter((i) => !i.hidden)) {
@@ -102,26 +105,22 @@ test('an unknown or invalid instrument id falls back to the default, and so does
   }
 })
 
-test('other invalid values fall back one by one: count-in, language and the hint flag', () => {
-  assert.deepEqual(normaliseSettings({ defaultInstrument: 'piano', countIn: 'yes', language: 'fr', scanHintSeen: 'yes' }), {
+test('other invalid values fall back one by one: count-in and the hint flag', () => {
+  assert.deepEqual(normaliseSettings({ defaultInstrument: 'piano', countIn: 'yes', scanHintSeen: 'yes' }), {
     defaultInstrument: 'piano',
     countIn: false,
-    language: null,
     scanHintSeen: false,
   })
-  assert.equal(normaliseSettings({ language: 'en' }).language, 'en')
-  assert.equal(normaliseSettings({ language: 'nl' }).language, 'nl')
   assert.equal(normaliseSettings({ scanHintSeen: true }).scanHintSeen, true)
   assert.equal(normaliseSettings({ countIn: true }).countIn, true)
 })
 
-test('setting an instrument or language the app does not have is refused and changes nothing', async () => {
+test('setting an instrument the app does not have is refused and changes nothing', async () => {
   const { files } = createFakePlatform()
   const settings = await loadSettings(files)
   await assert.rejects(settings.setDefaultInstrument('theremin'), /not an instrument/)
   const hidden = INSTRUMENTS.find((i) => i.hidden)
   if (hidden) await assert.rejects(settings.setDefaultInstrument(hidden.id), /not an instrument/)
-  await assert.rejects(settings.setLanguage('fr' as 'en'), /not a language/)
   assert.deepEqual(settings.snapshot(), DEFAULT_SETTINGS)
   assert.deepEqual(files.paths(), [])
 })
@@ -227,27 +226,26 @@ test('settings.json that cannot be read: the defaults, but nothing is written ov
 test('a save that fails where the store can still see it leaves the old file and no temp file', async () => {
   const { files } = createFakePlatform()
   const settings = await loadSettings(files)
-  await settings.setLanguage('nl')
+  await settings.setDefaultInstrument('clarinet')
   files.fault = (operation) => {
     if (operation === 'rename') throw new Error('disk full')
   }
-  await assert.rejects(settings.setLanguage('en'), /disk full/)
+  await assert.rejects(settings.setDefaultInstrument('guitar'), /disk full/)
   files.fault = undefined
   assert.deepEqual(files.paths(), ['settings.json'])
-  assert.equal(JSON.parse(files.text('settings.json')!).language, 'nl')
+  assert.equal(JSON.parse(files.text('settings.json')!).defaultInstrument, 'clarinet')
   // the next change saves everything, including the value whose save failed
   await settings.setScanHintSeen()
-  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'tenor-sax', countIn: false, language: 'en', scanHintSeen: true })
+  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'guitar', countIn: false, scanHintSeen: true })
 })
 
 test('changes made one after the other without waiting are saved in order and the last one stays', async () => {
   const { files } = createFakePlatform()
   const settings = await loadSettings(files)
-  const saves = [settings.setCountIn(true), settings.setLanguage('nl'), settings.setCountIn(false), settings.setDefaultInstrument('guitar')]
+  const saves = [settings.setCountIn(true), settings.setScanHintSeen(), settings.setCountIn(false), settings.setDefaultInstrument('guitar')]
   await Promise.all(saves)
   const reloaded = await loadSettings(files)
   assert.equal(reloaded.countIn.value, false)
-  assert.equal(reloaded.language.value, 'nl')
   assert.equal(reloaded.defaultInstrument.value, 'guitar')
   assert.deepEqual(files.paths(), ['settings.json'])
 })
@@ -262,7 +260,7 @@ test('a failed save does not stop the saves after it', async () => {
       throw new Error('disk full')
     }
   }
-  const results = await Promise.allSettled([settings.setLanguage('nl'), settings.setLanguage('en')])
+  const results = await Promise.allSettled([settings.setDefaultInstrument('clarinet'), settings.setDefaultInstrument('guitar')])
   assert.deepEqual(results.map((r) => r.status), ['rejected', 'fulfilled'])
-  assert.equal((await loadSettings(files)).language.value, 'en')
+  assert.equal((await loadSettings(files)).defaultInstrument.value, 'guitar')
 })

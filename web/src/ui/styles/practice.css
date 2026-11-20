@@ -34,7 +34,8 @@
   min-width: 0;
   overflow: hidden;
   font-size: var(--fs-18);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -47,7 +48,8 @@
   margin: var(--space-1) var(--space-3) 0;
 }
 .practice-score--empty {
-  border-radius: var(--radius-surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
 }
 .practice-score .score-island {
@@ -90,13 +92,13 @@
 }
 .practice-return .button {
   pointer-events: auto;
-  box-shadow: 0 0.125rem 0.5rem rgb(16 42 34 / 0.22);
+  box-shadow: 0 0.125rem 0.5rem var(--shadow-float);
 }
 
 .practice-problem {
   margin: var(--space-2) var(--space-3) 0;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--danger-tint);
   color: var(--danger);
   font-size: var(--fs-13);
@@ -138,7 +140,7 @@
   justify-self: start;
 }
 .practice-action .icon-button {
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
 }
 .practice-action-label,
 .loop-label {
@@ -154,11 +156,11 @@
 .play-button {
   display: grid;
   place-items: center;
-  width: 4rem;
-  height: 3rem;
-  border-radius: var(--radius-lg);
-  background: var(--primary);
-  color: var(--on-primary);
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: var(--action);
+  color: var(--on-action);
   transition: filter var(--t-fast), transform var(--t-fast);
 }
 .play-button:active {
@@ -179,7 +181,7 @@
   place-items: center;
   width: var(--tap);
   height: var(--tap);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--surface-muted);
   color: var(--ink);
   transition: filter var(--t-fast), transform var(--t-fast);
@@ -207,7 +209,7 @@
   min-width: 0;
   height: 3rem;
   padding: 0 0.125rem;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
 }
 .metronome-toggle {
   display: flex;
@@ -216,8 +218,9 @@
   min-width: 0;
   height: 3rem;
   padding: 0 var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink-muted);
   transition: background var(--t-fast);
 }
@@ -226,11 +229,12 @@
 }
 .metronome-toggle[aria-pressed='true'] {
   background: var(--primary-tint);
+  box-shadow: inset 0 0 0 1px var(--primary);
   color: var(--primary);
 }
 /* Clicking on its own, with no music: the icon is filled in, so it shows in landscape too (where the text is hidden). */
 .metronome-toggle--alone .icon {
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
   box-shadow: 0 0 0 0.25rem var(--primary);
@@ -313,9 +317,8 @@
     grid-row: 3;
   }
   .play-button {
-    width: 3.5rem;
+    width: var(--tap);
     height: var(--tap);
-    border-radius: var(--radius-md);
   }
   /* Loop: an icon like Restart, tinted while a loop is on; its words are its name for a screen reader. */
   .loop-button {
@@ -335,7 +338,7 @@
     min-width: 9.5rem;
     height: var(--tap);
     padding: 0;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
   }
   /* The metronome: an icon that shows its state by its tint; its name is the button's. */
   .metronome-toggle {
@@ -416,7 +419,8 @@
   gap: var(--space-1);
   height: 4rem;
   padding: var(--space-2) var(--space-3) 0;
-  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
 }
 .bar-field-label {

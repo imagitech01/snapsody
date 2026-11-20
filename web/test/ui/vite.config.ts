@@ -2,7 +2,8 @@ import { fileURLToPath } from 'node:url'
 import { mergeConfig } from 'vite'
 import base from '../../vite.config.ts'
 
-// The build the UI tests run against (npm run test:ui): the app's own build (vite.config.ts) plus
+// The build the UI tests run against (npm run test:ui): the app's own build (vite.config.ts, which also defines
+// `__APP_VERSION__` from android/app/build.gradle) plus
 //  - the component gallery, dev/gallery.html, which mounts the shared components and the score island
 //    for harness.test.ts;
 //  - the seeded app, test/ui/seeded.html: the app's own `mount` on the fake platform, started from a

@@ -1,27 +1,22 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { effect, signal } from '@preact/signals'
-import { createI18n, languageFromTag, loadI18n, resolveLanguage } from '../src/app/i18n/index.ts'
-import type { Catalogue, I18n, Language, MessageKey, PluralForms } from '../src/app/i18n/index.ts'
+import { createI18n } from '../src/app/i18n/index.ts'
+import type { I18n, MessageKey, PluralForms } from '../src/app/i18n/index.ts'
 import { en } from '../src/app/i18n/en.ts'
 import { calendarDaysBetween, capitalise, fill, pickForm, relativeParts } from '../src/app/i18n/format.ts'
-import { nl } from '../src/app/i18n/nl.ts'
-import { loadSettings } from '../src/app/settings.ts'
 import { ALTO_SAX, INSTRUMENTS, PIANO, TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import type { InstrumentFamily } from '../src/core/instruments/instruments.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import { computeWarnings } from '../src/core/score/warnings.ts'
 import type { ScoreWarning, ScoreWarningKind } from '../src/core/score/warnings.ts'
-import { createFakePlatform } from '../src/platform/fake/index.ts'
 import { eighths, note, quarters, score } from './helpers.ts'
 
-// English and Dutch (practice-app task 9.1, design D13, spec `app-shell` "English and Dutch"):
-// the two catalogues, the language from the settings or the device, plurals, relative dates and
-// the warning messages. Every date is built with the local constructor and `now` is passed in, so
+// The English texts (practice-app task 9.1, design D13; English only since `paper-and-ink-and-about` D11):
+// the catalogue, plurals, relative dates and the warning messages. Every date is built with the local constructor and `now` is passed in, so
 // "yesterday" (a local calendar day) comes out the same in any time zone.
 
-const entries = (catalogue: Catalogue | typeof en): Array<[string, string | PluralForms]> => Object.entries(catalogue)
+const entries = (catalogue: typeof en): Array<[string, string | PluralForms]> => Object.entries(catalogue)
 const textsOf = (value: string | PluralForms): string[] => (typeof value === 'string' ? [value] : [value.one, value.other])
 const placeholdersOf = (value: string | PluralForms): string[] =>
   [...new Set(textsOf(value).flatMap((text) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!)))].sort()
@@ -30,83 +25,30 @@ const NOW = new Date(2026, 10, 18, 14, 5) // 18 November 2026, 14:05
 
 // ---- The catalogues --------------------------------------------------------------------------
 
-test('catalogues: Dutch has every key of English and no other (a runtime check; the type check is below)', () => {
-  assert.deepEqual(Object.keys(nl).sort(), Object.keys(en).sort())
-})
-
-test('catalogues: each message is plural in both languages or in neither, and has the same placeholders', () => {
-  for (const [key, english] of entries(en)) {
-    const dutch = nl[key as MessageKey]
-    assert.equal(typeof dutch, typeof english, `${key}: plural in one language only`)
-    assert.deepEqual(placeholdersOf(dutch), placeholdersOf(english), `${key}: placeholders differ`)
-  }
-})
-
 test('catalogues: no message is empty or has stray whitespace', () => {
-  for (const [name, catalogue] of [['en', en], ['nl', nl]] as const) {
-    for (const [key, value] of entries(catalogue)) {
-      for (const text of textsOf(value)) {
-        assert.ok(text.length > 0, `${name} ${key} is empty`)
-        assert.equal(text, text.trim(), `${name} ${key} has leading or trailing space`)
-      }
+  for (const [key, value] of entries(en)) {
+    for (const text of textsOf(value)) {
+      assert.ok(text.length > 0, `${key} is empty`)
+      assert.equal(text, text.trim(), `${key} has leading or trailing space`)
     }
   }
 })
 
 test('catalogues: no technical term shows (spec `app-shell` "Name and words")', () => {
-  const technical = /recogni[sz]|musicxml|\bmodel\b|\bgpu\b|accelerat|herkenning/i
-  for (const [name, catalogue] of [['en', en], ['nl', nl]] as const) {
-    for (const [key, value] of entries(catalogue)) {
-      for (const text of textsOf(value)) assert.ok(!technical.test(text), `${name} ${key}: ${text}`)
-    }
+  const technical = /recogni[sz]|musicxml|\bmodel\b|\bgpu\b|accelerat/i
+  for (const [key, value] of entries(en)) {
+    for (const text of textsOf(value)) assert.ok(!technical.test(text), `${key}: ${text}`)
   }
 })
 
-test('catalogues: Dutch is translated, except the words that are the same in both languages', () => {
-  const sameInBoth = new Set([
-    'app.name', // the name of the app
-    'common.ok',
-    'unit.bpm',
-    'practice.tempo',
-    'practice.tempo.unit',
-    'mark.staccato',
-    'mark.tenuto',
-    'mark.accent',
-    'mark.crescendo',
-    'mark.diminuendo',
-    'barline.timesValue', // "3×"
-    'add.reading.progress',
-    'language.en', // a language is named in its own words, in both languages
-    'language.nl',
-  ])
-  const untranslated = entries(en)
-    .filter(([key, value]) => JSON.stringify(value) === JSON.stringify(nl[key as MessageKey]) && !sameInBoth.has(key))
-    .map(([key]) => key)
-  assert.deepEqual(untranslated, [], 'these Dutch messages are still the English text')
-  assert.deepEqual(
-    [...sameInBoth].filter((key) => JSON.stringify(en[key as MessageKey]) !== JSON.stringify(nl[key as MessageKey])),
-    [],
-    'a word listed as the same in both languages was translated: remove it from the list',
-  )
-})
-
-test('catalogues: Dutch calls a piece a "muziekstuk", English a "piece"', () => {
-  assert.match(nl['library.delete.title'] as string, /muziekstuk/)
+test('catalogues: a piece is a "piece"', () => {
   assert.match(en['library.delete.title'] as string, /piece/)
-  assert.ok(!/\b(piece|pieces)\b/i.test(Object.values(nl).flatMap(textsOf).join('\n')), 'English "piece" left in the Dutch texts')
 })
 
 // Compile-time checks: `npm run typecheck` fails when an `@ts-expect-error` below stops being an
 // error, so these prove that the types catch what the runtime checks above can only observe.
 // The function is never called.
-export function typeChecks(i18n: I18n, complete: Catalogue): void {
-  const { 'tab.library': _left, ...withoutOneKey } = complete
-  // @ts-expect-error a Dutch catalogue without a key of English does not compile
-  const _missing: Catalogue = withoutOneKey
-  // @ts-expect-error a key that English does not have does not compile either
-  const _extra: Catalogue = { ...complete, 'no.such.key': 'x' }
-  // @ts-expect-error a plural message cannot be a plain string in the other language
-  const _plain: Catalogue = { ...complete, 'unit.pages': '{count} pages' }
+export function typeChecks(i18n: I18n): void {
   // @ts-expect-error a message that does not exist
   i18n.t('no.such.key')
   // @ts-expect-error a message with placeholders needs its parameters
@@ -118,102 +60,37 @@ export function typeChecks(i18n: I18n, complete: Catalogue): void {
   i18n.t('bar.position', { bar: 2, bars: 12 })
   i18n.t('unit.pages', { count: 2 })
   i18n.t('tab.library')
-  void [_left, _missing, _extra, _plain]
 }
 
-test('catalogues: every kind of warning has a message in both languages (a compile-time check, and a look at the keys)', () => {
+test('catalogues: every kind of warning has a message (a compile-time check, and a look at the keys)', () => {
   const covered: `warning.${ScoreWarningKind}` extends MessageKey ? true : never = true
   assert.equal(covered, true)
   for (const kind of ['bar-length', 'out-of-range', 'time-signature-inferred', 'time-signature-missing'] as const) {
-    assert.ok(`warning.${kind}` in en && `warning.${kind}` in nl)
+    assert.ok(`warning.${kind}` in en)
   }
 })
 
-// ---- The language ----------------------------------------------------------------------------
-
-test('language: Dutch when the device tag starts with nl, English for anything else', () => {
-  for (const tag of ['nl', 'nl-BE', 'nl-NL', 'nl_BE', 'NL', 'nl-be', 'nld', ' nl-BE ']) assert.equal(languageFromTag(tag), 'nl', tag)
-  for (const tag of ['en', 'en-GB', 'en-US', 'fr-BE', 'de', 'nn-NO', 'nb', 'zh-Hans', 'id', '', 'xnl']) assert.equal(languageFromTag(tag), 'en', tag)
-  assert.equal(languageFromTag(undefined), 'en')
-  assert.equal(languageFromTag(null), 'en')
-})
-
-test('language: the user\'s choice beats the device, and null follows the device', () => {
-  assert.equal(resolveLanguage(null, 'nl-BE'), 'nl')
-  assert.equal(resolveLanguage(null, 'en-US'), 'en')
-  assert.equal(resolveLanguage(null, undefined), 'en', 'a device that says nothing: English')
-  assert.equal(resolveLanguage('en', 'nl-BE'), 'en', 'English chosen on a Dutch phone')
-  assert.equal(resolveLanguage('nl', 'en-US'), 'nl', 'Dutch chosen on an English phone')
-  assert.equal(resolveLanguage('nl', undefined), 'nl')
-})
-
-test('language: a Dutch phone and no choice gives Dutch; choosing English switches at once and stays after a restart', async () => {
-  const platform = createFakePlatform({ language: 'nl-BE' })
-  const settings = await loadSettings(platform.files)
-  const i18n = await loadI18n(settings, platform.device)
-  assert.equal(i18n.language.value, 'nl')
-  assert.equal(i18n.t('tab.library'), 'Bibliotheek')
-  assert.equal(i18n.t('library.delete.title'), 'Dit muziekstuk verwijderen?')
-
-  // What a component does: read the language through `t`, and run again when it changes.
-  const seen: string[] = []
-  const stop = effect(() => {
-    seen.push(i18n.t('tab.practice'))
-  })
-  const saved = settings.setLanguage('en')
-  assert.equal(i18n.language.value, 'en', 'at once, before the save is done')
-  assert.equal(i18n.t('tab.practice'), 'Practice')
-  await saved
-  assert.deepEqual(seen, ['Oefenen', 'Practice'])
-  stop()
-
-  // A restart: new settings and a new translator on the same files and the same Dutch phone.
-  const again = await loadI18n(await loadSettings(platform.files), platform.device)
-  assert.equal(again.language.value, 'en')
-
-  // Back to the device's language.
-  await settings.setLanguage(null)
-  assert.equal(i18n.language.value, 'nl')
-})
-
-test('language: a device that cannot tell its language gives English', async () => {
-  const chosen = signal<Language | null>(null)
-  const i18n = await loadI18n({ language: chosen }, { language: () => Promise.reject(new Error('no language')) })
-  assert.equal(i18n.language.value, 'en')
-  chosen.value = 'nl'
-  assert.equal(i18n.language.value, 'nl')
-})
-
 test('t: the translator can be used without `this` (destructured, as a component would)', () => {
-  const { t } = createI18n(signal<Language | null>('nl'))
-  assert.equal(t('common.cancel'), 'Annuleren')
+  const { t } = createI18n()
+  assert.equal(t('common.cancel'), 'Cancel')
 })
 
 // ---- Plurals and placeholders ---------------------------------------------------------------
 
 test('plurals: 1 page and 2 pages, 1 pagina and 2 pagina\'s', () => {
-  const english = createI18n(signal<Language | null>('en'))
-  const dutch = createI18n(signal<Language | null>('nl'))
+  const english = createI18n()
   assert.equal(english.t('unit.pages', { count: 1 }), '1 page')
   assert.equal(english.t('unit.pages', { count: 2 }), '2 pages')
   assert.equal(english.t('unit.pages', { count: 0 }), '0 pages')
-  assert.equal(dutch.t('unit.pages', { count: 1 }), '1 pagina')
-  assert.equal(dutch.t('unit.pages', { count: 2 }), "2 pagina's")
-  assert.equal(dutch.t('unit.pages', { count: 0 }), "0 pagina's")
   assert.equal(english.t('unit.bars', { count: 1 }), '1 bar')
   assert.equal(english.t('unit.bars', { count: 24 }), '24 bars')
-  assert.equal(dutch.t('unit.bars', { count: 1 }), '1 maat')
-  assert.equal(dutch.t('unit.bars', { count: 24 }), '24 maten')
   assert.equal(english.t('warnings.count', { count: 2 }), '2 things to check')
   assert.equal(english.t('warnings.count', { count: 1 }), '1 thing to check')
-  assert.equal(dutch.t('warnings.count', { count: 2 }), '2 dingen om na te kijken')
 })
 
 test('placeholders: filled in, numbers without a thousands separator, a missing one left as written', () => {
-  const english = createI18n(signal<Language | null>('en'))
-  const dutch = createI18n(signal<Language | null>('nl'))
+  const english = createI18n()
   assert.equal(english.t('bar.position', { bar: 2, bars: 12 }), 'Bar 2 of 12')
-  assert.equal(dutch.t('bar.position', { bar: 2, bars: 12 }), 'Maat 2 van 12')
   assert.equal(english.t('bar.range', { from: 9, to: 12 }), 'Bars 9–12')
   assert.equal(english.t('editor.preview', { bar: '3' }), 'Preview bar 3')
   assert.equal(english.t('unit.bars', { count: 1200 }), '1200 bars')
@@ -226,20 +103,15 @@ test('placeholders: filled in, numbers without a thousands separator, a missing 
 // ---- Relative dates --------------------------------------------------------------------------
 
 test('dates: "Practised yesterday" and "Gisteren geoefend"', () => {
-  const english = createI18n(signal<Language | null>('en'))
-  const dutch = createI18n(signal<Language | null>('nl'))
+  const english = createI18n()
   const yesterday = iso(2026, 10, 17, 9, 30)
   assert.equal(english.practised(yesterday, NOW), 'Practised yesterday')
-  assert.equal(dutch.practised(yesterday, NOW), 'Gisteren geoefend')
   assert.equal(english.added(yesterday, NOW), 'Added yesterday')
-  assert.equal(dutch.added(yesterday, NOW), 'Gisteren toegevoegd')
   assert.equal(english.relativeTime(yesterday, NOW), 'yesterday')
-  assert.equal(dutch.relativeTime(yesterday, NOW), 'gisteren')
 })
 
 test('dates: today, days, weeks, months and years, in both languages', () => {
-  const english = createI18n(signal<Language | null>('en'))
-  const dutch = createI18n(signal<Language | null>('nl'))
+  const english = createI18n()
   const cases: Array<[Date, string, string]> = [
     [new Date(2026, 10, 18, 0, 1), 'Practised today', 'Vandaag geoefend'],
     [new Date(2026, 10, 18, 14, 5), 'Practised today', 'Vandaag geoefend'],
@@ -255,12 +127,11 @@ test('dates: today, days, weeks, months and years, in both languages', () => {
   ]
   for (const [when, expectedEn, expectedNl] of cases) {
     assert.equal(english.practised(when, NOW), expectedEn, when.toString())
-    assert.equal(dutch.practised(when, NOW), expectedNl, when.toString())
   }
 })
 
 test('dates: yesterday is a calendar day, not 24 hours, and a clock set back is today', () => {
-  const english = createI18n(signal<Language | null>('en'))
+  const english = createI18n()
   // 23:50 on the 17th is yesterday at 00:10 on the 18th, though only 20 minutes passed.
   assert.equal(english.relativeTime(new Date(2026, 10, 17, 23, 50), new Date(2026, 10, 18, 0, 10)), 'yesterday')
   // 00:10 on the 17th is still yesterday at 23:50 on the 18th, with almost two days passed.
@@ -272,63 +143,47 @@ test('dates: yesterday is a calendar day, not 24 hours, and a clock set back is 
 })
 
 test('dates: the stored ISO time is read as the instant it names', () => {
-  const english = createI18n(signal<Language | null>('en'))
+  const english = createI18n()
   const stored = new Date(2026, 10, 17, 9, 30).toISOString() // what piece.json holds: UTC
   assert.match(stored, /Z$/)
   assert.equal(english.practised(stored, NOW), 'Practised yesterday')
-  assert.equal(capitalise('éclair', 'nl'), 'Éclair')
+  assert.equal(capitalise('éclair', 'en-GB'), 'Éclair')
 })
 
-test('summary line: "2 pages · 24 bars · Practised yesterday" and its Dutch', () => {
-  const english = createI18n(signal<Language | null>('en'))
-  const dutch = createI18n(signal<Language | null>('nl'))
+test('summary line: "2 pages · 24 bars · Practised yesterday"', () => {
+  const english = createI18n()
   const piece = { pages: 2, bars: 24, lastPracticed: iso(2026, 10, 17, 9, 30), created: iso(2026, 10, 1, 8, 0) }
   assert.equal(english.pieceSummary(piece, NOW), '2 pages · 24 bars · Practised yesterday')
-  assert.equal(dutch.pieceSummary(piece, NOW), "2 pagina's · 24 maten · Gisteren geoefend")
   // One page is not mentioned; a piece never practised shows when it was added.
   const added = { pages: 1, bars: 8, lastPracticed: null, created: iso(2026, 10, 18, 9, 0) }
   assert.equal(english.pieceSummary(added, NOW), '8 bars · Added today')
-  assert.equal(dutch.pieceSummary(added, NOW), '8 maten · Vandaag toegevoegd')
   assert.equal(english.pieceSummary({ ...added, bars: 1 }, NOW), '1 bar · Added today')
   assert.equal(english.pieceSummary({ ...added, lastPracticed: 'broken', created: 'broken' }, NOW), '8 bars', 'no time that can be read: no time shown')
 })
 
-test('default name: the date and time the piece was added, in the language in use', () => {
-  const chosen = signal<Language | null>('en')
-  const i18n = createI18n(chosen)
+test('default name: the date and time the piece was added', () => {
+  const i18n = createI18n()
   const added = new Date(2026, 10, 18, 14, 5)
   // The exact separators belong to the ICU version, so only what must be there is checked.
-  const english = i18n.defaultPieceName(added)
-  assert.match(english, /18/)
-  assert.match(english, /Nov/)
-  assert.match(english, /14:05/)
-  chosen.value = 'nl'
-  const dutch = i18n.defaultPieceName(added)
-  assert.match(dutch, /18/)
-  assert.match(dutch, /nov/)
-  assert.match(dutch, /14:05/)
-  assert.notEqual(english, dutch)
+  const name = i18n.defaultPieceName(added)
+  assert.match(name, /18/)
+  assert.match(name, /Nov/)
+  assert.match(name, /14:05/)
 })
 
 // ---- Instruments and families ----------------------------------------------------------------
 
-test('instrument names come from core/instruments in the language in use', () => {
-  const chosen = signal<Language | null>('en')
-  const i18n = createI18n(chosen)
-  for (const instrument of INSTRUMENTS) assert.equal(i18n.instrumentName(instrument.id), instrument.names.en)
-  chosen.value = 'nl'
-  for (const instrument of INSTRUMENTS) assert.equal(i18n.instrumentName(instrument.id), instrument.names.nl)
-  assert.equal(i18n.instrumentName('tenor-sax'), 'Tenorsaxofoon')
+test('instrument names come from core/instruments', () => {
+  const i18n = createI18n()
+  for (const instrument of INSTRUMENTS) assert.equal(i18n.instrumentName(instrument.id), instrument.name)
+  assert.equal(i18n.instrumentName('tenor-sax'), 'Tenor saxophone')
   assert.equal(i18n.instrumentName('theremin'), 'theremin', 'an id that does not exist is shown as it is')
 })
 
-test('instrument families have a label in both languages', () => {
-  const chosen = signal<Language | null>('en')
-  const i18n = createI18n(chosen)
+test('instrument families have a label', () => {
+  const i18n = createI18n()
   const families = [...new Set(INSTRUMENTS.map((i) => i.family))] satisfies InstrumentFamily[]
   assert.deepEqual(families.map((f) => i18n.familyName(f)), ['Woodwind', 'Keyboard', 'Strings', 'Brass'])
-  chosen.value = 'nl'
-  assert.deepEqual(families.map((f) => i18n.familyName(f)), ['Houtblazers', 'Toetsen', 'Snaren', 'Koperblazers'])
 })
 
 // ---- Score warnings --------------------------------------------------------------------------
@@ -337,37 +192,31 @@ test('instrument families have a label in both languages', () => {
 const warningsOf = (xml: string, instrument = TENOR_SAX): ScoreWarning[] => computeWarnings(parseMusicXml(xml), instrument)
 const a3 = note({ step: 'A', octave: 3, type: 'quarter' })
 
-test('warnings: a note outside the range reads the same in English as core says it, and in Dutch', () => {
+test('warnings: a note outside the range reads the same as core says it', () => {
   const [warning] = warningsOf(score([a3 + note({ step: 'B', octave: 3, type: 'quarter' }) + note({ step: 'C', octave: 4, type: 'quarter' })], [3, 4]))
   assert.equal(warning!.kind, 'out-of-range')
-  const chosen = signal<Language | null>('en')
-  const i18n = createI18n(chosen)
+  const i18n = createI18n()
   assert.equal(i18n.warning(warning!), 'Bar 1: A3 is outside the written range of the instrument (Tenor saxophone, B♭3–F♯6); it may be a misread.')
   assert.ok(i18n.warning(warning!).startsWith(warning!.message), 'the English text is the one core builds, with a full stop')
-  chosen.value = 'nl'
-  assert.equal(i18n.warning(warning!), 'Maat 1: A3 ligt buiten het genoteerde bereik van het instrument (Tenorsaxofoon, B♭3–F♯6); misschien is het verkeerd gelezen.')
 })
 
-test('warnings: the instrument in the warning decides the name and the range, not the language alone', () => {
+test('warnings: the instrument in the warning decides the name and the range', () => {
   const xml = score([a3 + note({ step: 'B', octave: 3, type: 'quarter' }) + note({ step: 'C', octave: 4, type: 'quarter' })], [3, 4])
-  const i18n = createI18n(signal<Language | null>('nl'))
-  assert.match(i18n.warning(warningsOf(xml, ALTO_SAX)[0]!), /\(Altsaxofoon, B♭3–F♯6\)/)
+  const i18n = createI18n()
+  assert.match(i18n.warning(warningsOf(xml, ALTO_SAX)[0]!), /\(Alto saxophone, B♭3–F♯6\)/)
   assert.deepEqual(warningsOf(xml, PIANO), [])
 })
 
 test('warnings: a bar that does not add up, and the two time-signature warnings', () => {
-  const english = createI18n(signal<Language | null>('en'))
-  const dutch = createI18n(signal<Language | null>('nl'))
+  const english = createI18n()
   const barLength = warningsOf(score([quarters(3), eighths(6) + note({ step: 'G', type: 'quarter' }), quarters(3)], [3, 4]))
   assert.deepEqual(barLength.map((w) => [w.kind, w.bar]), [['bar-length', '2']])
   assert.deepEqual([barLength[0]!.counted, barLength[0]!.time], ['4', { beats: 3, beatType: 4 }])
   assert.equal(english.warning(barLength[0]!), 'Bar 2 adds up to 4 beats but 3/4 needs 3.')
   assert.ok(english.warning(barLength[0]!).startsWith(barLength[0]!.message), 'the English text is the one core builds, with a full stop')
-  assert.equal(dutch.warning(barLength[0]!), 'Maat 2 telt 4 tellen, maar 3/4 vraagt er 3.')
   // a part of a beat is shown as a person reads it
   const short = warningsOf(score([quarters(3), eighths(5)], [3, 4]))
   assert.equal(english.warning(short[0]!), 'Bar 2 adds up to 2½ beats but 3/4 needs 3.')
-  assert.equal(dutch.warning(short[0]!), 'Maat 2 telt 2½ tellen, maar 3/4 vraagt er 3.')
   const sixEight = warningsOf(score([eighths(6), eighths(5)], [6, 8]))
   assert.equal(english.warning(sixEight[0]!), 'Bar 2 adds up to 5 beats but 6/8 needs 6.')
 
@@ -375,15 +224,13 @@ test('warnings: a bar that does not add up, and the two time-signature warnings'
   assert.deepEqual(inferred.map((w) => w.kind), ['time-signature-inferred'])
   assert.deepEqual(inferred[0]!.time, { beats: 3, beatType: 4 })
   assert.equal(english.warning(inferred[0]!), 'No time signature was found, so 3/4 was worked out from the bar lengths. Check that it is right.')
-  assert.equal(dutch.warning(inferred[0]!), 'Er is geen maatsoort gevonden, dus is 3/4 afgeleid uit de lengte van de maten. Controleer of die klopt.')
 
   const missing = computeWarnings(parseMusicXml(prepareRecognisedScore(score([quarters(2), quarters(3), quarters(4)])).musicxml), TENOR_SAX)
   assert.deepEqual(missing.map((w) => w.kind), ['time-signature-missing'])
-  assert.match(dutch.warning(missing[0]!), /^Er is geen maatsoort gevonden en de maten/)
 })
 
 test('warnings: a warning this cannot build from its fields shows the English message it came with', () => {
-  const i18n = createI18n(signal<Language | null>('nl'))
+  const i18n = createI18n()
   const base = { message: 'English text from core' }
   assert.equal(i18n.warning({ ...base, kind: 'out-of-range', bar: '1', pitch: 'A3', instrument: 'theremin' as ScoreWarning['instrument'] }), base.message)
   assert.equal(i18n.warning({ ...base, kind: 'out-of-range', bar: '1', pitch: 'A3' }), base.message, 'no instrument')

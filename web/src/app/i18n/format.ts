@@ -6,7 +6,7 @@ import type { PluralForms } from './en.ts'
  * the `Intl` objects and the clock as arguments, so tests can fix both.
  */
 
-/** The values a message is filled in with. A number is formatted for the language (no thousands separator). */
+/** The values a message is filled in with. A number is formatted without a thousands separator. */
 export type Params = Readonly<Record<string, string | number>>
 
 /** Replaces each `{name}` with its parameter; a name without a parameter stays as written, so the gap is easy to see. */
@@ -18,14 +18,14 @@ export function fill(template: string, params: Params, numbers: Intl.NumberForma
   })
 }
 
-/** The form of a message for these parameters: a plain message as it is, a plural one by the language's rule for `count`. */
+/** The form of a message for these parameters: a plain message as it is, a plural one by the plural rule for `count`. */
 export function pickForm(message: string | PluralForms, params: Params, plural: Intl.PluralRules): string {
   if (typeof message === 'string') return message
   const count = Number(params.count)
   return Number.isNaN(count) ? message.other : message[plural.select(count) === 'one' ? 'one' : 'other']
 }
 
-/** The first letter in upper case, by the rules of the language ("gisteren geoefend" becomes "Gisteren geoefend"). */
+/** The first letter in upper case, ("yesterday" becomes "Yesterday"). */
 export function capitalise(text: string, locale: string): string {
   return text.charAt(0).toLocaleUpperCase(locale) + text.slice(1)
 }

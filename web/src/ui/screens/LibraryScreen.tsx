@@ -31,7 +31,6 @@ export function LibraryScreen() {
   return (
     <div class="screen screen--tabs">
       <header class="screen-header">
-        <p class="t-eyebrow">{t('app.name')}</p>
         <h1 class="t-title">{t('library.title')}</h1>
         <p class="t-subtitle">{t('library.subtitle')}</p>
       </header>

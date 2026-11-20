@@ -15,8 +15,8 @@ See proposal.md for why. The facts the policy rests on, checked on 2026-11-19:
 
 ## Decisions
 
-### D1. One static page, both languages, in the repo
-The policy is `docs/privacy/index.html`: a single self-contained file with inline CSS and no scripts, fonts or images from elsewhere. It has English first and Dutch below, with a link to jump between them. It lives in the repo so it's versioned with the app it describes. The user uploads it to `https://imagitech.be/snapsody/privacy/` (a folder, so the file is served as `index.html`).
+### D1. One static page, in English, in the repo
+The policy is `docs/privacy/index.html`: a single self-contained file with inline CSS and no scripts, fonts or images from elsewhere. It is in English only: the app and its store listing are English only since 2026-11-20 (it was English and Dutch before; see change `paper-and-ink-and-about`). It lives in the repo so it's versioned with the app it describes. The user uploads it to `https://imagitech.be/snapsody/privacy/` (a folder, so the file is served as `index.html`).
 
 Alternative: GitHub Pages. The user chose the company's own site.
 

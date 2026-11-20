@@ -322,7 +322,7 @@ test('capacitor reader: cancel is sent after the start, even when asked for befo
 
 // ---- device --------------------------------------------------------------------------------
 
-test('capacitor device: keep awake, pause and resume, language', async () => {
+test('capacitor device: keep awake, pause and resume', async () => {
   const { platform: { device }, plugins } = setUp()
   await device.setKeepAwake(true)
   await device.setKeepAwake(false)
@@ -336,7 +336,6 @@ test('capacitor device: keep awake, pause and resume, language', async () => {
   await flush()
   plugins.app.fire('pause')
   assert.deepEqual(log, ['pause', 'resume'])
-  assert.equal(await device.language(), 'nl-BE')
 })
 
 test('capacitor device: the newest back handler answers; false or no handler leaves the app', async () => {

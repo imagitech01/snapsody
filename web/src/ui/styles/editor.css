@@ -53,8 +53,8 @@
   width: 100%;
   height: var(--tap);
   padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--ink);
   font-size: var(--fs-14);
@@ -88,13 +88,13 @@
   padding: var(--space-1);
   overflow: hidden;
   border: 1px solid var(--line-card);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius);
   background: var(--surface);
 }
 /* What needs checking: how many, the way to the next, and what the current one says. Not in the frames. */
 .editor-warnings {
   padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--mark-flagbar) 14%, var(--surface));
 }
 .editor-warnings-row {
@@ -190,7 +190,8 @@
 
 .editor-tools {
   padding: var(--space-2) 0 var(--space-3);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
 }
 .editor-tools > .segmented {
@@ -204,7 +205,7 @@
   gap: var(--space-2);
   margin: 0 var(--space-2) var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--bg);
 }
 .editor-element-title {
@@ -225,7 +226,7 @@
 }
 .editor-tools-head {
   display: flex;
-  flex-wrap: wrap; /* the heading takes a row of its own when the buttons leave it too little (Dutch) */
+  flex-wrap: wrap; /* the heading takes a row of its own when the buttons leave it too little */
   align-items: center;
   column-gap: var(--space-2);
   margin-top: var(--space-1);
@@ -338,8 +339,9 @@
   height: var(--tap);
   padding: 0 1.25rem;
   border: 0;
-  border-radius: var(--radius-xs);
-  background: var(--surface-muted);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink);
   font-size: var(--fs-11);
   font-weight: var(--fw-semibold);
@@ -370,8 +372,9 @@
   min-width: 0;
   min-height: var(--tap);
   padding: 0 var(--space-2);
-  border-radius: var(--radius-xs);
-  background: var(--surface-muted);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink);
   font-size: var(--fs-11);
   font-weight: var(--fw-semibold);
@@ -398,7 +401,8 @@
   color: var(--primary);
 }
 .editor-chip--danger {
-  background: var(--danger-tint);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--danger);
   color: var(--danger);
 }
 .editor-chip-dot {
@@ -442,7 +446,7 @@
 .editor-message,
 .editor-save-error {
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius);
   background: var(--danger-tint);
   color: var(--danger);
   font-size: var(--fs-11);

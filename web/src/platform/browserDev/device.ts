@@ -35,10 +35,6 @@ export class BrowserDevDevice implements Device {
       if ((event as KeyboardEvent).key === 'Escape' && handler()) event.preventDefault()
     })
   }
-
-  async language(): Promise<string> {
-    return navigator.language || 'en'
-  }
 }
 
 function onDocument(type: string, listener: (event: Event) => void): () => void {

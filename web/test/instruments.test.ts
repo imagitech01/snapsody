@@ -49,17 +49,17 @@ test('instruments: written ranges (B-flat3 to F-sharp6 for both saxophones)', ()
   }
 })
 
-test('instruments: names in English and Dutch, a family and a sound folder named like the id', () => {
+test('instruments: a name, a family and a sound folder named like the id', () => {
   assert.deepEqual(
-    INSTRUMENTS.map((i) => [i.id, i.names.en, i.names.nl, i.family]),
+    INSTRUMENTS.map((i) => [i.id, i.name, i.family]),
     [
-      ['tenor-sax', 'Tenor saxophone', 'Tenorsaxofoon', 'woodwind'],
-      ['alto-sax', 'Alto saxophone', 'Altsaxofoon', 'woodwind'],
-      ['clarinet', 'B♭ clarinet', 'B♭-klarinet', 'woodwind'],
-      ['piano', 'Piano', 'Piano', 'keyboard'],
-      ['guitar', 'Guitar', 'Gitaar', 'string'],
-      ['violin', 'Violin', 'Viool', 'string'],
-      ['trumpet', 'Trumpet', 'Trompet', 'brass'],
+      ['tenor-sax', 'Tenor saxophone', 'woodwind'],
+      ['alto-sax', 'Alto saxophone', 'woodwind'],
+      ['clarinet', 'B♭ clarinet', 'woodwind'],
+      ['piano', 'Piano', 'keyboard'],
+      ['guitar', 'Guitar', 'string'],
+      ['violin', 'Violin', 'string'],
+      ['trumpet', 'Trumpet', 'brass'],
     ],
   )
   for (const i of INSTRUMENTS) assert.equal(i.sound, i.id, `${i.id}: the sample folder is the id`)

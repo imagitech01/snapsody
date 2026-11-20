@@ -121,17 +121,6 @@ test('practice home: it is read again when it is shown again, so a practised pie
   })
 })
 
-test('practice home: it is in Dutch on a Dutch phone', async () => {
-  await withApp({ seed: 'library', language: 'nl-BE' }, async ({ page }) => {
-    await page.getByRole('heading', { name: 'Laten we oefenen', level: 1 }).waitFor()
-    const card = page.getByRole('region', { name: 'Verder oefenen' })
-    assert.match(await textOf(card), /Maat 2 van 12/, 'bar 2 of 12 in Dutch')
-    await page.getByRole('heading', { name: 'In je oefenrotatie' }).waitFor()
-    await page.getByRole('button', { name: '“C major warm-up” afspelen' }).waitFor()
-    await page.getByRole('navigation', { name: 'Hoofdonderdelen' }).getByRole('button', { name: 'Bibliotheek' }).waitFor()
-  })
-})
-
 // ---- Practising a piece (task 13.1) --------------------------------------------------------------------------
 
 /** Freezes the page's clock where it is: from here on time moves only with `page.clock.runFor`, so the music is exactly where a test puts it. */
@@ -747,19 +736,5 @@ test('practise: a piece that is not there, or whose sound will not load, is said
     await page.getByRole('alert').filter({ hasText: 'The sound of this instrument could not be loaded.' }).waitFor()
     await page.getByRole('button', { name: 'Play', exact: true }).waitFor()
     assert.equal(await page.evaluate(() => window.__test!.platform.device.keepAwake), false, 'a Play that failed does not hold the screen on')
-  })
-})
-
-test('practise: the practice screen is in Dutch on a Dutch phone', async () => {
-  await withApp({ seed: 'library', language: 'nl-BE' }, async ({ page }) => {
-    await page.getByRole('button', { name: 'Verder oefenen' }).last().click()
-    await scoreDrawn(page)
-    assert.equal(await textOf(page.locator('.practice-header')), 'Ode to Joy', 'the header has only the title')
-    assert.equal(await page.getByText(/Maat \d+ van \d+|Volgt mee/).count(), 0)
-    await page.getByRole('button', { name: 'Herhaling uit' }).waitFor()
-    await page.getByRole('button', { name: 'Metronoom' }).waitFor()
-    await page.getByRole('button', { name: 'Afspelen', exact: true }).waitFor()
-    await page.getByRole('button', { name: 'Oefenhulpmiddelen' }).click()
-    await page.getByRole('dialog', { name: 'Oefenhulpmiddelen' }).getByRole('switch', { name: 'Favoriet' }).waitFor()
   })
 })

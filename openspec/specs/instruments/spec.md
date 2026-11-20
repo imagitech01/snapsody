@@ -52,8 +52,8 @@ Each instrument SHALL play with a recorded sound of that instrument, bundled wit
 - **THEN** it plays with the clarinet sound
 
 #### Scenario: Credits
-- **WHEN** the user opens the app's credits from Settings
-- **THEN** the source and licence of the instrument sounds are listed
+- **WHEN** the user opens Settings, then About Snapsody, then Credits and licences, and opens the instrument sounds
+- **THEN** the source and licence of the instrument sounds are shown, with the acknowledgements their licence asks to include
 
 ### Requirement: Written range per instrument
 Each instrument SHALL have a written range, used to warn about notes it cannot play. The tenor and alto saxophones' written range SHALL be B♭3 to F♯6.

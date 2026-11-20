@@ -3,7 +3,7 @@ import type { ReadonlySignal, Signal } from '@preact/signals'
 import type { Platform } from '../platform/port.ts'
 import { createHome } from './home.ts'
 import type { Home } from './home.ts'
-import { loadI18n } from './i18n/index.ts'
+import { createI18n } from './i18n/index.ts'
 import type { I18n } from './i18n/index.ts'
 import { createLibrary } from './library.ts'
 import type { Library } from './library.ts'
@@ -20,11 +20,11 @@ import type { Settings } from './settings.ts'
  * gets what it needs from `Shell`.
  *
  * Start-up, in this order (`startShell`):
- *   1. `loadSettings(files)`: the language and the default instrument are needed first. It never fails.
+ *   1. `loadSettings(files)`: the default instrument is needed first. It never fails.
  *   2. `library.sweep()`: it settles what an interrupted run left in `pieces/` and MUST finish before
  *      the first `list()` (design D4: a piece whose `piece.json` only survives as a temp file is
  *      recovered at start). A sweep that fails is not the end of the app: the list is read anyway.
- *   3. `loadI18n(settings, device)`: the translator, which follows `settings.language` from then on.
+ *   3. `createI18n()`: the translator.
  *   4. The library view and the home (`createLibraryView`, `createHome`), over the library.
  *   5. The router, and the back button handed to it (`connectBackButton`).
  *   Then the list is read once (`home.refresh()`), so the first screen is drawn with the pieces in it.
@@ -46,7 +46,7 @@ import type { Settings } from './settings.ts'
  * by the screen from `shell.library`, `shell.settings`, `shell.platform` and `shell.i18n` when it opens.
  */
 
-/** The texts the notice can be: keys of the catalogue, so the notice follows the language. */
+/** The texts the notice can be: keys of the catalogue, so the notice is written in the catalogue's words. */
 export type NoticeKey = 'settings.saveFailed' | 'error.generic'
 
 export interface Shell {
@@ -88,7 +88,7 @@ export async function startShell(platform: Platform): Promise<Shell> {
     // The list below is read anyway; what the sweep could not clean up is tried again at the next start.
   }
 
-  const i18n = await loadI18n(settings, platform.device)
+  const i18n = createI18n()
   const view = createLibraryView({ library, i18n })
   const home = createHome({ view, library, i18n })
   const router = createRouter('practice')

@@ -1,0 +1,10 @@
+/* Public Sans (design D4): one variable file, Latin, weights 400 to 700, SIL OFL 1.1 (see ../fonts/README.md and
+   ../fonts/OFL.txt). Vite bundles the file into dist/assets/. It is local, so `block` costs no visible delay and
+   the text never flashes in the system font first. */
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url('../fonts/PublicSans-Variable.woff2') format('woff2');
+}
