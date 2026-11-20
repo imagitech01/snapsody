@@ -6,75 +6,75 @@
  "notes": {
   "49": {
    "file": "49.ogg",
-   "sustainStart": 0.4844375,
-   "sustainEnd": 0.9899375,
-   "gain": 0.3355
+   "sustainStart": 0.483333333,
+   "sustainEnd": 0.988416667,
+   "gain": 0.3303
   },
   "52": {
    "file": "52.ogg",
-   "sustainStart": 0.508479167,
-   "sustainEnd": 0.9331875,
-   "gain": 0.3323
+   "sustainStart": 0.506395833,
+   "sustainEnd": 0.931125,
+   "gain": 0.3429
   },
   "55": {
    "file": "55.ogg",
-   "sustainStart": 0.791770833,
-   "sustainEnd": 1.231083333,
-   "gain": 0.3372
+   "sustainStart": 0.787125,
+   "sustainEnd": 1.225895833,
+   "gain": 0.3184
   },
   "58": {
    "file": "58.ogg",
-   "sustainStart": 0.846479167,
-   "sustainEnd": 1.284291667,
-   "gain": 0.3731
+   "sustainStart": 0.845083333,
+   "sustainEnd": 1.2826875,
+   "gain": 0.3712
   },
   "61": {
    "file": "61.ogg",
-   "sustainStart": 0.844166667,
-   "sustainEnd": 1.270375,
-   "gain": 0.3043
+   "sustainStart": 0.839979167,
+   "sustainEnd": 1.2656875,
+   "gain": 0.2737
   },
   "64": {
    "file": "64.ogg",
-   "sustainStart": 0.8021875,
-   "sustainEnd": 1.202979167,
-   "gain": 0.3794
+   "sustainStart": 0.801104167,
+   "sustainEnd": 1.2015625,
+   "gain": 0.3392
   },
   "67": {
    "file": "67.ogg",
-   "sustainStart": 0.44325,
-   "sustainEnd": 0.8769375,
-   "gain": 0.2947
+   "sustainStart": 0.4418125,
+   "sustainEnd": 0.8755,
+   "gain": 0.2993
   },
   "70": {
    "file": "70.ogg",
-   "sustainStart": 0.319604167,
-   "sustainEnd": 0.752895833,
-   "gain": 0.3469
+   "sustainStart": 0.3184375,
+   "sustainEnd": 0.751770833,
+   "gain": 0.3273
   },
   "73": {
    "file": "73.ogg",
-   "sustainStart": 0.388458333,
-   "sustainEnd": 0.7718125,
-   "gain": 0.3154
+   "sustainStart": 0.386833333,
+   "sustainEnd": 0.76925,
+   "gain": 0.3095
   },
   "76": {
    "file": "76.ogg",
-   "sustainStart": 0.3520625,
-   "sustainEnd": 0.7285,
-   "gain": 0.3167
+   "sustainStart": 0.350666667,
+   "sustainEnd": 0.726854167,
+   "gain": 0.3185
   },
   "79": {
    "file": "79.ogg",
-   "sustainStart": 0.603833333,
-   "sustainEnd": 0.993229167,
-   "gain": 0.444
+   "sustainStart": 0.605125,
+   "sustainEnd": 0.9954375,
+   "gain": 0.3398
   },
   "81": {
    "file": "81.ogg",
-   "sustainStart": 0.4959375,
-   "sustainEnd": 0.880854167,
-   "gain": 0.2682
+   "sustainStart": 0.496458333,
+   "sustainEnd": 0.880541667,
+   "gain": 0.2605
   }
  }
 }

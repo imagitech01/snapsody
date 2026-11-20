@@ -104,6 +104,21 @@ second lossy generation before our Opus. D9's "SF2 or SF3" is therefore SF2 only
   repeated to at least 0.3 s, and the resampling step is adjusted by under 0.06 cent so that the loop is a
   whole number of output samples, so that a short loop does not tick at the wrap. A loop whose
   waveform jumps at the seam would get a 30 ms cross-fade; none needed one.
+- **Steady notes** (`"steady": true` in the config: tenor sax, alto sax and trumpet; change
+  `steady-notes-and-free-metronome`, 2026-11-19). The SoundFont's saxophones and trumpet are recorded with
+  vibrato, and the loop repeats it for as long as a note lasts. The converter takes it out (`steady_note`):
+  it follows the pitch on the strongest low harmonic and reads the sample at a varying speed so that the pitch is
+  constant, then brings every harmonic to its mean level and phase in the loop (breath noise is not touched).
+  Both corrections come in after the attack (pitch from 30 to 100 ms, level from 80 to 200 ms), which keeps its
+  own bend and rise. The note is resampled to the exact pitch of its key instead of by the SoundFont's tuning
+  data, and the loop is a whole number of periods with a 30 ms linear cross-fade. Measured on a note held for
+  3 s as the sampler plays it, from 0.15 s on (pitch range, level range; median over the notes, worst in brackets):
+  alto 27 ct (45) and 2.7 dB before, 1.4 ct (3.4) and 0.4 dB after; tenor 14 ct (35) and 3.6 dB before, 0.8 ct (6.5,
+  the attack's bend) and 0.5 dB after; trumpet 11 ct (16) and 0.5 dB before, 0.4 ct (1.8) and 0.2 dB after.
+  Brightness (the range of the spectral centre below 8 kHz, as a share of its mean) went from a median of 34 %
+  to 5 % on the alto, 35 % to 7 % on the tenor and 8 % to 4 % on the trumpet.
+  The user compared both by ear on 2026-11-19 and chose these three; the clarinet has no vibrato, and the violin
+  keeps its own (the pitch tracking does not hold on its high notes, where the vibrato is widest).
 - **Piano and guitar** are different (a deviation from D9, see below): they decay, and the SoundFont's loops sit
   in the inaudible tail of the decay. Their config has `"attack": "always"`: the file is the SoundFont's sample as
   it plays up to its loop end, with no loop, and `map.json` has `"attack": "always"` and no `sustainStart` or
@@ -155,11 +170,13 @@ second lossy generation before our Opus. D9's "SF2 or SF3" is therefore SF2 only
 4. **Trumpet below sounding E4 (64)** is one sample (root key 64) pitched down by up to an octave.
    The written trumpet range F♯3 to D6 sounds E3 to C6 (52 to 84), so a third of the range is affected.
 5. **Loop level.** `check_loops.py` flags notes whose level changes by more than 1.5 dB across the wrap:
-   alto 79 (+5.1 dB) and 73 (-1.8), tenor 71 (-2.4), violin 73 (+3.9), 94 (+3.8), 97 (+3.3), 100 (+3.6),
-   85 (-3.6), 79 (-2.4) and 82 (-1.7) (piano and guitar have no loop). The waveform is
-   continuous at every wrap of the winds and the violin (the jump and curvature measures are at most 1.8
-   times their typical value), so the level change is the SoundFont's own loop (vibrato or a slow swell).
-   No SoundFont loop needed the converter's cross-fade. Listen for a slow pulse on long notes at these pitches.
+   violin 73 (+3.9), 94 (+3.8), 97 (+3.3), 100 (+3.6), 85 (-3.6), 79 (-2.4) and 82 (-1.7) (piano and guitar
+   have no loop). The waveform is continuous at every wrap of the winds and the violin (the jump and curvature
+   measures are at most 1.4 times their typical value), so the level change is the SoundFont's own loop (the
+   violin's vibrato). Listen for a slow pulse on long violin notes at these pitches. The saxophones and the
+   trumpet were flagged too before they were made steady (alto 79 +5.1 dB and 73 -1.8, tenor 71 -2.4); now their
+   level changes by at most 0.8 dB across the wrap. No SoundFont loop needed the cross-fade for a bad seam; a
+   steady note always gets its own 30 ms linear one.
 6. **Wraps in the real looper** (`check_wraps.mjs`, Chromium's decoder and Web Audio loop, entering at
    `sustainStart`): the second difference at the wrap stays within 1.8 times its 99th percentile for every
    note of the winds and the violin. The piano and the guitar have no loop and are skipped. (With the earlier

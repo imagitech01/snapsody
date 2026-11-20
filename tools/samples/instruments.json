@@ -17,13 +17,15 @@
       "name": "Tenor saxophone",
       "gmProgram": 67,
       "presetName": "Tenor Sax",
-      "range": [44, 76]
+      "range": [44, 76],
+      "steady": true
     },
     "alto-sax": {
       "name": "Alto saxophone",
       "gmProgram": 66,
       "presetName": "Alto Sax",
-      "range": [49, 81]
+      "range": [49, 81],
+      "steady": true
     },
     "clarinet": {
       "name": "B-flat clarinet",
@@ -57,6 +59,7 @@
       "gmProgram": 57,
       "presetName": "Trumpet",
       "range": [52, 84],
+      "steady": true,
       "credit": "Trumpet samples: uncredited, public domain (per the SoundFont's sample sources list)."
     }
   }

@@ -35,6 +35,8 @@ presets are not applied) and writes, per instrument in the config, a folder with
     see fixed_loop_note.)
   - A SoundFont loop whose waveform jumps at the seam (see seam_metrics) gets a short
     cross-fade baked in.
+  - An instrument with `"steady": true` in the config (the saxophones, the trumpet) has its recorded
+    vibrato taken out: constant pitch, tuned to the key, every harmonic at a constant level (steady_note).
   - `gain` (at most 1) evens out the held loudness between notes: every file is peak-
     normalised, `gain` brings its loop section down to a common RMS (TARGET_RMS).
 
@@ -65,6 +67,13 @@ CROSSFADE_S = 0.03
 ENV_HOP, ENV_WIN = int(0.01 * SR), int(0.1 * SR)    # loudness envelope: 100 ms windows every 10 ms
 KERNEL_HALF, KERNEL_BETA = 24, 8.0   # windowed-sinc resampler
 OPUS_KBPS = 80
+# Steady notes (config "steady"): the recorded vibrato is taken out.
+STEADY_TRACK_HZ = 30.0                  # the pitch and the level of a harmonic are followed up to this rate
+STEADY_WIDE = 0.06                      # the first pass follows the pitch this far (a share of the frequency): a semitone either side
+STEADY_PITCH_IN = (0.03, 0.10)          # seconds over which the pitch correction comes in (the attack keeps its own pitch)
+STEADY_LEVEL_IN = (0.08, 0.20)          # the same for the level of the harmonics (the attack keeps its own rise)
+STEADY_FLOOR_DB = -60                   # harmonics weaker than this, against the strongest, are left alone
+STEADY_MARGIN_S = 0.3                   # the loop is carried on this long past its end, so the filters have no edge there
 
 # SoundFont generator numbers (SF 2.04, section 8.1.2)
 G_START, G_END, G_LOOP_START, G_LOOP_END = 0, 1, 2, 3
@@ -299,7 +308,10 @@ def build_note(sf, cfg, key, velocity):
         ls, le = ls_abs - start - t0, le_abs - start - t0
         if z.modes not in (1, 3) or not (0 <= ls < le <= len(x)):
             raise ConvertError(f'key {key} ({z.sample.name}): no usable loop in the SoundFont; give the instrument a "loop" in the config')
-        y, ls_i, le_i = periodic_note(x, ls, le, step, info)
+        if cfg.get('steady'):
+            y, ls_i, le_i = steady_note(x, ls, le, step, rate, 440.0 * 2 ** ((z.root - 69) / 12), 440.0 * 2 ** ((key - 69) / 12), info)
+        else:
+            y, ls_i, le_i = periodic_note(x, ls, le, step, info)
     else:
         y, ls_i, le_i = fixed_loop_note(x, step, loop_cfg, info)
     return y, ls_i, le_i, info
@@ -339,6 +351,128 @@ def periodic_note(x, ls, le, step, info):
     le_i = ls_i + n_loop
     info.update(loop_src=(ls, le, length), repeats=best, loop_out=n_loop)
     return finish_loop(y, ls_i, le_i, info), ls_i, le_i
+
+
+def low_pass(z, cutoff, rate):
+    """z (real or complex) without what changes faster than cutoff Hz (a Gaussian, -3 dB at the cutoff)."""
+    pad = int(0.2 * rate)
+    n = len(z) + 2 * pad
+    spectrum = np.fft.fft(np.concatenate([np.zeros(pad, z.dtype), z, np.zeros(pad, z.dtype)]))
+    f = np.fft.fftfreq(n, 1.0 / rate)
+    return np.fft.ifft(spectrum * np.exp(-0.5 * math.log(2) * (f / cutoff) ** 2))[pad:pad + len(z)]
+
+
+def ramp(n, rate, span):
+    """0 before span[0] seconds, 1 after span[1], a raised cosine between."""
+    t = np.clip((np.arange(n) / rate - span[0]) / (span[1] - span[0]), 0, 1)
+    return 0.5 - 0.5 * np.cos(math.pi * t)
+
+
+def pitch_estimate(x, rate, near):
+    """The pitch of x in Hz by autocorrelation, within a semitone and a half of `near`."""
+    n = 1 << int(math.ceil(math.log2(2 * len(x))))
+    ac = np.fft.irfft(np.abs(np.fft.rfft(x * np.hanning(len(x)), n)) ** 2)
+    lo, hi = int(rate / (near * 1.09)), int(math.ceil(rate / (near / 1.09)))
+    k = lo + int(np.argmax(ac[lo:hi + 1]))
+    a, b, c = ac[k - 1], ac[k], ac[k + 1]
+    return rate / (k + 0.5 * (a - c) / (a - 2 * b + c))
+
+
+def steady_pitch(x, rate, f_est, h, track, held):
+    """x read at a varying speed so that its pitch stays at its mean over the samples held[0]..held[1]. The pitch
+    is followed on harmonic h of f_est Hz, up to `track` Hz either side of it. Returns the steady sound, a function
+    that says where a sample position of x lands in it, the pitch in Hz and how wide the pitch moved (cents)."""
+    n = len(x)
+    t = np.arange(n) / rate
+    a0, a1 = held
+    for _ in range(2):                                                # the second round starts from the measured pitch
+        z = low_pass(x * np.exp(-2j * math.pi * h * f_est * t), track, rate)
+        ratio = 1 + np.gradient(np.unwrap(np.angle(z))) * rate / (2 * math.pi * h * f_est)     # pitch against f_est
+        f_ref = f_est * float(ratio[a0:a1].mean())
+        ratio, f_est = ratio * f_est / f_ref, f_ref
+    width = float(1200 * np.log2(ratio[a0:a1].max() / ratio[a0:a1].min()))
+    speed = 1 + ramp(n, rate, STEADY_PITCH_IN) * (np.clip(ratio, 0.9, 1.1) - 1)     # periods per source sample, against the mean
+    warped = np.concatenate([[0.0], np.cumsum(speed)[:-1]])           # where each source sample lands
+    y = interpolate(x, np.interp(np.arange(int(warped[-1])), warped, np.arange(n)), float(speed.max()))
+    return y, lambda pos: float(np.interp(pos, np.arange(n), warped)), f_ref, width
+
+
+def steady_note(x, ls, le, step, rate, near, target, info):
+    """A looped note with its recorded vibrato taken out (the config's "steady"): the same note at a constant
+    pitch, each harmonic at a constant level, looped where the SoundFont loops it.
+
+    1. The pitch is followed on the strongest of the first harmonics (its phase, STEADY_TRACK_HZ wide), and the
+       sample is read at a varying speed so that the pitch stays at the mean pitch of the loop.
+    2. The harmonics are then at fixed frequencies, so each can be followed on its own; it is brought to its
+       mean level and phase in the loop. What is not a harmonic (breath, bow) is not touched.
+    3. The pitch is now known, so the note is resampled to `target` Hz, the pitch of its key, instead of by the
+       SoundFont's tuning data (which is right to a few cents). The loop is a whole number of periods, with a
+       linear cross-fade at its end (the two sides are in phase, so the level does not dip or bulge).
+    Both corrections come in after the attack, which keeps its own pitch and rise."""
+    length = le - ls
+    k = max(1, math.ceil(MIN_LOOP_S * SR * step / length))            # the loop is repeated to MIN_LOOP_S, as in periodic_note
+    margin = int(STEADY_MARGIN_S * rate)
+    reps = k + int(math.ceil(margin / length)) + 1
+    ext = np.concatenate([x[:ls], np.tile(x[ls:le], reps)])           # the note as the SoundFont plays it
+    n = len(ext)
+    held = slice(ls, ls + k * length)
+
+    # 1. the pitch, in two passes: a wide one that can follow a wide vibrato on a high note, then a narrow one
+    f_ref = pitch_estimate(ext[held][:int(0.5 * rate)], rate, near)
+    harmonics = [h for h in (1, 2, 3, 4) if h * f_ref < 0.4 * rate]
+    t = np.arange(n) / rate
+    amps = [np.abs(low_pass(ext * np.exp(-2j * math.pi * h * f_ref * t), min(STEADY_TRACK_HZ, 0.45 * f_ref), rate)[held]).mean() for h in harmonics]
+    h = harmonics[int(np.argmax(amps))]
+    v, ls_v, le_v = ext, float(ls), float(ls + k * length)
+    for wide in (STEADY_WIDE, 0.0):
+        track = min(max(STEADY_TRACK_HZ, wide * h * f_ref), 0.45 * f_ref)
+        v, at, f_ref, width = steady_pitch(v, rate, f_ref, h, track, (int(ls_v), int(le_v)))
+        ls_v, le_v = at(ls_v), at(le_v)
+        info.setdefault('vibrato_ct', round(width, 1))
+    m = len(v)
+    periods = round((le_v - ls_v) * f_ref / rate)
+    loop_v = periods * rate / f_ref                                   # the loop: a whole number of periods
+
+    # 2. the level of each harmonic
+    tv = np.arange(m) / rate
+    a0, a1 = int(ls_v), min(m, int(ls_v + loop_v))
+    wl = ramp(m, rate, STEADY_LEVEL_IN)
+    track = min(STEADY_TRACK_HZ, 0.45 * f_ref)
+    parts, strongest = [], 0.0
+    for hh in range(1, int(0.45 * rate / f_ref) + 1):
+        carrier = np.exp(2j * math.pi * hh * f_ref * tv)
+        a = low_pass(v * np.conj(carrier), track, rate)
+        mean = float(np.abs(a[a0:a1]).mean())
+        strongest = max(strongest, mean)
+        parts.append((carrier, a, mean))
+    out = v.copy()
+    settled = min(m - 1, int(STEADY_LEVEL_IN[1] * rate))
+    for carrier, a, mean in parts:
+        if mean < strongest * 10 ** (STEADY_FLOOR_DB / 20):
+            continue
+        # The harmonic goes from what it is in the attack to a fixed level and phase (its mean in the loop).
+        # In a vibrato the harmonics also shift against each other, which is heard as a wobble of its own.
+        phase = np.unwrap(np.angle(a))
+        fixed = float(np.angle(a[a0:a1].mean()))
+        fixed += 2 * math.pi * round((phase[settled] - fixed) / (2 * math.pi))
+        level = np.exp((1 - wl) * np.log(np.abs(a) + 1e-12) + wl * math.log(mean))
+        out += 2 * np.real((level * np.exp(1j * (phase + wl * (fixed - phase))) - a) * carrier)
+
+    # 3. the loop, a whole number of output samples (see periodic_note)
+    tuned = target * rate / (SR * f_ref)
+    info['retuned_ct'] = round(1200 * math.log2(tuned / step), 1)
+    if abs(info['retuned_ct']) > 50:
+        raise ConvertError(f'key {info["key"]}: the pitch found ({f_ref:.1f} Hz) is {info["retuned_ct"]} cents from the SoundFont\'s tuning')
+    n_loop = round(loop_v / tuned)
+    step = loop_v / n_loop
+    ls_i = math.ceil(ls_v / step)
+    le_i = ls_i + n_loop
+    y = interpolate(out, np.arange(le_i) * step, step)
+    xf = min(int(CROSSFADE_S * SR), ls_i, n_loop // 3)
+    fade = (np.arange(xf) + 0.5) / xf
+    y[le_i - xf:le_i] = y[le_i - xf:le_i] * (1 - fade) + y[ls_i - xf:ls_i] * fade
+    info.update(loop_src=(ls, le, length), repeats=k, loop_out=n_loop, harmonic=h, steady_hz=round(f_ref, 2))
+    return finish_loop(y, ls_i, le_i, info, allow_bake=False), ls_i, le_i
 
 
 def fixed_loop_note(x, step, loop_cfg, info):
@@ -446,7 +580,8 @@ def convert_instrument(sf, name, cfg, defaults, soundfont, out_dir, report_dir):
     attack = cfg.get('attack')
     if attack not in (None, 'always'):
         raise ConvertError(f'{name}: "attack" is "always" or left out, not {attack!r}')
-    ncfg = {'zones': zones, 'loop': cfg.get('loop'), 'attack': attack, 'endFade': cfg.get('endFade', END_FADE_S)}
+    ncfg = {'zones': zones, 'loop': cfg.get('loop'), 'attack': attack, 'endFade': cfg.get('endFade', END_FADE_S),
+            'steady': cfg.get('steady', defaults.get('steady', False))}
     level_mode = cfg.get('level', 'attack' if 'loop' in cfg or attack == 'always' else 'loop')
     if attack == 'always' and 'loop' not in cfg and level_mode != 'attack':
         raise ConvertError(f'{name}: a note without a loop has no sustain section to measure; use "level": "attack"')
@@ -469,6 +604,7 @@ def convert_instrument(sf, name, cfg, defaults, soundfont, out_dir, report_dir):
         notes[str(key)] = {'file': fname, 'sustainStart': round(ls_i / SR, 9), 'sustainEnd': round(le_i / SR, 9), 'gain': round(gain, 4)}
         lines.append(f'{lead}loop {ls_i / SR:6.3f}-{le_i / SR:6.3f} ({(le_i - ls_i) / SR:5.3f}s'
                      f'{" x" + str(info["repeats"]) if "repeats" in info else ""})  seam {info["seam"]}'
+                     f'{" steady at " + str(info["steady_hz"]) + " Hz (was " + str(info["vibrato_ct"]) + " ct wide, retuned " + str(info["retuned_ct"]) + " ct, harmonic " + str(info["harmonic"]) + ")" if "steady_hz" in info else ""}'
                      f'{" -> " + str(info["seam_after"]) if "seam_after" in info else ""}'
                      f'{" entry " + str(info["entry_db"]) + " dB, decay " + str(info["decay_db"]) + " dB, end shift " + str(info["shift"]) if "shift" in info else ""}  '
                      f'gain {gain:.3f} (rms {rms:.3f})  {size} B')
