@@ -1,7 +1,8 @@
 import type { EditorSession } from '../../../app/editorSession.ts'
-import { DURATION_TYPES, deleteNote, insertNote, noteToRest, restToNote, setAccidental, setDuration, stepPitch } from '../../../core/score/edit.ts'
-import type { AccidentalChoice } from '../../../core/score/edit.ts'
-import type { NoteType, VoiceScore } from '../../../core/score/model.ts'
+import { DURATION_TYPES, addChordNote, deleteNote, insertNote, moveToOtherStaff, noteToRest, restToNote, setAccidental, setDuration, splitBar, stepPitch } from '../../../core/score/edit.ts'
+import type { AccidentalChoice, EditError } from '../../../core/score/edit.ts'
+import { barLineText } from './barLineText.ts'
+import type { NoteType, Score } from '../../../core/score/model.ts'
 import { pitchName } from '../../../core/score/repairs.ts'
 import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
@@ -10,7 +11,9 @@ import { Chip, SelectField } from './controls.tsx'
 /**
  * The Note tab (frame 06.1, spec `score-editing` "Edit a note"): the pitch, its accidental, its length with
  * a dot or as a triplet, turning it into a rest and back, a note or a rest before or after it, and delete.
- * Everything acts on the selected note; with none selected the controls are there but off.
+ * Everything acts on the selected note; with none selected the controls are there but off. In a chord, pitch and
+ * accidental are the selected note's, length and rest the whole chord's (change edit-parts, D3). "+ Chord note" adds
+ * a note a third above the chord, and in a part with two staves "To other hand" moves the note or chord there (D4).
  */
 export interface ToolProps {
   session: EditorSession
@@ -18,11 +21,22 @@ export interface ToolProps {
    * Runs an edit of the score as one undo step, or with `amend` as part of the last one (the steps of a
    * held button); when it cannot be done, the reason is shown instead.
    */
-  run: (edit: (score: VoiceScore) => unknown, failure?: FailureKey, options?: { amend?: boolean }) => void
+  run: (edit: (score: Score) => unknown, failure?: Failure, options?: { amend?: boolean }) => void
 }
 
+/** What to say when an edit cannot be done: a fixed text, or one made from the refusal (a bar line's, which names where). */
+export type Failure = FailureKey | ((error: EditError) => string)
+
 /** The texts that say why a change did not happen (none of them has a parameter). */
-export type FailureKey = 'editor.error.edit' | 'mark.error.slur' | 'mark.error.tie' | 'mark.error.wedge' | 'practice.error.sound'
+export type FailureKey =
+  | 'editor.error.edit'
+  | 'mark.error.slur'
+  | 'mark.error.tie'
+  | 'mark.error.wedge'
+  | 'mark.error.voice'
+  | 'mark.error.staff'
+  | 'note.error.otherHand'
+  | 'practice.error.sound'
 
 const ACCIDENTALS: readonly AccidentalChoice[] = ['sharp', 'flat', 'natural', 'none']
 
@@ -39,6 +53,8 @@ export function NoteTab({ session, run }: ToolProps) {
   const dotted = (note?.dots ?? 0) > 0
   const triplet = note?.timeMod?.actual === 3 && note.timeMod.normal === 2
   const lengthKnown = type !== undefined && (DURATION_TYPES as readonly string[]).includes(type)
+  // "To other hand" is there only in a part with two staves (the piano).
+  const twoStaves = session.score.value.parts.find((p) => p.id === session.part.value)?.staves === 2
 
   const length = (change: { type?: NoteType; dots?: number; triplet?: boolean }): void => {
     if (!id) return
@@ -112,6 +128,20 @@ export function NoteTab({ session, run }: ToolProps) {
         <Chip disabled={off} onPress={() => id && run((s) => insertNote(s, id, 'after', 'rest'))}>
           {t('note.restAfter')}
         </Chip>
+      </div>
+      <div class="editor-row-actions">
+        {/* Not offered for the first note of a bar, which would leave an empty bar (change edit-parts, D9). */}
+        {id && session.canAddBarLineBefore(id) ? (
+          <Chip onPress={() => run((s) => splitBar(s, id), (error) => barLineText(t, session.score.peek(), error))}>{t('note.barLine')}</Chip>
+        ) : null}
+        <Chip disabled={off || rest} onPress={() => id && run((s) => addChordNote(s, id))}>
+          {t('note.chordNote')}
+        </Chip>
+        {twoStaves ? (
+          <Chip disabled={off || rest || note?.grace === true} onPress={() => id && run((s) => moveToOtherStaff(s, id), 'note.error.otherHand')}>
+            {t('note.otherHand')}
+          </Chip>
+        ) : null}
       </div>
     </div>
   )

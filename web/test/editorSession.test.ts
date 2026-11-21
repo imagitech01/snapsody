@@ -10,8 +10,9 @@ import { loadSettings } from '../src/app/settings.ts'
 import { preparePages } from '../src/core/pages/pages.ts'
 import type { AudioBackend } from '../src/core/playback/player.ts'
 import type { NoteOnSpec, TimerApi } from '../src/core/playback/scheduler.ts'
-import { addSlur, deleteElement, deleteNote, insertNote, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
+import { addChordNote, addSlur, deleteElement, deleteNote, insertNote, joinBars, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
 import { notesOf, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
+import type { MeasureItem } from '../src/core/score/model.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
@@ -135,9 +136,9 @@ test('edits: the selected bar\'s bar lines follow the selection, every edit, und
   assert.equal(editor.selectedBarLines.value, undefined, 'no bar selected')
   editor.selectBar(2)
   assert.deepEqual(editor.selectedBarLines.value, { start: 'normal', end: 'normal', times: 2 }, 'a bar without a note')
-  editor.apply((s) => setBarStart(ownerOf(s).score, 1, 'repeat'))
-  editor.apply((s) => setBarEnd(ownerOf(s).score, 1, 'repeat'))
-  editor.apply((s) => setRepeatTimes(ownerOf(s).score, 1, 3))
+  editor.apply((s) => setBarStart(s, 1, 'repeat'))
+  editor.apply((s) => setBarEnd(s, 1, 'repeat'))
+  editor.apply((s) => setRepeatTimes(s, 1, 3))
   assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 3 })
   editor.undo()
   assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 2 })
@@ -163,13 +164,13 @@ test('selection: an element other than a note is selected with its bar, follows 
   assert.equal(editor.selection.value, null)
   assert.ok(editor.selectElement(slur))
   assert.deepEqual(editor.selection.value, { bar: 2, noteId: null }, 'its bar is selected, no note')
-  assert.deepEqual(editor.selectedElement.value, { ref: slur, info: { kind: 'slur', bar: 1, deletable: true } })
+  assert.deepEqual(editor.selectedElement.value, { ref: slur, info: { kind: 'slur', bar: 1, deletable: true, part: 'P1', staff: 0 } })
   assert.equal(editor.selectedNote.value, undefined)
 
   // An edit elsewhere keeps it; deleting it leaves its bar selected; undo selects it again.
   editor.apply((s) => toggleStaccato(s, idsOf(editor, 1)[0]!))
   assert.deepEqual(editor.selectedElement.value?.ref, slur)
-  editor.apply((s) => deleteElement(ownerOf(s).score, ownerOf(s).ref, slur))
+  editor.apply((s) => deleteElement(s, slur))
   assert.equal(editor.selectedElement.value, undefined, 'gone with the slur')
   assert.deepEqual(editor.selection.value, { bar: 2, noteId: null })
   editor.undo()
@@ -480,7 +481,7 @@ test('preview: without a practice tempo the score decides; the excerpt drops rep
   assert.equal(firstLine(excerpt).measures[0]!.rightBarline, undefined)
   assert.deepEqual(firstLine(excerpt).measures[0]!.time, { beats: 3, beatType: 4 })
   assert.deepEqual(s, before)
-  assert.deepEqual(barExcerpt(s, 9), singleVoiceScore([]))
+  assert.deepEqual(barExcerpt(s, 9).bars, [], 'no bar 10: a score without bars')
 })
 
 // ---- your part (change parts-and-accompaniment, task 7.1) -------------------------------------
@@ -509,13 +510,20 @@ async function setupMelodyPiano(part?: { id: string; hand?: 'right' | 'left' }) 
   return { editor, stored }
 }
 
+/** The id of the `k`th shown note (from 0, chord notes counted) of a voice in a bar (from 1) of the editor's score. */
+const noteAt = (editor: EditorSession, ref: { part: string; staff: number; voice: number }, bar: number, k: number): string =>
+  notesOf(voiceView(editor.score.value, ref).measures[bar - 1]!).filter((n) => !n.hidden)[k]!.id
+const LH = { part: 'P2', staff: 1, voice: 0 }
+const LH2 = { part: 'P2', staff: 1, voice: 1 }
+const RH = { part: 'P2', staff: 0, voice: 0 }
+
 const partXml = (xml: string, id: string): string => new RegExp(`<part id="${id}">[\\s\\S]*?</part>`).exec(xml)![0]
 
 test('your part: editing a note of the melody and saving leaves the piano part as it was in the stored MusicXML', async () => {
   const { editor, stored } = await setupMelodyPiano()
-  assert.deepEqual(editor.voice, { part: 'P1', staff: 0, voice: 0 })
+  assert.equal(editor.part.value, 'P1')
   const before = partXml(serializeMusicXml(parseMusicXml(await stored())), 'P2')
-  const [first] = voiceView(editor.score.value, editor.voice).measures[0]!.items.filter((i) => 'pitch' in i)
+  const [first] = voiceView(editor.score.value, { part: 'P1', staff: 0, voice: 0 }).measures[0]!.items.filter((i) => 'pitch' in i)
   editor.select((first as { id: string }).id)
   editor.apply((s) => stepPitch(s, (first as { id: string }).id, 1))
   assert.equal((await editor.save()).ok, true)
@@ -526,38 +534,244 @@ test('your part: editing a note of the melody and saving leaves the piano part a
   editor.close()
 })
 
-test('your part: P2 with the left hand opens staff 1 voice 0 of P2, offers only its items, and a key change goes on P2 only', async () => {
+test('edit parts: the editor opens on your part, the piano, and draws it whole; a key change goes on it only', async () => {
   const { editor } = await setupMelodyPiano({ id: 'P2', hand: 'left' })
-  assert.deepEqual(editor.voice, { part: 'P2', staff: 1, voice: 0 })
-  assert.deepEqual(editor.drawn.value, { id: 'P2', voice: { staff: 1, voice: 0 } })
-  const ids = (bar: number): string[] => notesOf(voiceView(editor.score.value, editor.voice).measures[bar - 1]!).map((n) => n.id)
-  const right = voiceView(editor.score.value, { part: 'P2', staff: 0, voice: 0 }).measures[0]!.items.filter((i) => 'id' in i).map((i) => (i as { id: string }).id)
-  assert.equal(editor.select(right[0]!), false, 'a note of the right hand is not selectable')
-  assert.equal(editor.select(ids(1)[0]!), true)
-  editor.apply((s) => setKey(ownerOf(s).score, ownerOf(s).ref, 2))
+  assert.equal(editor.part.value, 'P2', 'open on the piano part when it is your part')
+  assert.deepEqual(editor.drawn.value, { id: 'P2' }, 'both hands are drawn, whichever one you play')
+  // Any note of the part can be selected: the right hand, the left hand, its second voice.
+  for (const id of [noteAt(editor, RH, 1, 0), noteAt(editor, LH, 3, 0), noteAt(editor, LH2, 3, 0)]) assert.equal(editor.select(id), true, id)
+  editor.apply((s) => setKey(s, editor.part.value, 2))
   const score = editor.score.value
   assert.equal(score.bars[0]!.parts[1]!.key?.fifths, 2, 'the key is on P2')
   assert.equal(score.bars[0]!.parts[0]!.key?.fifths, 0, 'the melody keeps its key')
-  editor.apply((s) => setClef(ownerOf(s).score, ownerOf(s).ref, 0, { sign: 'G', line: 2 }))
+  editor.apply((s) => setClef(s, { part: 'P2', staff: 1 }, 0, { sign: 'G', line: 2 }))
   assert.equal(editor.score.value.bars[0]!.parts[1]!.staves[1]!.clef?.sign, 'G', 'the clef is on the left-hand staff')
   assert.equal(editor.score.value.bars[0]!.parts[1]!.staves[0]!.clef?.sign, 'G')
   assert.equal(editor.score.value.bars[0]!.parts[0]!.staves[0]!.clef?.sign, 'G')
   editor.close()
 })
 
-test('your part: an unknown part is the first part', async () => {
-  const { editor } = await setupMelodyPiano({ id: 'P9' })
-  assert.deepEqual(editor.voice, { part: 'P1', staff: 0, voice: 0 })
+test('edit parts: switching part clears the selection, and an undo switches to the part it changes (spec "Edit any part")', async () => {
+  const { editor } = await setupMelodyPiano()
+  assert.equal(editor.part.value, 'P1')
+  // Edit the melody, switch to the piano, undo: the session is on the melody again, with the edit undone.
+  const g4 = noteAt(editor, { part: 'P1', staff: 0, voice: 0 }, 1, 0)
+  assert.ok(editor.select(g4))
+  editor.apply((s) => stepPitch(s, g4, 1))
+  assert.ok(editor.setPart('P2'))
+  assert.equal(editor.part.value, 'P2')
+  assert.equal(editor.selection.value, null, 'switching clears the selection')
+  assert.deepEqual(editor.drawn.value, { id: 'P2' })
+  assert.ok(editor.undo())
+  assert.equal(editor.part.value, 'P1', 'on the melody again')
+  assert.equal(voiceView(editor.score.value, { part: 'P1', staff: 0, voice: 0 }).measures[0]!.items.filter((i) => 'pitch' in i).map((n) => (n as { pitch: { step: string } }).pitch.step)[0], 'G', 'the edit is undone')
+  // Redo of it from the piano goes back to the melody too.
+  editor.setPart('P2')
+  assert.ok(editor.redo())
+  assert.equal(editor.part.value, 'P1')
+  // An edit of the whole piece (a bar line) keeps the part shown when it is undone.
+  editor.setPart('P2')
+  editor.apply((s) => setBarEnd(s, 0, 'double'))
+  assert.ok(editor.undo())
+  assert.equal(editor.part.value, 'P2')
+  assert.equal(editor.setPart('P9'), false)
+  assert.equal(editor.part.value, 'P2')
   editor.close()
 })
 
-test('preview: a left-hand bar is heard and drawn with its own staff\'s clef and its part\'s name', () => {
+test('your part: an unknown part is the first part', async () => {
+  const { editor } = await setupMelodyPiano({ id: 'P9' })
+  assert.equal(editor.part.value, 'P1')
+  editor.close()
+})
+
+test('preview: the excerpt of a bar holds every part, each staff with its own clef, and each part with its name', () => {
   const s = parseMusicXml(read(MELODY_PIANO_FIXTURE))
   const left = { part: 'P2', staff: 1, voice: 0 }
-  const excerpt = barExcerpt(s, 2, left)
-  const bar = firstLine(excerpt).measures[0]!
+  const excerpt = barExcerpt(s, 2)
+  const bar = voiceView(excerpt, left).measures[0]!
   assert.deepEqual(bar.clef, { sign: 'F', line: 4 }, 'the bass clef of the left hand, not the melody\'s treble clef')
   assert.deepEqual(bar.time, { beats: 4, beatType: 4 })
   assert.deepEqual(notesOf(bar).map((n) => n.pitch?.step), notesOf(voiceView(s, left).measures[2]!).map((n) => n.pitch?.step))
-  assert.equal(firstLine(excerpt).partName, 'Piano')
+  assert.deepEqual(excerpt.parts.map((p) => p.name), ['Melody', 'Piano'])
+  assert.equal(excerpt.bars.length, 1)
+  assert.deepEqual(notesOf(voiceView(excerpt, { part: 'P1', staff: 0, voice: 0 }).measures[0]!).map((n) => n.id), ['n8', 'n9', 'n10'], 'the melody is there too')
+})
+
+test('edit parts: the label says where the selected note is (spec "Select a chord note")', async () => {
+  const { editor } = await setupMelodyPiano({ id: 'P2' })
+  // A three-note chord in the left hand of bar 5: C3, then E3 and G3 added above it.
+  const c3 = noteAt(editor, LH, 5, 0)
+  const e3 = editor.apply((s) => addChordNote(s, c3))
+  const g3 = editor.apply((s) => addChordNote(s, c3))
+  assert.ok(editor.select(e3))
+  assert.equal(editor.selectionLabel.value, 'Bar 5 · Left hand · Chord, note 2 of 3')
+  assert.ok(editor.select(g3))
+  assert.equal(editor.selectionLabel.value, 'Bar 5 · Left hand · Chord, note 3 of 3')
+  assert.ok(editor.select(noteAt(editor, LH, 5, 3)))
+  assert.equal(editor.selectionLabel.value, 'Bar 5 · Left hand · Note 2', 'a chord counts once among the notes of the bar')
+  // Bar 3 of the left hand has two voices: the voice is named.
+  assert.ok(editor.select(noteAt(editor, LH2, 3, 0)))
+  assert.equal(editor.selectionLabel.value, 'Bar 3 · Left hand · Voice 2 · Note 1', 'the hidden rest before it is not counted')
+  assert.ok(editor.select(noteAt(editor, LH, 3, 1)))
+  assert.equal(editor.selectionLabel.value, 'Bar 3 · Left hand · Voice 1 · Note 2')
+  // A second voice in the right hand of bar 7.
+  const added = editor.apply((s) => {
+    for (const bar of s.bars) bar.parts[1]!.staves[0]!.voices.push([])
+    const note: MeasureItem = { kind: 'note', id: 'v2', pitch: { step: 'C', octave: 5 }, type: 'whole', dots: 0, duration: { n: 1, d: 1 }, slurs: [], tuplets: [] }
+    s.bars[6]!.parts[1]!.staves[0]!.voices[1]!.push(note)
+    return 'v2'
+  })
+  assert.ok(editor.select(added))
+  assert.equal(editor.selectionLabel.value, 'Bar 7 · Right hand · Voice 2 · Note 1')
+  editor.close()
+})
+
+test('edit parts: a one-line piece keeps its label, "Bar 2 · Note 3"', async () => {
+  const { editor } = await setup()
+  assert.ok(editor.select(idsOf(editor, 2)[2]!))
+  assert.equal(editor.selectionLabel.value, 'Bar 2 · Note 3')
+  assert.ok(editor.select(idsOf(editor, 1)[0]!))
+  assert.equal(editor.selectionLabel.value, 'Bar 1 · Note 1')
+  editor.close()
+})
+
+/** A melody-and-piano piece with what practice.json says plays along, opened in the editor, bar 3 selected. */
+async function previewOf(practice: { part?: { id: string; hand?: 'right' | 'left' }; silent?: string[]; ownLine?: boolean }) {
+  const platform = createFakePlatform()
+  const library = createLibrary(platform.files, { newId: () => 'piece-1' })
+  const settings = await loadSettings(platform.files)
+  const router = createRouter('library')
+  platform.files.seed('scans/1/page-1.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+  const xml = read(MELODY_PIANO_FIXTURE)
+  await library.create({ name: 'Duet', musicxml: xml, bars: 8, repairs: [], pages: [{ source: 'scans/1/page-1.jpg', recognised: xml, firstBar: 1, lastBar: 8 }] })
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, ...practice })
+  router.push({ name: 'editor', pieceId: 'piece-1' })
+  const editor = await openEditor({ library, settings, router, i18n: createI18n() }, 'piece-1')
+  assert.ok(editor.selectBar(3))
+  return editor
+}
+
+test('edit parts: the preview plays a bar as practice does, every part that plays along (spec "Preview a bar")', async () => {
+  // Both parts play in practice: bar 3 holds the melody's notes and the piano's.
+  const both = await previewOf({ part: { id: 'P1' } })
+  const heard = new Set(both.previewNotes())
+  for (const id of ['n8', 'n9', 'n10']) assert.ok(heard.has(id), `the melody's ${id}`)
+  for (const id of ['n35', 'n41', 'n44']) assert.ok(heard.has(id), `the piano's ${id}`)
+  assert.equal(both.barPreview()!.score.parts.length, 2)
+  both.close()
+  // Your line off: the melody is left out, the piano still plays.
+  const off = await previewOf({ part: { id: 'P1' }, ownLine: false })
+  const without = new Set(off.previewNotes())
+  for (const id of ['n8', 'n9', 'n10']) assert.ok(!without.has(id), `your ${id} is not heard`)
+  assert.ok(without.has('n35'))
+  off.close()
+  // The piano switched off under "Plays along": only your melody.
+  const alone = await previewOf({ part: { id: 'P1' }, silent: ['P2'] })
+  assert.deepEqual(new Set(alone.previewNotes()), new Set(['n8', 'n9', 'n10']))
+  alone.close()
+})
+
+// ---- bar lines added and removed (change edit-parts, D9, D10, task 5.2) ------------------------
+
+/** Records every `writeScore` call of the library (its arguments) and lets it through. */
+function spyOnWrites(library: EditorDeps['library']): unknown[][] {
+  const calls: unknown[][] = []
+  const real = library.writeScore.bind(library)
+  library.writeScore = (...args: Parameters<typeof real>) => {
+    calls.push(args)
+    return real(...args)
+  }
+  return calls
+}
+
+test('bar lines: a bar line added and undone saves no bar map; one added and saved maps the bars, the pages and the lines of the photo', async () => {
+  const { editor, library } = await setup()
+  const calls = spyOnWrites(library)
+  // Bar 2 is G5 G5 G5: a bar line before its second note, then undone; then a pitch, so there is something to save.
+  editor.apply((s) => splitBar(s, idsOf(editor, 2)[1]!))
+  assert.equal(editor.score.value.bars.length, 5)
+  editor.undo()
+  editor.apply((s) => stepPitch(s, idsOf(editor, 1)[1]!, -1))
+  assert.equal((await editor.save()).ok, true)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]!.length, 3, 'no bar map: saving is as before')
+  assert.equal((await library.info('piece-1')).bars, 4)
+
+  editor.apply((s) => splitBar(s, idsOf(editor, 2)[1]!))
+  const result = await editor.save()
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls[1]![3], [{ first: 1, last: 1 }, { first: 2, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }])
+  const info = await library.info('piece-1')
+  assert.equal(info.bars, 5)
+  assert.deepEqual(info.pages.map((p) => [p.firstBar, p.lastBar, p.staves.map((s) => [s.firstBar, s.lastBar])]), [[1, 3, []], [4, 5, [[4, 4], [5, 5]]]])
+  assert.equal(editor.dirty.value, false)
+})
+
+test('bar lines: a second save maps from the first save, and a retry after a failed rename does not map again', async () => {
+  const { editor, library } = await setup()
+  const calls = spyOnWrites(library)
+  editor.apply((s) => splitBar(s, idsOf(editor, 2)[1]!))
+  assert.equal((await editor.save()).ok, true)
+  // Now a bar line in bar 1 (A3 C5 C5, before its second note): bar 1 of the saved piece becomes bars 1 and 2.
+  editor.apply((s) => splitBar(s, idsOf(editor, 1)[1]!))
+  editor.setTitle('Renamed')
+  const realUpdate = library.update.bind(library)
+  library.update = async () => {
+    throw new Error('disk full')
+  }
+  const failed = await editor.save()
+  assert.equal(!failed.ok && failed.reason, 'failed')
+  assert.deepEqual(calls[1]![3], [{ first: 1, last: 2 }, { first: 3, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }, { first: 6, last: 6 }], 'from the piece as saved the first time')
+  library.update = realUpdate
+  assert.equal((await editor.save()).ok, true)
+  assert.equal(calls.length, 2, 'the score was saved: the retry only renames')
+  const info = await library.info('piece-1')
+  assert.deepEqual([info.name, info.bars, info.pages.map((p) => [p.firstBar, p.lastBar])], ['Renamed', 6, [[1, 4], [5, 6]]])
+})
+
+test('bar lines: "Bar line before" is not offered for the first note of a bar; "Remove bar line" not after the last bar or where a page or a line of the photo ends', async () => {
+  const { editor } = await setup()
+  const [first, second] = idsOf(editor, 2)
+  assert.equal(editor.canAddBarLineBefore(first!), false, 'the first note of a bar')
+  assert.equal(editor.canAddBarLineBefore(second!), true)
+  assert.equal(editor.canAddBarLineBefore('no-such-note'), false)
+  // Page 1 is bars 1–2; page 2 is bars 3–4 in two lines of the photo, bar 3 and bar 4.
+  assert.deepEqual([0, 1, 2, 3, -1, 4].map((i) => editor.canRemoveBarLineAfter(i)), [true, false, false, false, false, false])
+  // A bar line added in bar 2 and not saved: the bar line between its halves can go, the end of page 1 still cannot.
+  editor.apply((s) => splitBar(s, second!))
+  assert.deepEqual([0, 1, 2, 3, 4].map((i) => editor.canRemoveBarLineAfter(i)), [true, true, false, false, false])
+  // Saved: page 1 is bars 1–3 now, and the same holds.
+  assert.equal((await editor.save()).ok, true)
+  assert.deepEqual([0, 1, 2, 3, 4].map((i) => editor.canRemoveBarLineAfter(i)), [true, true, false, false, false])
+  // The two halves joined again (not saved): the bar line after them is the end of page 1.
+  editor.apply((s) => joinBars(s, 1))
+  assert.deepEqual([0, 1, 2, 3].map((i) => editor.canRemoveBarLineAfter(i)), [true, false, false, false])
+  // Joined across the end of page 1 anyway (the edit itself does not know the pages): the save is refused as a failure, not as a name.
+  editor.apply((s) => joinBars(s, 1))
+  const refused = await editor.save()
+  assert.equal(!refused.ok && refused.reason, 'failed')
+  assert.equal(editor.dirty.value, true)
+})
+
+test('bar lines: a missed bar line in a bar that does not add up is split and saved with the right map', async () => {
+  for (const [count, before] of [
+    [6, 3],
+    [8, 4],
+  ] as const) {
+    const { editor, library } = await setup()
+    const calls = spyOnWrites(library)
+    // Bar 2 of the 3/4 piece read with `count` quarter notes: a bar line was missed.
+    for (let k = 3; k < count; k++) editor.apply((s) => insertNote(s, idsOf(editor, 2).at(-1)!, 'after', 'note'))
+    assert.equal(idsOf(editor, 2).length, count)
+    const note = idsOf(editor, 2)[before]!
+    assert.ok(editor.canAddBarLineBefore(note))
+    editor.apply((s) => splitBar(s, note))
+    assert.deepEqual([idsOf(editor, 2).length, idsOf(editor, 3).length], [before, count - before])
+    if (count === 6) assert.deepEqual(editor.warnings.value.filter((w) => w.kind === 'bar-length' && (w.bar === '2' || w.bar === '3')).map((w) => w.bar), [], 'neither half is marked')
+    assert.equal((await editor.save()).ok, true)
+    assert.deepEqual(calls[0]![3], [{ first: 1, last: 1 }, { first: 2, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }], `${count} quarters: old 2 is 2–3, old 3 is 4`)
+    assert.equal((await library.info('piece-1')).bars, 5)
+    editor.close()
+  }
 })

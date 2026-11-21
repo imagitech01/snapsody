@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import type { Page } from 'playwright'
-import { parseMusicXml } from '../../src/core/score/musicxml.ts'
+import { parseMusicXml, serializeMusicXml } from '../../src/core/score/musicxml.ts'
 import { isNote, isWedge } from '../../src/core/score/model.ts'
 import type { Score } from '../../src/core/score/model.ts'
 import { withApp } from './app.ts'
@@ -11,7 +11,7 @@ import { noteIdsByBar, tab, tapNote, textOf } from './journey.ts'
 import { BUILD_DIR } from './paths.ts'
 import { ID } from './pieces.ts'
 import { barsScore, elementsScore } from './scores.ts'
-import { firstLine } from '../helpers.ts'
+import { MELODY_PIANO_FIXTURE, firstLine } from '../helpers.ts'
 
 // The edit journey (practice-app design D15, "edit: note, mark, preview, save & practice"; tasks 15.1 to
 // 15.4; specs `score-editing`, `score-capture` "Add pages to a piece", `piece-library` "Rename"; change
@@ -931,8 +931,8 @@ test('edit: deleting a misread clef moves the notes up 12 steps, as one undo ste
     const { page } = app
     const id = await makeElementsPiece(page)
     await openEditor(page, id)
-    // The clef change of bar 3 is drawn at the end of bar 2, with the drawing id `clef-2` (a bar from 0).
-    const at = await centre(page, '.score-view g.clef[id="clef-2"]')
+    // The clef change of bar 3 is drawn at the end of bar 2, with the drawing id `clef-P1-0-2` (part, staff and bar from 0).
+    const at = await centre(page, '.score-view g.clef[id="clef-P1-0-2"]')
     await page.touchscreen.tap(at.x, at.y)
     await panel(page).waitFor()
     assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Clef · bass · bar 3')
@@ -1056,5 +1056,189 @@ test('edit: Trill from the Marks tab is stored as <trill-mark/> on its note, a t
     await onScreen(page, 'practice')
     assert.equal(noteOf(await stored(app, ode), target).ornament, undefined)
     assert.ok(!((await app.file(`pieces/${ode}/${info.score}`)) ?? '').includes('trill-mark'), 'the stored file has no trill')
+  })
+})
+
+// ---- editing every part (change edit-parts, tasks 4.1 and 4.2) -----------------------------------
+
+/** The melody-and-piano fixture with a chord in the left hand of bar 1: C3 with E3 (`lc1`) on it. */
+const DUET = readFileSync(MELODY_PIANO_FIXTURE, 'utf8').replace(
+  '<note><pitch><step>C</step><octave>3</octave></pitch><duration>4</duration><type>half</type><voice>5</voice><staff>2</staff></note>',
+  (c3) => `${c3}<note id="lc1"><chord/><pitch><step>E</step><octave>3</octave></pitch><duration>4</duration><type>half</type><voice>5</voice><staff>2</staff></note>`,
+)
+const DUET_SCORE = parseMusicXml(DUET)
+/** The id of the `k`th note (from 0, chord notes counted) of a voice in a bar (from 1) of the duet. */
+const duetNote = (part: string, staff: number, bar: number, k: number): string => {
+  const pi = DUET_SCORE.parts.findIndex((p) => p.id === part)
+  return DUET_SCORE.bars[bar - 1]!.parts[pi]!.staves[staff]!.voices[0]!.filter(isNote)[k]!.id
+}
+
+/** The duet made through the library, as reading would leave it. */
+async function makeDuet(page: Page): Promise<string> {
+  return page.evaluate(
+    async ({ xml }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({ name: 'Duet', musicxml: xml, bars: 8, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 8 }] })
+      return info.id
+    },
+    { xml: DUET },
+  )
+}
+
+/** One part of a stored MusicXML file, as the app writes it. */
+async function storedPart(app: App, pieceId: string, part: string): Promise<string> {
+  const info = JSON.parse((await app.file(`pieces/${pieceId}/piece.json`)) ?? '{}') as { score: string }
+  const xml = serializeMusicXml(parseMusicXml((await app.file(`pieces/${pieceId}/${info.score}`)) ?? ''))
+  return new RegExp(`<part id="${part}">[\\s\\S]*?</part>`).exec(xml)![0]
+}
+
+const partSwitch = (page: Page) => page.getByRole('radiogroup', { name: 'Part to edit' })
+
+/** Taps a drawn note by its id, once the score has settled (a selection lays the score out again, as one line). */
+async function tapDrawn(page: Page, id: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.locator('.score-view[data-rendered="true"]').waitFor()
+      const at = await centre(page, `.score-view g.note[id="${id}"]`)
+      await page.touchscreen.tap(at.x, at.y)
+      return
+    } catch (error) {
+      if (attempt >= 3) throw error
+      await page.waitForTimeout(200)
+    }
+  }
+}
+
+test('edit parts: switch to the piano, fix a note of a left-hand chord, save: the piano changes, the melody does not', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeDuet(page)
+    await openEditor(page, id)
+    const melodyBefore = await storedPart(app, id, 'P1')
+    // The editor opens on the melody; the switch offers both parts.
+    assert.equal(await partSwitch(page).getByRole('radio', { name: 'Melody' }).getAttribute('aria-checked'), 'true')
+    assert.equal(await page.locator('.score-view g.staff').count() > 0, true)
+    await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
+    await page.locator('.score-view g.note[id="lc1"]').waitFor()
+    // The piano is drawn as a grand staff: two staves in every bar.
+    assert.equal(await page.locator('.score-view g.measure').first().locator(':scope > g.staff').count(), 2)
+    await tapDrawn(page, 'lc1')
+    assert.equal(await selection(page), 'Bar 1 · Left hand · Chord, note 2 of 2')
+    assert.equal(await pitch(page), 'E3')
+    await page.getByRole('button', { name: 'Pitch up' }).click()
+    assert.equal(await pitch(page), 'F3')
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const saved = await stored(app, id)
+    const pi = saved.parts.findIndex((p) => p.id === 'P2')
+    const chord = saved.bars[0]!.parts[pi]!.staves[1]!.voices[0]!.filter(isNote)
+    assert.deepEqual(chord.map((n) => `${n.chord ? '+' : ''}${n.pitch!.step}${n.pitch!.octave}`).slice(0, 2), ['C3', '+F3'], 'the chord note is F3 in P2')
+    assert.equal(await storedPart(app, id, 'P1'), melodyBefore, 'P1 is unchanged')
+  })
+})
+
+test('edit parts: "+ Chord note" adds and selects the note; "To other hand" says why it cannot; a one-line piece has no "To other hand"', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeDuet(page)
+    await openEditor(page, id)
+    await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
+    // The right hand's first chord, C4–E4–G4: a fourth note a third above G4.
+    const middle = duetNote('P2', 0, 1, 1)
+    await page.locator(`.score-view g.note[id="${middle}"]`).waitFor()
+    await tapDrawn(page, middle)
+    assert.equal(await selection(page), 'Bar 1 · Right hand · Chord, note 2 of 3')
+    await page.getByRole('button', { name: '+ Chord note' }).click()
+    assert.equal(await selection(page), 'Bar 1 · Right hand · Chord, note 4 of 4', 'the new note is selected')
+    assert.equal(await pitch(page), 'B4')
+    // Bar 2: the right hand's second chord, on beat 3, where the left hand holds a whole note.
+    const held = duetNote('P2', 0, 2, 3)
+    await tapDrawn(page, held)
+    await page.getByRole('button', { name: 'To other hand' }).click()
+    assert.equal(await textOf(page.locator('.editor-message')), 'The other hand has no rest or chord of the same length there. Make room for it first.')
+    // The Score tab names the part whose key it sets.
+    await tabs(page, 'Score').click()
+    await page.getByText('Key of Piano').first().waitFor()
+  })
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await openEditor(page, ID.ode)
+    await tapNote(page, ODE[0]![0]!)
+    await page.getByRole('button', { name: '+ Chord note' }).waitFor()
+    assert.equal(await page.getByRole('button', { name: 'To other hand' }).count(), 0)
+    assert.equal(await partSwitch(page).count(), 0, 'one part: no part switch')
+  })
+})
+
+// ---- adding and removing a bar line (change edit-parts, task 5.3) --------------------------------
+
+/** piece.json of a piece. */
+async function pieceJson(app: App, pieceId: string): Promise<{ bars: number; pages: { firstBar: number; lastBar: number }[] }> {
+  return JSON.parse((await app.file(`pieces/${pieceId}/piece.json`)) ?? '{}') as { bars: number; pages: { firstBar: number; lastBar: number }[] }
+}
+
+test('edit parts: tap a bar line, remove it, save: one bar fewer in the score and in piece.json; not at the end of a page', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeOdePiece(page)
+    await openEditor(page, id)
+    await tabs(page, 'Marks').click()
+    // The bar line that closes bar 4 ends the first page: it stays.
+    const pageEnd = await centre(page, '.score-view g.barLine', 3)
+    await page.touchscreen.tap(pageEnd.x, pageEnd.y)
+    await page.getByRole('heading', { name: 'Bar 4' }).waitFor()
+    assert.equal(await page.getByRole('button', { name: 'Remove bar line' }).count(), 0)
+    // The bar line that closes bar 1 goes.
+    await page.getByRole('button', { name: 'Full score' }).click()
+    const line = await centre(page, '.score-view g.barLine', 0)
+    await page.touchscreen.tap(line.x, line.y)
+    await page.getByRole('heading', { name: 'Bar 1' }).waitFor()
+    await page.getByRole('button', { name: 'Remove bar line' }).click()
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const saved = await stored(app, id)
+    assert.equal(saved.bars.length, 11)
+    assert.deepEqual(firstLine(saved).measures[0]!.items.filter(isNote).map((n) => n.id), [...ODE[0]!, ...ODE[1]!], 'bar 1 holds the notes of both')
+    const info = await pieceJson(app, id)
+    assert.equal(info.bars, 11)
+    assert.deepEqual(info.pages.map((p) => [p.firstBar, p.lastBar]), [[1, 3], [4, 7], [8, 11]])
+  })
+})
+
+test('edit parts: add a bar line, Save & practice: the loop is over the same music', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeOdePiece(page)
+    await page.evaluate((pieceId) => window.__test!.shell.library.writePractice(pieceId, { bar: 9, tempo: null, loop: { start: 9, end: 12 }, loopRest: 0, metronome: false }), id)
+    await openEditor(page, id)
+    // Bar 6, before its third note.
+    await tapNote(page, ODE[5]![2]!)
+    await page.getByRole('button', { name: 'Bar line before' }).click()
+    assert.equal(await selection(page), 'Bar 7 · Note 1', 'the note stays selected, now the first of the new bar 7')
+    // Not offered before the first note of a bar.
+    await tapDrawn(page, ODE[5]![0]!)
+    await page.getByRole('button', { name: '+ Chord note' }).waitFor()
+    assert.equal(await page.getByRole('button', { name: 'Bar line before' }).count(), 0)
+    await save(page).click()
+    await onScreen(page, 'practice')
+    await page.getByRole('button', { name: 'Loop 10–13' }).waitFor()
+    const saved = await stored(app, id)
+    assert.equal(saved.bars.length, 13)
+    assert.equal(firstLine(saved).measures[9]!.items.filter(isNote)[0]!.id, ODE[8]![0], 'bar 10 is the old bar 9')
+    assert.equal((await pieceJson(app, id)).bars, 13)
+  })
+})
+
+test('edit parts: a bar line that would cut a note of the other part is refused, with its explanation', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeDuet(page)
+    await openEditor(page, id)
+    // The melody's second note: the right hand holds a half-note chord across it.
+    await tapDrawn(page, duetNote('P1', 0, 1, 1))
+    await page.getByRole('button', { name: 'Bar line before' }).click()
+    assert.equal(await textOf(page.locator('.editor-message')), 'A note in the right hand sounds across that point, so a bar line cannot go there.')
+    assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), true, 'nothing changed')
   })
 })

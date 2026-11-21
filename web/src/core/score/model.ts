@@ -257,6 +257,15 @@ export interface Bar {
   rightBarline?: Barline
   newSystem?: boolean
   parts: PartBar[]
+  /**
+   * Transient, while editing (change edit-parts, D10): the stretch of the score as the editor loaded it that this bar
+   * holds, as `[start, end)` on a line where the loaded bar `i` is `[i, i + 1)`. Absent on every bar means each bar
+   * is its own loaded bar (`barSpans`). The first bar line added or removed gives every bar its span; a split cuts the
+   * span in two where the bar is split (in proportion to the bar's length), and a join puts the two spans together.
+   * So the two halves of a split bar stay apart, also after a save. It lives in the score copies, so undo and redo
+   * keep it right, and it is never written to MusicXML.
+   */
+  from?: [number, number]
 }
 
 export interface Score {
@@ -352,6 +361,54 @@ export function voices(score: Score): VoiceRef[] {
     }
   })
   return refs
+}
+
+/** Where a note or rest is in a score (change edit-parts, D2 and D5): its voice, its bar (from 0) and its index in that voice's items there. */
+export interface NotePlace {
+  ref: VoiceRef
+  barIndex: number
+  at: number
+  note: Note
+}
+
+/**
+ * Every note and rest of the score by id, with its part, staff, voice and bar (change edit-parts, D2). Ids are
+ * unique in the whole score (change parts-and-accompaniment, D1), so an id alone says where a note is: the
+ * editor derives the place of the selection from it, and every note edit finds its voice through it.
+ */
+export function noteIndex(score: Score): Map<string, NotePlace> {
+  const index = new Map<string, NotePlace>()
+  score.bars.forEach((bar, barIndex) =>
+    bar.parts.forEach((pb, pi) =>
+      pb.staves.forEach((sb, staff) =>
+        sb.voices.forEach((items, voice) =>
+          items.forEach((item, at) => {
+            if (isNote(item)) index.set(item.id, { ref: { part: score.parts[pi]!.id, staff, voice }, barIndex, at, note: item })
+          }),
+        ),
+      ),
+    ),
+  )
+  return index
+}
+
+/** Where the note `id` is, or undefined when no note of the score has it. */
+export function placeOfNote(score: Score, id: string): NotePlace | undefined {
+  for (let barIndex = 0; barIndex < score.bars.length; barIndex++) {
+    const bar = score.bars[barIndex]!
+    for (let pi = 0; pi < bar.parts.length; pi++) {
+      const staves = bar.parts[pi]!.staves
+      for (let staff = 0; staff < staves.length; staff++) {
+        const voiceLists = staves[staff]!.voices
+        for (let voice = 0; voice < voiceLists.length; voice++) {
+          const items = voiceLists[voice]!
+          const at = items.findIndex((i) => isNote(i) && i.id === id)
+          if (at >= 0) return { ref: { part: score.parts[pi]!.id, staff, voice }, barIndex, at, note: items[at] as Note }
+        }
+      }
+    }
+  }
+  return undefined
 }
 
 /** Every item list of the score (every voice in every bar), in bar order, then part, staff and voice. */
@@ -481,4 +538,39 @@ export function partMultiRestRuns(score: Score, partIndex: number): MultiRestRun
     covered = index + n
   })
   return runs
+}
+
+/** The stretch of the loaded score each bar holds (`Bar.from`); a bar without `from` holds its own loaded bar. */
+export function barSpans(score: Score): [number, number][] {
+  return score.bars.map((bar, i) => bar.from ?? [i, i + 1])
+}
+
+/** Whether two bars hold some of the same music of the loaded score. */
+export const sameMusic = (a: readonly [number, number], b: readonly [number, number]): boolean => a[0] < b[1] && b[0] < a[1]
+
+/** For each bar of an earlier score (by index), the bars of a later one that hold its music: bar numbers from 1, first and last included. */
+export type BarMap = readonly { first: number; last: number }[]
+
+/**
+ * Where each bar of `before` went in `after` (change edit-parts, D10), worked out through their `from`s, which both
+ * count in the score as the editor loaded it: a bar of `before` is now held by every bar of `after` whose stretch
+ * of the loaded score overlaps its own. Edits keep the bars in order, so that is one range. Undefined when nothing
+ * moved (the same number of bars, each in its own place), so a save without bar-line changes writes no map.
+ */
+export function barMap(before: Score, after: Score): BarMap | undefined {
+  const was = barSpans(before)
+  const now = barSpans(after)
+  const map = was.map((span, j) => {
+    let first = -1
+    let last = -1
+    now.forEach((other, i) => {
+      if (!sameMusic(span, other)) return
+      if (first < 0) first = i
+      last = i
+    })
+    if (first < 0) throw new Error(`bar ${j + 1} of the saved score is in no bar of the edited one`)
+    return { first: first + 1, last: last + 1 }
+  })
+  const same = before.bars.length === after.bars.length && map.every((r, j) => r.first === j + 1 && r.last === j + 1)
+  return same ? undefined : map
 }

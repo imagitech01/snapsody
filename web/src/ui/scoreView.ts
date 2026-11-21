@@ -130,8 +130,6 @@ export function describeNote(info: NoteInfo): TappedNote {
 export interface DrawnPart {
   id: string;
   hand?: "right" | "left";
-  /** The voice the editor edits: the bars, clefs and marks of the drawing follow it (task 7.1). The first voice of the part when absent. */
-  voice?: { staff: number; voice: number };
 }
 
 /** The class on the `g.staff` that is not the hand played (practice, design D7); `score.css` fades it. */
@@ -161,12 +159,8 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     const refs = part ? voices(score).filter((r) => r.part === part!.id) : [];
     return refs.length > 0 ? refs : [firstVoice(score)];
   };
-  /** The voice the bars and the editor's elements follow: the edited one when named, else the first of the drawn part. */
-  const lineRef = () => {
-    const refs = drawnVoices();
-    const v = part?.voice;
-    return (v && refs.find((r) => r.staff === v.staff && r.voice === v.voice)) || refs[0]!;
-  };
+  /** The voice the bars follow: the first of the drawn part (every voice has every bar). */
+  const lineRef = () => drawnVoices()[0]!;
   // The first voice of the drawn part is what the bars follow (`drawnBars`, the editor's elements); the note map holds every drawn voice.
   let line = voiceView(score, lineRef());
   const indexOf = (): NoteIndex => {
@@ -270,7 +264,8 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     lastRender = { ms, pages: pages.length, width };
     highlighted = [];
     applyMarks();
-    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, line, bars) : new Map();
+    // The elements of every staff and voice of the drawn part (change edit-parts): a left-hand clef is the left hand's.
+    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, { score, part: lineRef().part }, bars) : new Map();
     lines = linesOf<Element>(element, DOM_TREE, bars);
     measureNodes = [...element.querySelectorAll<SVGGElement>("g.measure")];
     fadeOtherHand();

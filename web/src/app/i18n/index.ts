@@ -109,15 +109,27 @@ export function createI18n(): I18n {
 
   const warning: I18n['warning'] = (w) => {
     const bar = w.bar
+    // The hand and the voice, when the part has more than one (change edit-parts, D5): "left hand, voice 2".
+    const hand = w.hand ? t(`warning.hand.${w.hand}`) : undefined
+    const place =
+      hand && w.voiceNumber
+        ? t('warning.place.handVoice', { hand, voice: w.voiceNumber })
+        : hand
+          ? t('warning.place.hand', { hand })
+          : w.voiceNumber
+            ? t('warning.place.voice', { voice: w.voiceNumber })
+            : undefined
     switch (w.kind) {
       case 'bar-length':
         if (bar === undefined || w.counted === undefined || w.time === undefined) return w.message
+        if (place) return t('warning.bar-length.place', { bar, place, counted: w.counted, beats: w.time.beats, beatType: w.time.beatType })
         return t('warning.bar-length', { bar, counted: w.counted, beats: w.time.beats, beatType: w.time.beatType })
       case 'out-of-range': {
         const instrument = w.instrument === undefined ? undefined : instrumentById(w.instrument)
         if (bar === undefined || w.pitch === undefined || !instrument) return w.message
         const { low, high } = instrument.writtenRange
-        return t('warning.out-of-range', { bar, pitch: w.pitch, instrument: instrumentName(instrument.id), low: midiName(low), high: midiName(high) })
+        const params = { bar, pitch: w.pitch, instrument: instrumentName(instrument.id), low: midiName(low), high: midiName(high) }
+        return place ? t('warning.out-of-range.place', { ...params, place }) : t('warning.out-of-range', params)
       }
       case 'time-signature-inferred':
         return w.time === undefined ? w.message : t('warning.time-signature-inferred', { beats: w.time.beats, beatType: w.time.beatType })

@@ -1,10 +1,10 @@
 import type { EditorSession } from '../../../app/editorSession.ts'
-import { deleteElement, ownerOf, setClef } from '../../../core/score/edit.ts'
+import { deleteElement, setClef } from '../../../core/score/edit.ts'
 import type { ElementInfo } from '../../../core/score/elements.ts'
-import type { VoiceScore } from '../../../core/score/model.ts'
+import type { Score } from '../../../core/score/model.ts'
 import { useShell } from '../../ShellContext.ts'
 import { Chip, SelectField } from './controls.tsx'
-import type { FailureKey } from './NoteTab.tsx'
+import type { Failure } from './NoteTab.tsx'
 
 /**
  * The panel for a selected element that is not a note or a bar (change select-and-delete-elements, design
@@ -15,7 +15,7 @@ import type { FailureKey } from './NoteTab.tsx'
 
 export interface ElementPanelProps {
   session: EditorSession
-  run: (edit: (score: VoiceScore) => unknown, failure?: FailureKey) => void
+  run: (edit: (score: Score) => unknown, failure?: Failure) => void
 }
 
 const CLEFS = ['treble', 'bass'] as const
@@ -53,11 +53,11 @@ export function ElementPanel({ session, run }: ElementPanelProps) {
           label={t('element.clef.field')}
           value={choiceOf(info)}
           options={CLEFS.map((value) => ({ value, label: t(`element.clef.${value}`) }))}
-          onChange={(value) => run((s) => setClef(ownerOf(s).score, ownerOf(s).ref, info.bar, { ...CLEF_OF[value] }))}
+          onChange={(value) => run((s) => setClef(s, { part: info.part ?? session.part.value, staff: info.staff ?? 0 }, info.bar, { ...CLEF_OF[value] }))}
         />
       ) : null}
       {info.deletable ? (
-        <Chip tone="danger" onPress={() => run((s) => deleteElement(ownerOf(s).score, ownerOf(s).ref, ref))}>
+        <Chip tone="danger" onPress={() => run((s) => deleteElement(s, ref))}>
           {t('element.delete')}
         </Chip>
       ) : (

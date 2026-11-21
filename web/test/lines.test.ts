@@ -8,7 +8,8 @@ import { renderScore } from '../src/core/score/render.ts'
 import { parseXml } from '../src/core/score/xml.ts'
 import type { XmlElement } from '../src/core/score/xml.ts'
 import { PRACTICE_EXERCISE } from './fixtures/make-practice-exercise.ts'
-import { HOMR_MARKS_FIXTURE, read } from './helpers.ts'
+import { HOMR_MARKS_FIXTURE, MELODY_PIANO_FIXTURE, read } from './helpers.ts'
+import { noteIndex } from '../src/core/score/model.ts'
 import { firstLine } from './helpers.ts'
 
 // The lines of a drawn score (change simplify-editor-and-name-new-pieces, task 2.1).
@@ -85,4 +86,33 @@ test('lines: a synthetic drawing with a measure that holds three bars', () => {
     { firstBar: 0, lastBar: 3 },
     { firstBar: 4, lastBar: 4 },
   ])
+})
+
+test('lines: on the piano part, the line of a left-hand note holds both staves (change edit-parts, spec "One line while editing")', async () => {
+  const score = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  const [svg] = await renderScore(score, { width: 360, parts: ['P2'], multiRests: 'expand' })
+  const root = parseXml(svg!)
+  const lines = linesOf(root, xmlTree)
+  // C3 of the left hand, in bar 3: its line is the system that draws bar 3.
+  const bar = noteIndex(score).get('n43')!.barIndex
+  const line = lineOfBar(lines, bar)
+  assert.ok(line >= 0)
+  const systems: XmlElement[] = []
+  const walk = (e: XmlElement): void => {
+    if (xmlTree.classes(e).includes('system')) systems.push(e)
+    else for (const c of e.children) walk(c)
+  }
+  walk(root)
+  const system = systems[line]!
+  const measures = system.children.filter((c) => xmlTree.classes(c).includes('measure'))
+  assert.equal(measures.length, lines[line]!.lastBar - lines[line]!.firstBar + 1)
+  for (const m of measures) assert.equal(m.children.filter((c) => xmlTree.classes(c).includes('staff')).length, 2, 'right hand and left hand')
+  // And the left hand's note is drawn in that line.
+  const ids: string[] = []
+  const collect = (e: XmlElement): void => {
+    if (e.attrs.id) ids.push(e.attrs.id)
+    for (const c of e.children) collect(c)
+  }
+  collect(system)
+  assert.ok(ids.includes('n43'))
 })

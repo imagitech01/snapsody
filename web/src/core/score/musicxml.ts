@@ -540,13 +540,15 @@ function readPart(part: XmlElement, ids: IdAllocator, warnings: string[]): ReadP
           if (!isChord) ends[staff]![voice] = add(start, advance)
           seenNoteInMeasure = true
           sawNote = true
-          if (voice === 0 && !note.chord && !note.grace) {
+          // A hairpin runs from the note written right after its start to the note written right before its stop, in
+          // any voice of the staff (change edit-parts, D7): the writer puts them there.
+          if (!note.chord && !note.grace) {
             const state = wedges[staff]!
             state.lastNote = note
             for (const open of state.open) {
               if (open.startNote) continue
               open.startNote = note
-              open.startList = voiceList(staff, 0)
+              open.startList = voiceList(staff, voice)
               open.startHere = true
             }
           }
@@ -904,9 +906,9 @@ export interface SerializeOptions {
   beams?: Map<string, BeamMark[]>
   /**
    * For drawing only, never stored (change select-and-delete-elements, design D2): ids that Verovio keeps
-   * on what it draws, so a tap can be traced back to the model. `clef-<bar>` on a bar's clef (the bar's
-   * index, from 0; staff 0 of the first part), `slur-<noteId>-<number>` on a slur start, `tie-<noteId>` on a
-   * tie start and `wedge-<startId>` on a hairpin start. Any other staff's clef is `clef-<bar>-<part id>-<staff>`.
+   * on what it draws, so a tap can be traced back to the model. `clef-<part id>-<staff>-<bar>` on a staff's
+   * clef (staff and bar from 0; change edit-parts, D6), `slur-<noteId>-<number>` on a slur start, `tie-<noteId>`
+   * on a tie start and `wedge-<startId>` on a hairpin start.
    */
   drawingIds?: boolean
   /**
@@ -921,8 +923,8 @@ export interface SerializeOptions {
 
 /** The drawing ids of `SerializeOptions.drawingIds`. */
 export const drawingId = {
-  /** The clef of a bar (index from 0); for the first staff of the first part the id has no part or staff in it. */
-  clef: (bar: number, partId?: string, staff = 0): string => (partId === undefined ? `clef-${bar}` : `clef-${bar}-${partId}-${staff}`),
+  /** The clef of one staff of a part (staff from 0) in a bar (index from 0). */
+  clef: (partId: string, staff: number, bar: number): string => `clef-${partId}-${staff}-${bar}`,
   slur: (noteId: string, number: number): string => `slur-${noteId}-${number}`,
   tie: (noteId: string): string => `tie-${noteId}`,
   wedge: (startId: string): string => `wedge-${startId}`,
@@ -1033,7 +1035,7 @@ export function serializeMusicXml(score: Score, options: SerializeOptions = {}):
         if (!sb.clef) return
         const clefAttrs: Record<string, string> = {}
         if (info.staves === 2) clefAttrs.number = String(si + 1)
-        if (options.drawingIds) clefAttrs.id = pi === 0 && si === 0 ? drawingId.clef(index) : drawingId.clef(index, info.id, si)
+        if (options.drawingIds) clefAttrs.id = drawingId.clef(info.id, si, index)
         const clef = el('clef', clefAttrs, [txt('sign', sb.clef.sign)])
         if (sb.clef.line !== undefined) clef.children.push(txt('line', sb.clef.line))
         if (sb.clef.octaveChange !== undefined) clef.children.push(txt('clef-octave-change', sb.clef.octaveChange))

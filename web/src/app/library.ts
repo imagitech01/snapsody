@@ -1,4 +1,5 @@
 import type { PageRange, PartRead } from '../core/pages/pages.ts'
+import type { BarMap } from '../core/score/model.ts'
 import { parseMusicXml } from '../core/score/musicxml.ts'
 import type { Repair } from '../core/score/repairs.ts'
 import { PlatformError } from '../platform/port.ts'
@@ -503,20 +504,56 @@ export class Library {
 
   /**
    * Replaces the corrected score: writes it as a new `score-<rev>.musicxml`, replaces piece.json
-   * (which then names it) atomically, then removes the old score file. Returns the new info. The
-   * bars of the piece do not change with it: editing does not add or remove bars. The raw readings
-   * are not touched. [basedOn] is the score file the caller loaded (`PieceInfo.score`); when
+   * (which then names it) atomically, then removes the old score file. Returns the new info. The raw
+   * readings are not touched. [basedOn] is the score file the caller loaded (`PieceInfo.score`); when
    * piece.json names another one, the call rejects with `conflict` and writes nothing.
+   *
+   * Without [barMap] the bars of the piece do not change, and piece.json changes only in the score
+   * file it names. With one (change edit-parts, D10: bar lines were added or removed), [barMap] says
+   * for each bar of the stored piece the bars of the new score that hold it, and the change carries
+   * the numbers along: the piece's `bars`; each page's and staff box's range (its first bar is the
+   * first new bar of its first old bar, its last bar the last new bar of its last old bar); and
+   * practice.json (the bar is the first new bar of the old one, the loop's start the first new bar of
+   * its start, its end the last new bar of its end). The repairs keep their numbers: they record what
+   * reading changed. A map that does not fit the piece, or pages that would no longer follow each
+   * other, are `invalid` and nothing is written. practice.json is written with the new score, before
+   * piece.json commits the change, and put back as it was when the change fails where the store can
+   * see it; a crash between the two leaves it with the new numbers on the old score (it is only a
+   * convenience). A practice.json that is missing or does not read is left as it is.
    */
-  writeScore(id: string, musicxml: string, basedOn: string): Promise<PieceInfo> {
+  writeScore(id: string, musicxml: string, basedOn: string, barMap?: BarMap): Promise<PieceInfo> {
     return this.enqueue(async () => {
       if (typeof musicxml !== 'string' || musicxml === '') throw new LibraryError('invalid', 'a piece needs a score', id)
       const info = await this.readInfo(id)
       checkBase(info, basedOn)
-      const next: PieceInfo = { ...info, score: nextScore(info.score) }
-      await this.commit(info, next, [scorePath(id, next.score)], async () => {
-        await this.files.writeTextAtomic(scorePath(id, next.score), musicxml)
-      })
+      if (barMap === undefined) {
+        const next: PieceInfo = { ...info, score: nextScore(info.score) }
+        await this.commit(info, next, [scorePath(id, next.score)], async () => {
+          await this.files.writeTextAtomic(scorePath(id, next.score), musicxml)
+        })
+        return next
+      }
+      const bad = (message: string): never => {
+        throw new LibraryError('invalid', message, id)
+      }
+      const bars = checkBarMap(barMap, info.bars, bad)
+      const pages: PageInfo[] = info.pages.map((page) => ({ ...page, ...mapRange(page, barMap), staves: page.staves.map((staff) => ({ ...staff, ...mapRange(staff, barMap) })) }))
+      checkPages(pages, bars, bad)
+      const next: PieceInfo = { ...info, score: nextScore(info.score), bars, pages }
+      const practice = await this.readPracticeText(id)
+      const mapped = practice === undefined ? undefined : mapPractice(practice, barMap)
+      await this.commit(
+        info,
+        next,
+        [scorePath(id, next.score)],
+        async () => {
+          await this.files.writeTextAtomic(scorePath(id, next.score), musicxml)
+          if (mapped !== undefined) await this.files.writeTextAtomic(practiceFile(id), mapped)
+        },
+        async () => {
+          if (practice !== undefined && mapped !== undefined) await this.files.writeTextAtomic(practiceFile(id), practice)
+        },
+      )
       return next
     })
   }
@@ -636,10 +673,11 @@ export class Library {
    * paths in [written], which nothing refers to yet), then piece.json is replaced by [next], then
    * the score file of [info] is removed. After a failure, what this call wrote is removed again,
    * unless piece.json already names the new score (the replace landed after all) or cannot be read
-   * to tell: then the sweep sorts it out at the next start. Removing the old score is best effort:
-   * the change is committed by then, and a score file nothing refers to is the sweep's.
+   * to tell: then the sweep sorts it out at the next start. [restore] puts back, in the same case,
+   * a file [write] replaced in place (practice.json), best effort. Removing the old score is best
+   * effort: the change is committed by then, and a score file nothing refers to is the sweep's.
    */
-  private async commit(info: PieceInfo, next: PieceInfo, written: string[], write: () => Promise<void>): Promise<void> {
+  private async commit(info: PieceInfo, next: PieceInfo, written: string[], write: () => Promise<void>, restore?: () => Promise<void>): Promise<void> {
     const id = info.id
     // The old score is removed after the commit: it must never be the file just written.
     if (next.score === info.score || !SCORE_FILE.test(next.score)) {
@@ -652,6 +690,7 @@ export class Library {
       const now = await this.readInfo(id).catch(() => undefined)
       if (now !== undefined && now.score === info.score) {
         for (const path of written) await this.files.remove(path).catch(() => undefined)
+        await restore?.().catch(() => undefined)
       }
       throw error
     }
@@ -714,6 +753,16 @@ export class Library {
       throw new LibraryError(there ? 'damaged' : 'not-found', there ? 'piece.json is missing' : `no piece ${id}`, id)
     }
     return parseInfo(text, id)
+  }
+
+  /** The text of practice.json, or undefined when there is none. */
+  private async readPracticeText(id: string): Promise<string | undefined> {
+    try {
+      return await this.files.readText(practiceFile(id))
+    } catch (error) {
+      if (error instanceof PlatformError && error.code === 'not-found') return undefined
+      throw error
+    }
   }
 
   /** The score file [score] of a piece, or undefined when it is not there. */
@@ -828,6 +877,49 @@ function checkPages(pages: PageInfo[], bars: number, bad: Bad): void {
     next = page.lastBar + 1
   }
   if (next !== bars + 1) bad(`the pages end at bar ${next - 1}, not at the last bar ${bars}`)
+}
+
+/**
+ * Checks a bar map (change edit-parts, D10) against a piece of [bars] bars and returns the new number of bars: one
+ * range of new bars per old bar, from bar 1, in order, each starting at most one bar after the one before ends (two
+ * old bars joined share one new bar). The new piece ends where the last old bar does.
+ */
+function checkBarMap(map: BarMap, bars: number, bad: Bad): number {
+  if (!Array.isArray(map) || map.length !== bars) return bad(`the bar map has ${Array.isArray(map) ? map.length : 'no'} bars, the piece ${bars}`)
+  map.forEach((range: unknown, k) => {
+    if (!isRecord(range) || !isInt(range.first, 1) || !isInt(range.last, 1) || range.last < range.first) bad(`the bar map's bar ${k + 1} is not a range`)
+    const r = range as { first: number; last: number }
+    const before = map[k - 1]
+    if (before === undefined ? r.first !== 1 : r.first < before.first || r.last < before.last || r.first > before.last + 1) bad(`the bar map's bar ${k + 1} does not follow the one before`)
+  })
+  return map[map.length - 1]!.last
+}
+
+/** A bar range carried over a bar map: its first old bar's first new bar to its last old bar's last new bar. */
+function mapRange(range: { firstBar: number; lastBar: number }, map: BarMap): { firstBar: number; lastBar: number } {
+  return { firstBar: map[range.firstBar - 1]?.first ?? range.firstBar, lastBar: map[range.lastBar - 1]?.last ?? range.lastBar }
+}
+
+/**
+ * practice.json's text with its bar and loop carried over a bar map: the bar to the first new bar of the old one, the
+ * loop from the first new bar of its start to the last new bar of its end. Anything else in it stays as it is; a bar
+ * that is not in the map stays too. Undefined when the text does not read: it is then left alone.
+ */
+function mapPractice(text: string, map: BarMap): string | undefined {
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (!isRecord(json)) return undefined
+  const state = { ...json }
+  if (isInt(state.bar, 1) && map[state.bar - 1]) state.bar = map[state.bar - 1]!.first
+  const loop = state.loop
+  if (isRecord(loop) && isInt(loop.start, 1) && isInt(loop.end, 1) && map[loop.start - 1] && map[loop.end - 1]) {
+    state.loop = { ...loop, start: map[loop.start - 1]!.first, end: map[loop.end - 1]!.last }
+  }
+  return serialise(state)
 }
 
 /** Checks that [value] has whole `firstBar` and `lastBar` with 1 <= first <= last <= bars. */

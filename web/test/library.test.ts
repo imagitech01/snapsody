@@ -1045,3 +1045,100 @@ test('practice: the fields of parts-and-accompaniment are absent in an old file,
   assert.deepEqual(normalisePractice({ part: { id: 'P2', hand: 'both' }, silent: 'P1', instrument: '' }), { ...DEFAULT_PRACTICE, part: { id: 'P2' } })
   assert.deepEqual(normalisePractice({ part: 'P2', silent: null, ownLine: false }), { ...DEFAULT_PRACTICE, ownLine: false })
 })
+
+// ---- bar lines added or removed (change edit-parts, D10, task 5.2) ----------------------------
+
+/** The bar map of a piece of [bars] bars after a bar line was added in bar [bar]: it becomes bars bar and bar + 1. */
+const splitMap = (bars: number, bar: number) =>
+  Array.from({ length: bars }, (_, k) => (k + 1 < bar ? { first: k + 1, last: k + 1 } : k + 1 === bar ? { first: bar, last: bar + 1 } : { first: k + 2, last: k + 2 }))
+/** The bar map of a piece of [bars] bars after the bar line after bar [bar] was removed. */
+const joinMap = (bars: number, bar: number) =>
+  Array.from({ length: bars }, (_, k) => (k + 1 <= bar ? { first: k + 1, last: k + 1 } : k + 1 === bar + 1 ? { first: bar, last: bar } : { first: k, last: k }))
+const EDITED = '<score-partwise><!-- a bar line added --></score-partwise>'
+
+test('writeScore with a bar map: "A loop after the change" moves the loop, the position, the pages and the lines of the photo along, in one change', async () => {
+  const { files, library } = setup()
+  const created = await library.create(twoPages(files))
+  const state: PracticeState = { bar: 10, tempo: 72, loop: { start: 9, end: 12 }, loopRest: 1, metronome: true, part: { id: 'P1' }, partsHintSeen: true }
+  await library.writePractice('piece-1', state)
+  // A bar line added in bar 6.
+  const written = await library.writeScore('piece-1', EDITED, created.score, splitMap(14, 6))
+  assert.equal(written.bars, 15)
+  assert.deepEqual(
+    written.pages.map((p) => [p.n, p.firstBar, p.lastBar, p.staves.map((s) => [s.firstBar, s.lastBar])]),
+    [
+      [1, 1, 9, []],
+      [2, 10, 15, [[10, 14], [15, 15]]],
+    ],
+  )
+  assert.deepEqual(written.pages[1]!.staves.map((s) => s.box), created.pages[1]!.staves.map((s) => s.box), 'the boxes stay where they are on the photo')
+  assert.deepEqual(written.repairs, created.repairs, 'the repairs keep their numbers')
+  assert.deepEqual(await library.info('piece-1'), written, 'piece.json reads, so its pages pass the page check')
+  assert.equal((await library.load('piece-1')).musicxml, EDITED)
+  assert.deepEqual(await library.readPractice('piece-1'), { ...state, bar: 11, loop: { start: 10, end: 13 } }, 'the loop is bars 10 to 13, over the same music')
+  assert.equal(strayTemps(files).length, 0)
+})
+
+test('writeScore with a bar map: "A loop around the change" grows by the bar that was added; a bar line removed shrinks it', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 6, loop: { start: 5, end: 8 } })
+  await library.writeScore('piece-1', EDITED, 'score-1.musicxml', splitMap(14, 6))
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 6, loop: { start: 5, end: 9 } })
+  // Removing the bar line after bar 3 again: bars 3 and 4 are one.
+  const joined = await library.writeScore('piece-1', EDITED, 'score-2.musicxml', joinMap(15, 3))
+  assert.equal(joined.bars, 14)
+  assert.deepEqual(joined.pages.map((p) => [p.firstBar, p.lastBar]), [[1, 8], [9, 14]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 5, loop: { start: 4, end: 8 } })
+})
+
+test('writeScore with a bar map: a map that does not fit, or joins across a page, is refused and nothing is written', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 9 })
+  const before = files.paths().map((p) => [p, files.text(p)])
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', splitMap(13, 6))), 'invalid', 'a map of another number of bars')
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', joinMap(14, 8))), 'invalid', 'bars 8 and 9 are on two pages')
+  const gap = splitMap(14, 6).map((r, k) => (k === 9 ? { first: r.first + 1, last: r.last + 1 } : r))
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', gap)), 'invalid', 'a bar left out')
+  assert.deepEqual(files.paths().map((p) => [p, files.text(p)]), before)
+})
+
+test('writeScore: a save without a bar map leaves piece.json as today and practice.json untouched; with one, a piece never practised gets no practice.json', async () => {
+  const { files, library } = setup()
+  const created = await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 12, loop: { start: 9, end: 12 } })
+  const practice = files.text('pieces/piece-1/practice.json')
+  const written = await library.writeScore('piece-1', EDITED, created.score)
+  assert.deepEqual(written, { ...created, score: 'score-2.musicxml' })
+  assert.equal(files.text('pieces/piece-1/practice.json'), practice)
+
+  const other = setup()
+  await other.library.create(twoPages(other.files))
+  await other.library.writeScore('piece-1', EDITED, 'score-1.musicxml', splitMap(14, 1))
+  assert.equal(other.files.text('pieces/piece-1/practice.json'), undefined)
+  assert.equal((await other.library.info('piece-1')).bars, 15)
+})
+
+test('writeScore with a bar map: a failure the store can see puts practice.json back, and the old piece stays', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, loop: { start: 9, end: 12 } })
+  const before = files.paths().map((p) => [p, files.text(p)])
+  failWhen(files, ['rename'], (paths) => paths[1] === 'pieces/piece-1/piece.json')
+  await assert.rejects(library.writeScore('piece-1', EDITED, 'score-1.musicxml', splitMap(14, 6)), /disk full/)
+  files.fault = undefined
+  assert.deepEqual(files.paths().map((p) => [p, files.text(p)]), before)
+  assert.deepEqual((await library.readPractice('piece-1'))!.loop, { start: 9, end: 12 })
+})
+
+test('writeScore with a bar map: a practice.json write still on its way when the editor saves lands first, so its numbers are mapped too (task 5.3)', async () => {
+  // Opening the editor over the practice screen closes the practice session, which saves practice.json at once; the
+  // library runs its writes in order, so that write is done before any save of the editor maps the numbers.
+  const { files, library } = setup()
+  const created = await library.create(twoPages(files))
+  const leaving = library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 12, loop: { start: 9, end: 12 } })
+  const saving = library.writeScore('piece-1', EDITED, created.score, splitMap(14, 6))
+  await Promise.all([leaving, saving])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 13, loop: { start: 10, end: 13 } })
+})

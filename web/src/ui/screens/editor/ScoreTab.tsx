@@ -1,5 +1,5 @@
 import { clampTempo, tempoSetup } from '../../../core/playback/tempo.ts'
-import { firstTempoMarking, ownerOf, setKey, setTempoMarking, setTime } from '../../../core/score/edit.ts'
+import { firstTempoMarking, setKey, setTempoMarking, setTime } from '../../../core/score/edit.ts'
 import { voiceView } from '../../../core/score/model.ts'
 import { Button, Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
@@ -29,13 +29,18 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
   const { i18n } = useShell()
   const { t } = i18n
   const score = session.score.value
-  const line = voiceView(score, session.voice)
+  const line = voiceView(score, { part: session.part.value, staff: 0, voice: 0 })
   const first = line.measures[0]
   const fifths = first?.key?.fifths ?? 0
   const time = first?.time ? `${first.time.beats}/${first.time.beatType}` : ''
   const times = time === '' || TIMES.includes(time) ? TIMES : [...TIMES, time]
-  const marking = firstTempoMarking(line)
+  // The tempo marking is the whole piece's, in whichever part it was read (change edit-parts, D6).
+  const marking = firstTempoMarking(score)
   const written = marking?.perMinute
+
+  // The key is the part's (change edit-parts, D6): "Key of Piano" when the piece has several parts.
+  const editedPart = score.parts.find((p) => p.id === session.part.value)
+  const keyLabelText = score.parts.length > 1 && editedPart?.name ? t('score.keyOf', { part: editedPart.name }) : t('score.key')
 
   const keyLabel = (n: number): string => (n === 0 ? t('key.none') : n > 0 ? t('key.sharps', { count: n }) : t('key.flats', { count: -n }))
 
@@ -61,13 +66,13 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
 
   return (
     <div class="editor-grid editor-grid--score">
-      <span class="editor-field-label">{t('score.key')}</span>
+      <span class="editor-field-label">{keyLabelText}</span>
       <SelectField
-        label={t('score.key')}
+        label={keyLabelText}
         value={String(fifths)}
         disabled={!first}
         options={FIFTHS.map((n) => ({ value: String(n), label: keyLabel(n) }))}
-        onChange={(value) => run((s) => setKey(ownerOf(s).score, ownerOf(s).ref, Number(value)))}
+        onChange={(value) => run((s) => setKey(s, session.part.value, Number(value)))}
       />
 
       <span class="editor-field-label">{t('score.time')}</span>
@@ -81,7 +86,7 @@ export function ScoreTab({ session, run, onAddPages }: ToolProps & { onAddPages:
         ]}
         onChange={(value) => {
           const [beats, beatType] = value.split('/').map(Number)
-          if (beats && beatType) run((s) => setTime(ownerOf(s).score, beats, beatType))
+          if (beats && beatType) run((s) => setTime(s, beats, beatType))
         }}
       />
 

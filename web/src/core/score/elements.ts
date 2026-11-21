@@ -1,5 +1,5 @@
-import type { Clef, Measure, Note, VoiceScore } from './model.ts'
-import { isDirection, isNote, isWedge } from './model.ts'
+import type { Clef, Measure, MeasureItem, Note, Score, VoiceRef, VoiceScore } from './model.ts'
+import { isDirection, isNote, isWedge, partIndex, placeOfNote, voiceView, voices } from './model.ts'
 import type { DrawnBars } from './noteMap.ts'
 
 /*
@@ -32,6 +32,9 @@ import type { DrawnBars } from './noteMap.ts'
  * - A bar line drawn in a bar selects that bar, whether it is the bar's start (a start-repeat) or its end.
  *
  * Bars in an `ElementRef` are indexes into `score.measures`, from 0; the editor shows them from 1.
+ *
+ * A clef belongs to a staff and a key to a part (change edit-parts, D6): their references carry the part and the
+ * staff. One without them is the first part's first staff, which is all a one-line piece has.
  */
 
 export type ArticulationMark =
@@ -48,8 +51,11 @@ export type ArticulationMark =
   | 'arpeggio'
 
 export type ElementRef =
-  /** The clef, key or time signature at that bar: a change, or the first one at bar 0. */
-  | { kind: 'clef' | 'key' | 'time'; bar: number }
+  /** The clef of a staff at that bar: a change, or the first one at bar 0. */
+  | { kind: 'clef'; bar: number; part?: string; staff?: number }
+  /** The key of a part at that bar, or the time signature at that bar: a change, or the first one at bar 0. */
+  | { kind: 'key'; bar: number; part?: string }
+  | { kind: 'time'; bar: number }
   | { kind: 'dynamic' | 'tempo' | 'words'; id: string }
   /** The slur that starts on that note, with that number. */
   | { kind: 'slur'; noteId: string; number: number }
@@ -77,6 +83,9 @@ export interface ElementInfo {
   text?: string
   /** False for the first clef, key and time signature, which are changed instead (spec "Delete an element"). */
   deletable: boolean
+  /** The part it belongs to, and for a clef, a note's mark or a direction the staff, when described on a whole score. */
+  part?: string
+  staff?: number
 }
 
 /** The clef a score has when it gives none at its start. */
@@ -85,8 +94,14 @@ export const DEFAULT_CLEF: Clef = { sign: 'G', line: 2 }
 export function sameElement(a: ElementRef, b: ElementRef): boolean {
   if (a.kind !== b.kind) return false
   switch (a.kind) {
-    case 'clef':
-    case 'key':
+    case 'clef': {
+      const o = b as typeof a
+      return a.bar === o.bar && (a.staff ?? 0) === (o.staff ?? 0) && samePart(a.part, o.part)
+    }
+    case 'key': {
+      const o = b as typeof a
+      return a.bar === o.bar && samePart(a.part, o.part)
+    }
     case 'time':
     case 'barline':
       return a.bar === (b as typeof a).bar
@@ -105,6 +120,9 @@ export function sameElement(a: ElementRef, b: ElementRef): boolean {
   }
 }
 
+/** A reference without a part is the first part's: it matches any part, as one-line code does not name it. */
+const samePart = (a: string | undefined, b: string | undefined): boolean => a === undefined || b === undefined || a === b
+
 /** Where the note with this id is: its bar (from 0), or undefined. */
 function noteAt(score: VoiceScore, id: string): { note: Note; bar: number } | undefined {
   for (const [bar, m] of score.measures.entries()) {
@@ -113,8 +131,55 @@ function noteAt(score: VoiceScore, id: string): { note: Note; bar: number } | un
   return undefined
 }
 
-/** What the element is now, or undefined when it is gone from the score. */
-export function describeElement(score: VoiceScore, ref: ElementRef): ElementInfo | undefined {
+/**
+ * What the element is now, or undefined when it is gone from the score. On a whole score (change edit-parts), a
+ * clef is looked up on its staff, a key on its part, a mark on its note's voice, and a direction or hairpin in
+ * every voice; the answer says which part and staff it is in.
+ */
+export function describeElement(target: Score | VoiceScore, ref: ElementRef): ElementInfo | undefined {
+  if (!('bars' in target)) return describeInView(target, ref)
+  const score = target
+  const at = (r: VoiceRef): ElementInfo | undefined => {
+    const info = describeInView(voiceView(score, r), ref)
+    return info && { ...info, part: r.part, staff: r.staff }
+  }
+  const staffOf = (part: string | undefined, staff: number): VoiceRef | undefined => {
+    const id = part ?? score.parts[0]?.id
+    const pi = id === undefined ? -1 : partIndex(score, id)
+    return pi >= 0 && staff >= 0 && staff < score.parts[pi]!.staves ? { part: id!, staff, voice: 0 } : undefined
+  }
+  switch (ref.kind) {
+    case 'clef': {
+      const r = staffOf(ref.part, ref.staff ?? 0)
+      return r && at(r)
+    }
+    case 'key': {
+      const r = staffOf(ref.part, 0)
+      const info = r && at(r)
+      if (!info) return undefined
+      delete info.staff
+      return info
+    }
+    case 'time':
+    case 'barline':
+      return score.parts.length > 0 ? describeInView(voiceView(score, { part: score.parts[0]!.id, staff: 0, voice: 0 }), ref) : undefined
+    case 'slur':
+    case 'tie':
+    case 'articulation': {
+      const place = placeOfNote(score, ref.noteId)
+      return place && at(place.ref)
+    }
+    default:
+      for (const r of voices(score)) {
+        const info = at(r)
+        if (info) return info
+      }
+      return undefined
+  }
+}
+
+/** What the element is now in one voice view, or undefined. */
+function describeInView(score: VoiceScore, ref: ElementRef): ElementInfo | undefined {
   const inRange = (bar: number): boolean => Number.isInteger(bar) && bar >= 0 && bar < score.measures.length
   switch (ref.kind) {
     case 'clef': {
@@ -213,10 +278,10 @@ function drawn(item: Measure['items'][number]): boolean {
   return false
 }
 
-/** Reads a drawing id (`clef-3`, `slur-n4-1`, `tie-n7`, `wedge-a1`) back into a reference. */
+/** Reads a drawing id (`clef-P1-0-3`, `slur-n4-1`, `tie-n7`, `wedge-a1`) back into a reference. */
 function fromDrawingId(id: string): ElementRef | undefined {
-  let m = /^clef-(\d+)$/.exec(id)
-  if (m) return { kind: 'clef', bar: Number(m[1]) }
+  let m = /^clef-(.+)-(\d+)-(\d+)$/.exec(id)
+  if (m) return { kind: 'clef', part: m[1]!, staff: Number(m[2]), bar: Number(m[3]) }
   m = /^slur-(.+)-(\d+)$/.exec(id)
   if (m) return { kind: 'slur', noteId: m[1]!, number: Number(m[2]) }
   m = /^tie-(.+)$/.exec(id)
@@ -226,17 +291,40 @@ function fromDrawingId(id: string): ElementRef | undefined {
   return undefined
 }
 
+/** One part of a score as drawn: what `mapElements` maps a drawing of that part (every staff and voice of it) back to. */
+export interface DrawnPartOf {
+  score: Score
+  part: string
+}
+
 /**
  * Every element of the drawing at `root` (a Verovio SVG of `score`) that the editor can select, with
  * the element it draws. Notes and rests are not in it: they are found by their own ids (noteMap.ts).
  * A node maps to one element; one element can be drawn by several nodes (a slur over a system break, a
  * key at the start of each system).
+ *
+ * The drawing is of one voice view, or of one part of a score (change edit-parts, D2 and D6): then the nth
+ * `g.staff` of a bar is the part's nth staff, a clef is that staff's, a key the part's, and the directions and
+ * marks of a bar are those of every voice of the part, staff by staff and voice by voice, as they are written.
  */
-export function mapElements<N>(root: N, tree: SvgTree<N>, score: VoiceScore, bars?: Pick<DrawnBars, 'barsOf'>): Map<N, ElementRef> {
+export function mapElements<N>(root: N, tree: SvgTree<N>, target: VoiceScore | DrawnPartOf, bars?: Pick<DrawnBars, 'barsOf'>): Map<N, ElementRef> {
   const found = new Map<N, ElementRef>()
   const has = (node: N, cls: string): boolean => tree.classes(node).includes(cls)
+  // The staves drawn, each as its voices' views; the part named in references (none for a lone view).
+  const partId = 'measures' in target ? undefined : target.part
+  const staves: VoiceScore[][] =
+    'measures' in target
+      ? [[target]]
+      : (() => {
+          const refs = voices(target.score).filter((r) => r.part === target.part)
+          const count = Math.max(0, ...refs.map((r) => r.staff + 1))
+          return Array.from({ length: count }, (_, staff) => refs.filter((r) => r.staff === staff).map((r) => voiceView(target.score, r)))
+        })()
+  const score = staves[0]?.[0]
+  if (!score) return found
+  const views = staves.flat()
   const notesById = new Map<string, Note>()
-  for (const m of score.measures) for (const item of m.items) if (isNote(item)) notesById.set(item.id, item)
+  for (const view of views) for (const m of view.measures) for (const item of m.items) if (isNote(item)) notesById.set(item.id, item)
 
   /** The drawing id of a node: its own id, or the `id-…` class of the second piece of a split slur, tie or hairpin. */
   const drawingIdOf = (node: N): string | undefined => {
@@ -308,13 +396,18 @@ export function mapElements<N>(root: N, tree: SvgTree<N>, score: VoiceScore, bar
     const bar = bars?.barsOf[measureIndex]?.first ?? measureIndex // the first bar a drawn measure holds (noteMap.ts `drawnBars`)
     const model = score.measures[bar]
     if (!model) return
-    const directions = model.items.filter((i) => isDirection(i) && drawn(i))
+    // Every voice's items in this bar, staff by staff and voice by voice, as they are written.
+    const barItems: MeasureItem[] = views.flatMap((v) => v.measures[bar]?.items ?? [])
+    const directions = barItems.filter((i) => isDirection(i) && drawn(i))
+    let staffIndex = 0
     const drawnDirections: N[] = []
     /** The groups drawn per bar after the notes, by what they are: fermata, breath, caesura, arpeggio and the three ornaments. */
     const drawnMarks = new Map<string, N[]>()
 
     for (const child of tree.children(measureNode)) {
       if (has(child, 'staff')) {
+        const staff = staffIndex++
+        const staffView = staves[staff]?.[0] ?? score
         let afterNotes = false
         for (const part of tree.children(child)) {
           if (has(part, 'layer')) {
@@ -329,8 +422,11 @@ export function mapElements<N>(root: N, tree: SvgTree<N>, score: VoiceScore, bar
             found.set(part, byId)
             continue
           }
-          const at = inForce(score.measures, kind, afterNotes ? bar + 1 : bar)
-          if (at !== undefined) found.set(part, { kind, bar: at })
+          const at = inForce((kind === 'clef' ? staffView : score).measures, kind, afterNotes ? bar + 1 : bar)
+          if (at === undefined) continue
+          if (kind === 'clef') found.set(part, { kind, bar: at, ...(partId !== undefined ? { part: partId, staff } : {}) })
+          else if (kind === 'key') found.set(part, { kind, bar: at, ...(partId !== undefined ? { part: partId } : {}) })
+          else found.set(part, { kind, bar: at })
         }
         continue
       }
@@ -366,9 +462,13 @@ export function mapElements<N>(root: N, tree: SvgTree<N>, score: VoiceScore, bar
 
     // A chord is one unit: its mark is the first of its notes that has it (an arpeggio sits on the first note).
     const units: Note[][] = []
-    for (const item of model.items.filter(isNote)) {
-      if (item.chord && units.length > 0) units[units.length - 1]!.push(item)
-      else units.push([item])
+    for (const view of views) {
+      let fresh = true
+      for (const item of (view.measures[bar]?.items ?? []).filter(isNote)) {
+        if (item.chord && !fresh) units[units.length - 1]!.push(item)
+        else units.push([item])
+        fresh = false
+      }
     }
     for (const { cls, mark, has: owns } of MEASURE_MARKS) {
       const owners = units.map((u) => u.find(owns)).filter((n): n is Note => n !== undefined)

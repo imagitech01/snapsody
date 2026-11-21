@@ -3,12 +3,12 @@ import { test } from 'node:test'
 import { describeElement, mapElements, sameElement } from '../src/core/score/elements.ts'
 import type { ElementRef, SvgTree } from '../src/core/score/elements.ts'
 import type { Score } from '../src/core/score/model.ts'
-import { notesOf } from '../src/core/score/model.ts'
+import { isNote, noteIndex, notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { loadToolkit, renderScore } from '../src/core/score/render.ts'
 import { parseXml } from '../src/core/score/xml.ts'
 import type { XmlElement } from '../src/core/score/xml.ts'
-import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, read } from './helpers.ts'
+import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, MELODY_PIANO_FIXTURE, read } from './helpers.ts'
 import { firstLine, setAttr } from './helpers.ts'
 
 // Selecting elements other than notes (change select-and-delete-elements, tasks 1.2 and 1.4).
@@ -267,4 +267,99 @@ test('elements: a strong accent and a staccatissimo drawn below the note are tol
     key({ kind: 'articulation', noteId: 'lo1', mark: 'strongAccent' }),
     key({ kind: 'articulation', noteId: 'lo2', mark: 'staccatissimo' }),
   ].sort())
+})
+
+// ---------------------------------------------------------------- a drawn part of a score of parts (change edit-parts, D6)
+
+test('elements: on the drawn piano part, each clef is its own staff\'s, the key the part\'s, and every element maps', async () => {
+  const score = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  const [svg] = await renderScore(score, { width: 360, parts: ['P2'] })
+  const root = parseXml(svg!)
+  const map = mapElements(root, xmlTree, { score, part: 'P2' })
+  const refs = [...map.values()]
+  const has = (ref: ElementRef): boolean => refs.some((r) => key(r) === key(ref))
+  assert.ok(has({ kind: 'clef', part: 'P2', staff: 0, bar: 0 }), 'the right hand\'s first clef')
+  assert.ok(has({ kind: 'clef', part: 'P2', staff: 1, bar: 0 }), 'the left hand\'s first clef')
+  assert.ok(has({ kind: 'key', part: 'P2', bar: 0 }))
+  assert.ok(!refs.some((r) => r.kind === 'clef' && r.part !== 'P2'), 'no clef of another part')
+  // A clef change is drawn with its id, clef-<part>-<staff>-<bar>, and maps to that staff's clef.
+  const changed = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  changed.bars[2]!.parts[1]!.staves[1]!.clef = { sign: 'G', line: 2 }
+  const [withChange] = await renderScore(changed, { width: 360, parts: ['P2'] })
+  assert.match(withChange!, /id="clef-P2-1-2"/)
+  const changedRefs = [...mapElements(parseXml(withChange!), xmlTree, { score: changed, part: 'P2' }).values()]
+  assert.ok(changedRefs.some((r) => key(r) === key({ kind: 'clef', part: 'P2', staff: 1, bar: 2 })))
+  // Every selectable element of the drawing maps, the dynamic of the right hand too.
+  const selectable: XmlElement[] = []
+  const walk = (e: XmlElement): void => {
+    if (e.name === 'g' && xmlTree.classes(e).some((c) => SELECTABLE.includes(c))) selectable.push(e)
+    for (const c of e.children) walk(c)
+  }
+  walk(root)
+  assert.deepEqual(selectable.filter((e) => !map.has(e)).map((e) => `${e.attrs.class}#${e.attrs.id ?? ''}`), [])
+  const dynamic = refs.find((r) => r.kind === 'dynamic')
+  assert.ok(dynamic)
+  assert.deepEqual(describeElement(score, dynamic!), { kind: 'dynamic', bar: 0, text: 'mf', deletable: true, part: 'P2', staff: 0 })
+  // Described on the whole score, a clef is its staff's.
+  assert.deepEqual(describeElement(score, { kind: 'clef', part: 'P2', staff: 1, bar: 0 }), { kind: 'clef', bar: 0, clef: { sign: 'F', line: 4 }, deletable: false, part: 'P2', staff: 1 })
+  assert.equal(describeElement(score, { kind: 'clef', part: 'P1', staff: 1, bar: 0 }), undefined, 'the melody has one staff')
+  // A reference without a part is the first part's, as in a one-line piece.
+  assert.ok(sameElement({ kind: 'clef', bar: 0 }, { kind: 'clef', part: 'P1', staff: 0, bar: 0 }))
+  assert.ok(!sameElement({ kind: 'clef', part: 'P2', staff: 0, bar: 0 }, { kind: 'clef', part: 'P2', staff: 1, bar: 0 }))
+})
+
+test('elements: every note of a drawn chord keeps its own id, so a tap finds the one note (change edit-parts, D2)', async () => {
+  const score = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  const [svg] = await renderScore(score, { width: 360, parts: ['P2'] })
+  const root = parseXml(svg!)
+  // The ids of the notes drawn inside each g.chord, chord by chord.
+  const chords: string[][] = []
+  const walk = (e: XmlElement): void => {
+    if (e.name === 'g' && xmlTree.classes(e).includes('chord')) {
+      const ids: string[] = []
+      const inner = (n: XmlElement): void => {
+        if (n.name === 'g' && xmlTree.classes(n).includes('note')) ids.push(n.attrs.id!)
+        for (const c of n.children) inner(c)
+      }
+      inner(e)
+      chords.push(ids)
+      return
+    }
+    for (const c of e.children) walk(c)
+  }
+  walk(root)
+  const index = noteIndex(score)
+  const members = [...index.values()].filter((p) => p.ref.part === 'P2' && p.note.chord).map((p) => p.note.id)
+  assert.ok(members.length >= 20)
+  for (const id of members) {
+    const chord = chords.find((c) => c.includes(id))
+    assert.ok(chord, `chord note ${id} is drawn as its own g.note inside its chord`)
+  }
+  // Each drawn chord holds the notes of one model chord, each under its own id.
+  for (const chord of chords) {
+    const first = index.get(chord[0]!)!
+    const items = score.bars[first.barIndex]!.parts[1]!.staves[first.ref.staff]!.voices[first.ref.voice]!
+    let a = first.at
+    while (a > 0 && (items[a] as { chord?: boolean }).chord) a--
+    let b = a
+    while (b + 1 < items.length && isNote(items[b + 1]!) && (items[b + 1] as { chord?: boolean }).chord) b++
+    assert.deepEqual([...chord].sort(), (items.slice(a, b + 1) as { id: string }[]).map((n) => n.id).sort())
+  }
+})
+
+test('elements: a dynamic under each hand of a bar maps to its own mark (change edit-parts, D7)', async () => {
+  const score = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  // The right hand has mf in bar 1; the left hand gets p there.
+  score.bars[0]!.parts[1]!.staves[1]!.voices[0]!.unshift({ kind: 'dynamic', id: 'dleft', mark: 'p' })
+  const [svg] = await renderScore(score, { width: 360, parts: ['P2'] })
+  const root = parseXml(svg!)
+  const map = mapElements(root, xmlTree, { score, part: 'P2' })
+  const dynamics = [...map.entries()].filter(([, ref]) => ref.kind === 'dynamic')
+  assert.equal(dynamics.length, 2)
+  assert.deepEqual(dynamics.map(([, ref]) => describeElement(score, ref)!.staff).sort(), [0, 1], 'one in each hand')
+  // Each drawn dynamic is the glyph of the mark it maps to: mf (U+E52D) for the right hand, p (U+E520) for the left.
+  for (const [node, ref] of dynamics) {
+    const info = describeElement(score, ref)!
+    assert.equal(xmlTree.glyph(node), info.staff === 0 ? 'E52D' : 'E520', `${info.text} is drawn as itself`)
+  }
 })

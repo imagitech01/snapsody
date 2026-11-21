@@ -1,6 +1,7 @@
-import { MAX_REPEAT_TIMES, MIN_REPEAT_TIMES, barLinesOf, chordOf, ownerOf, removeWedge, setBarEnd, setBarStart, setRepeatTimes, toggleAccent, toggleArpeggio, toggleFermata, toggleOrnament, toggleSlur, toggleStaccatissimo, toggleStaccato, toggleStrongAccent, toggleTenuto, toggleTie, toggleTremolo, wedgeAt } from '../../../core/score/edit.ts'
+import { barLineText } from './barLineText.ts'
+import { MAX_REPEAT_TIMES, joinBars, MIN_REPEAT_TIMES, barLinesOf, chordOf, removeWedge, setBarEnd, setBarStart, setRepeatTimes, toggleAccent, toggleArpeggio, toggleFermata, toggleOrnament, toggleSlur, toggleStaccatissimo, toggleStaccato, toggleStrongAccent, toggleTenuto, toggleTie, toggleTremolo, wedgeAt } from '../../../core/score/edit.ts'
 import type { BarEnd, BarStart } from '../../../core/score/edit.ts'
-import type { VoiceScore } from '../../../core/score/model.ts'
+import type { Score, VoiceScore } from '../../../core/score/model.ts'
 import { voiceView } from '../../../core/score/model.ts'
 import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
@@ -46,7 +47,7 @@ const SINGLE_NOTE_MARKS = [
   { key: 'accent', toggle: toggleAccent },
   { key: 'strongAccent', toggle: toggleStrongAccent },
   { key: 'fermata', toggle: toggleFermata },
-] as const satisfies readonly { key: string; toggle: (score: VoiceScore, id: string) => void }[]
+] as const satisfies readonly { key: string; toggle: (score: Score | VoiceScore, id: string) => void }[]
 
 /** Trill, turn and mordent replace each other, so each chip is on when the note has that ornament. */
 const ORNAMENTS = ['trill', 'turn', 'mordent'] as const
@@ -55,13 +56,13 @@ export function MarksTab({ session, run, pick, onPick }: MarksTabProps) {
   const { i18n } = useShell()
   const { t } = i18n
   const note = session.selectedNote.value
-  const score = voiceView(session.score.value, session.voice)
+  const score = session.score.value
   const id = note?.id
   const wedge = id ? wedgeAt(score, id)?.type : undefined
   const chord = id ? chordOf(score, id) : undefined
   const off = !note || note.rest === true
 
-  const joined: readonly { kind: PickKind; on: boolean; remove: (score: VoiceScore, id: string) => void }[] = [
+  const joined: readonly { kind: PickKind; on: boolean; remove: (score: Score | VoiceScore, id: string) => void }[] = [
     { kind: 'slur', on: (note?.slurs.length ?? 0) > 0, remove: toggleSlur },
     { kind: 'tie', on: note?.tieStart === true || note?.tieStop === true, remove: toggleTie },
     { kind: 'crescendo', on: wedge === 'crescendo', remove: removeWedge },
@@ -125,7 +126,7 @@ function BarLineGroup({ session, run }: ToolProps) {
     const now = barLinesOf(session.score.value, index).times
     const times = now + direction
     if (times < MIN_REPEAT_TIMES || times > MAX_REPEAT_TIMES) return
-    run((s) => setRepeatTimes(ownerOf(s).score, index, times), undefined, { amend: repeated })
+    run((s) => setRepeatTimes(s, index, times), undefined, { amend: repeated })
   }
 
   return (
@@ -137,7 +138,7 @@ function BarLineGroup({ session, run }: ToolProps) {
         value={lines?.start ?? 'normal'}
         disabled={off}
         options={STARTS.map((value) => ({ value, label: t(`barline.start.${value}`) }))}
-        onChange={(value) => run((s) => setBarStart(ownerOf(s).score, index, value))}
+        onChange={(value) => run((s) => setBarStart(s, index, value))}
       />
       <span class="editor-field-label">{t('barline.end')}</span>
       <SelectField
@@ -145,8 +146,14 @@ function BarLineGroup({ session, run }: ToolProps) {
         value={lines?.end ?? 'normal'}
         disabled={off}
         options={ENDS.map((value) => ({ value, label: t(`barline.end.${value}`) }))}
-        onChange={(value) => run((s) => setBarEnd(ownerOf(s).score, index, value))}
+        onChange={(value) => run((s) => setBarEnd(s, index, value))}
       />
+      {/* Not offered after the last bar, nor where a page or a line of its photo ends (change edit-parts, D9). */}
+      {!off && session.canRemoveBarLineAfter(index) ? (
+        <div class="editor-barline-remove">
+          <Chip onPress={() => run((s) => joinBars(s, index), (error) => barLineText(t, session.score.peek(), error))}>{t('barline.remove')}</Chip>
+        </div>
+      ) : null}
       {lines?.end === 'repeat' && (
         <>
           <span class="editor-field-label">{t('barline.times')}</span>

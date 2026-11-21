@@ -484,3 +484,8 @@
   padding-top: var(--space-3);
   border-top: 1px solid var(--line);
 }
+
+/* "Remove bar line" in the Bar N group, under its bar-line controls (change edit-parts, D9). */
+.editor-barline-remove {
+  grid-column: 1 / -1;
+}

@@ -38,8 +38,39 @@ export interface ScoreWarning {
   counted?: string
   /** For bar-length: the time signature in force for the bar. For time-signature-inferred: the one that was inferred. */
   time?: { beats: number; beatType: number }
+  /**
+   * The voice it is about, for a bar-length or out-of-range warning of a score of parts (change edit-parts, D5):
+   * the part's id, the staff and the voice (both from 0). The editor switches to that part to show it.
+   */
+  part?: string
+  staff?: number
+  voice?: number
+  /** The staff by name, when the part has two: the right hand (staff 0) or the left hand. The text names it. */
+  hand?: 'right' | 'left'
+  /** The voice by number from 1, when its staff has more than one. The text names it. */
+  voiceNumber?: number
   /** English text for the UI; the app's i18n can build its own from the fields above. */
   message: string
+}
+
+/** Where a voice's warnings are: the voice, and what of it the text names. */
+interface Where {
+  part: string
+  staff: number
+  voice: number
+  hand?: 'right' | 'left'
+  voiceNumber?: number
+}
+
+/** "Bar 5", "Bar 5, left hand", "Bar 5, left hand, voice 2" or "Bar 5, voice 2": the start of a warning's English text. */
+function barPlace(bar: string, where?: Where): string {
+  return [`Bar ${bar}`, ...(where?.hand ? [`${where.hand} hand`] : []), ...(where?.voiceNumber ? [`voice ${where.voiceNumber}`] : [])].join(', ')
+}
+
+/** The fields of `where` that a warning carries. */
+function placeFields(where?: Where): Partial<ScoreWarning> {
+  if (!where) return {}
+  return { part: where.part, staff: where.staff, voice: where.voice, ...(where.hand ? { hand: where.hand } : {}), ...(where.voiceNumber ? { voiceNumber: where.voiceNumber } : {}) }
 }
 
 /**
@@ -52,9 +83,11 @@ export function computeWarnings(score: VoiceScore, instrument: Instrument): Scor
 }
 
 /** The bar and range warnings of one voice, by bar (index from 0). A voice without an instrument gets the bar check only. */
-function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, laterVoice = false): ScoreWarning[][] {
+function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, laterVoice = false, whereIn?: (bar: number) => Where): ScoreWarning[][] {
   const times = effectiveTimes(score)
   return score.measures.map((m, index) => {
+    const where = whereIn?.(index)
+    const named = !!where?.hand || !!where?.voiceNumber
     const found: ScoreWarning[] = []
     const time = times[index]
     if (time && hasNotes(m)) {
@@ -68,7 +101,8 @@ function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, la
           bar: m.number,
           counted,
           time: { beats: time.beats, beatType: time.beatType },
-          message: `Bar ${m.number} adds up to ${counted} beats but ${time.beats}/${time.beatType} needs ${time.beats}`,
+          ...placeFields(where),
+          message: `${barPlace(m.number, where)}${named ? ',' : ''} adds up to ${counted} beats but ${time.beats}/${time.beatType} needs ${time.beats}`,
         })
       }
     }
@@ -85,7 +119,8 @@ function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, la
         noteId: item.id,
         pitch,
         instrument: instrument.id,
-        message: `Bar ${m.number}: ${pitch} is outside the written range of the instrument (${instrument.name}, ${midiName(low)}–${midiName(high)}); it may be a misread`,
+        ...placeFields(where),
+        message: `${barPlace(m.number, where)}: ${pitch} is outside the written range of the instrument (${instrument.name}, ${midiName(low)}–${midiName(high)}); it may be a misread`,
       })
     }
     return found
@@ -107,7 +142,19 @@ export function computeScoreWarnings(score: Score, yourPart: string, pieceInstru
   const mine = partIndex(score, yourPart) >= 0 ? yourPart : first.part
   const partInfo = score.parts[partIndex(score, mine)]!
   const instrument = instrumentOfPart(partInfo, pieceInstrument)
-  const perVoice = refs.map((ref) => voiceWarnings(voiceView(score, ref), ref.part === mine ? instrument : undefined, ref.voice > 0))
+  // What a text names (change edit-parts, D5): the hand when the part has two staves, the voice when its staff has
+  // more than one voice with notes in that bar (as the editor's label of a note does).
+  const where = (ref: (typeof refs)[number]) => (bar: number): Where => {
+    const pi = partIndex(score, ref.part)
+    const staves = score.parts[pi]!.staves
+    const filled = score.bars[bar]?.parts[pi]?.staves[ref.staff]?.voices.filter((v) => v.some((i) => isNote(i) && !i.hidden)).length ?? 0
+    return {
+      ...ref,
+      ...(staves === 2 ? { hand: ref.staff === 0 ? ('right' as const) : ('left' as const) } : {}),
+      ...(filled > 1 ? { voiceNumber: ref.voice + 1 } : {}),
+    }
+  }
+  const perVoice = refs.map((ref) => voiceWarnings(voiceView(score, ref), ref.part === mine ? instrument : undefined, ref.voice > 0, where(ref)))
   const result = timeSignatureWarnings(voiceView(score, first))
   score.bars.forEach((_, bar) => {
     for (const found of perVoice) result.push(...(found[bar] ?? []))

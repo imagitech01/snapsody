@@ -145,13 +145,13 @@ test('render: clef changes, slurs, ties and hairpins are drawn with drawing ids,
   setAttr(score, 2, 'clef', { sign: 'F', line: 4 })
   const [svg] = await renderScore(score, { width: 360 })
   const drawn = (cls: string, id: string): boolean => new RegExp(`<g[^>]*\\bid="${id}"[^>]*class="${cls}"|<g[^>]*class="${cls}"[^>]*\\bid="${id}"`).test(svg!)
-  assert.ok(drawn('clef', 'clef-2'), 'the clef change at bar 3 (index 2)')
+  assert.ok(drawn('clef', 'clef-P1-0-2'), 'the clef change at bar 3 (index 2)')
   assert.ok(drawn('slur', 'slur-n1-1'), 'the slur that starts on n1')
   assert.ok(drawn('tie', 'tie-n7'), 'the tie that starts on n7')
   assert.ok(drawn('hairpin', 'wedge-a1') && drawn('hairpin', 'wedge-n4'), 'the crescendo and the diminuendo, by their first note')
   const stored = serializeMusicXml(score)
   assert.ok(!/id="(clef|slur|tie|wedge)-/.test(stored), 'the stored score has no drawing ids')
-  assert.match(serializeMusicXml(score, { drawingIds: true }), /<clef id="clef-2">/)
+  assert.match(serializeMusicXml(score, { drawingIds: true }), /<clef id="clef-P1-0-2">/)
 })
 
 // ---- The marks of homr and the multi-measure rest (change more-marks, tasks 2.1 and 2.2) ----------------------

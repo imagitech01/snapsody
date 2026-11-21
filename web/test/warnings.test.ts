@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { ALTO_SAX, CLARINET, GUITAR, PIANO, TENOR_SAX, TRUMPET, VIOLIN } from '../src/core/instruments/instruments.ts'
 import type { Instrument } from '../src/core/instruments/instruments.ts'
-import { stepPitch } from '../src/core/score/edit.ts'
+import { insertNote, setDuration, stepPitch } from '../src/core/score/edit.ts'
+import { createI18n } from '../src/app/i18n/index.ts'
 import { EditSession } from '../src/core/score/editSession.ts'
 import { notesOf } from '../src/core/score/model.ts'
 import { barLength } from '../src/core/score/repairs.ts'
@@ -162,4 +163,40 @@ test('warnings: a voice after the first is flagged only when it is too long, not
   const extra = second[0]
   if (extra && extra.kind === 'note') second.push({ ...extra, id: 'long', duration: frac(3, 4) }) // now too long
   assert.deepEqual(computeScoreWarnings(s, 'P1', TENOR_SAX).map((w) => `${w.kind}@${w.bar}`), ['bar-length@3'])
+})
+
+// --- warnings that say where they are (change edit-parts, D5) ---
+
+test('warnings: left hand too long (spec "Edits keep bars consistent")', () => {
+  // Bar 5 of the fixture: the left hand has four quarter notes; the first becomes a half note, so it adds up to 5 beats.
+  const session = new EditSession(parseMusicXml(read(MELODY_PIANO_FIXTURE)))
+  session.apply((s) => setDuration(s, 'n56', { type: 'half', dots: 0, triplet: false }))
+  const found = computeScoreWarnings(session.score, 'P1', TENOR_SAX).filter((w) => w.kind === 'bar-length')
+  assert.equal(found.length, 1)
+  const [w] = found
+  // The left hand has one voice with notes in bar 5, so the text names the hand only.
+  assert.deepEqual([w!.bar, w!.part, w!.staff, w!.voice, w!.hand, w!.voiceNumber], ['5', 'P2', 1, 0, 'left', undefined])
+  assert.equal(w!.message, 'Bar 5, left hand, adds up to 5 beats but 4/4 needs 4')
+  assert.equal(createI18n().warning(w!), 'Bar 5, left hand, adds up to 5 beats but 4/4 needs 4.')
+  // In bar 3 the left hand has two voices: a second voice that runs too long is named.
+  session.apply((s) => setDuration(s, 'n44', { type: 'whole', dots: 0, triplet: false }))
+  const second = computeScoreWarnings(session.score, 'P1', TENOR_SAX).find((x) => x.kind === 'bar-length' && x.bar === '3')!
+  assert.deepEqual([second.hand, second.voiceNumber], ['left', 2])
+  assert.equal(createI18n().warning(second), 'Bar 3, left hand, voice 2, adds up to 6 beats but 4/4 needs 4.')
+})
+
+test('warnings: a hand with one voice is named without a voice, and a one-line piece keeps its text', () => {
+  // Bar 1 of the fixture: the right hand has one voice; a half rest after its last chord makes it 6 beats.
+  const session = new EditSession(parseMusicXml(read(MELODY_PIANO_FIXTURE)))
+  session.apply((s) => insertNote(s, 'n23', 'after', 'rest'))
+  const right = computeScoreWarnings(session.score, 'P1', TENOR_SAX).find((w) => w.kind === 'bar-length')!
+  assert.deepEqual([right.hand, right.voiceNumber], ['right', undefined])
+  assert.equal(createI18n().warning(right), 'Bar 1, right hand, adds up to 6 beats but 4/4 needs 4.')
+  // One line: the text is as it was.
+  const line = parseMusicXml(score([quarters(4)], [3, 4]))
+  const [one] = computeScoreWarnings(line, 'P1', TENOR_SAX)
+  assert.equal(one!.kind, 'bar-length')
+  assert.deepEqual([one!.hand, one!.voiceNumber], [undefined, undefined])
+  assert.equal(one!.message, 'Bar 1 adds up to 4 beats but 3/4 needs 3')
+  assert.equal(createI18n().warning(one!), 'Bar 1 adds up to 4 beats but 3/4 needs 3.')
 })

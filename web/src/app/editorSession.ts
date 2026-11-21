@@ -6,15 +6,18 @@ import { Player } from '../core/playback/player.ts'
 import type { AudioBackend } from '../core/playback/player.ts'
 import type { TimerApi } from '../core/playback/scheduler.ts'
 import { startingTempo, tempoSetup } from '../core/playback/tempo.ts'
+import { buildTimeline } from '../core/playback/timeline.ts'
+import type { TimelineOptions } from '../core/playback/timeline.ts'
 import type { Quarters } from '../core/playback/tempo.ts'
-import { barLinesOf } from '../core/score/edit.ts'
+import { barLinesOf, canSplitBefore } from '../core/score/edit.ts'
 import type { BarLines } from '../core/score/edit.ts'
 import { EditSession } from '../core/score/editSession.ts'
 import { describeElement } from '../core/score/elements.ts'
 import type { ElementInfo, ElementRef } from '../core/score/elements.ts'
 import { isNote, isWedge } from '../core/score/model.ts'
 import type { Clef, KeySignature, Note, Score, TimeSignature, VoiceRef, VoiceScore } from '../core/score/model.ts'
-import { firstVoice, singleVoiceScore, voiceView } from '../core/score/model.ts'
+import { allItemLists, barMap, barSpans, firstVoice, partIndex, placeOfNote, sameMusic, singleVoiceScore, voiceView } from '../core/score/model.ts'
+import { midiNumber } from '../core/score/repairs.ts'
 import { parseMusicXml, serializeMusicXml } from '../core/score/musicxml.ts'
 import { computeScoreWarnings } from '../core/score/warnings.ts'
 import type { ScoreWarning } from '../core/score/warnings.ts'
@@ -49,6 +52,9 @@ import type { Settings } from './settings.ts'
  * - Save writes the score (`Library.writeScore`, based on the score file the editor loaded; a
  *   `conflict` when the piece was saved elsewhere since) only when it changed, then renames the
  *   piece when the title changed. An empty title is not accepted. The raw readings are not touched.
+ *   When bar lines were added or removed since the last save, it passes the bar map from the score
+ *   as last saved to the working one (`barMap`, change edit-parts D10), so the pages, the photo's
+ *   lines and practice.json follow the new numbering.
  * - A piece that adding music has just made opens `isNew` (change simplify-editor-and-name-new-pieces,
  *   D5): `naming` is on, so the editor asks for a name, until the title is typed in, a save succeeds or
  *   the editor closes. It changes nothing else: an untouched date name saves as it is.
@@ -74,15 +80,25 @@ export interface SelectedElement {
   info: ElementInfo
 }
 
-/** What "Preview bar N" plays (spec "Preview a bar"): the bar on its own, at the practice tempo, with the instrument in use. */
+/**
+ * What "Preview bar N" plays (spec "Preview a bar"): the bar on its own, at the practice tempo, with the instrument in
+ * use, as practice plays it (change edit-parts, D8): your part and the parts that play along, each with its own sound,
+ * and your line on or off as practice has it.
+ */
 export interface BarPreview {
   bar: number
-  /** A score of that one bar, with the clef, key and time in force there, from the working score. */
+  /** A score of that one bar, every part of it, with the clefs, keys and time in force there, from the working score. */
   score: Score
   /** Beats per minute of `beatUnit`: the tempo the user practises the piece at, else the score's. */
   bpm: number
   beatUnit: Quarters
   instrument: Instrument
+  /** Your line (practice.json), when the score has that part; absent: the first part, both hands. */
+  part?: TimelineOptions['part']
+  /** What does not play along. */
+  silent: readonly string[]
+  /** Whether your line sounds. */
+  ownLine: boolean
 }
 
 export type SaveResult =
@@ -108,9 +124,10 @@ export interface EditorDeps {
   timer?: TimerApi
 }
 
-/** Where a note is: its bar (0-based index) and its place among the bar's notes. */
+/** Where a note is: its part, its bar (0-based index) and its place among the bar's notes of its voice. */
 interface NotePlace {
   note: Note
+  part: string
   barIndex: number
   order: number
 }
@@ -130,16 +147,22 @@ export function editedVoice(score: Score, chosen: ChosenInPractice = {}): VoiceR
 /** The view of the edited voice of a score, made fresh from the score each time it is needed. */
 const lineOf = (score: Score, ref: VoiceRef): VoiceScore => voiceView(score, ref)
 
-function findNote(score: Score, ref: VoiceRef, id: string): NotePlace | undefined {
-  for (const [barIndex, m] of lineOf(score, ref).measures.entries()) {
-    let order = 0
-    for (const item of m.items) {
-      if (!isNote(item) || item.hidden) continue
-      if (item.id === id) return { note: item, barIndex, order }
-      order++
-    }
-  }
-  return undefined
+/** Where a shown note is, in any part, staff and voice (change edit-parts, D2): a hidden rest is not there to select. */
+function findNote(score: Score, id: string): NotePlace | undefined {
+  const place = placeOfNote(score, id)
+  if (!place || place.note.hidden) return undefined
+  const items = score.bars[place.barIndex]!.parts.find((_, pi) => score.parts[pi]?.id === place.ref.part)!.staves[place.ref.staff]!.voices[place.ref.voice]!
+  const order = items.slice(0, place.at).filter((i) => isNote(i) && !i.hidden).length
+  return { note: place.note, part: place.ref.part, barIndex: place.barIndex, order }
+}
+
+/**
+ * The parts an undo or redo changed, from the score before to the score after (change edit-parts, D1): those whose
+ * bars differ. A change in the number of bars (a bar line added or removed) is every part's, and says none.
+ */
+function changedParts(a: Score, b: Score): string[] {
+  if (a.bars.length !== b.bars.length) return []
+  return b.parts.filter((_, pi) => JSON.stringify(a.bars.map((bar) => bar.parts[pi])) !== JSON.stringify(b.bars.map((bar) => bar.parts[pi]))).map((p) => p.id)
 }
 
 /** A place in the score to order warnings by: [bar index, note order]; a bar itself comes before its notes. */
@@ -195,9 +218,21 @@ export class EditorSession {
   private readonly askName: Signal<boolean>
   /** Beats per minute the user practises the piece at (practice.json), or null. */
   private readonly practiceTempo: number | null
-  /** The voice being edited (your part's first voice) and what draws it: the editor draws that part only. */
-  readonly voice: VoiceRef
-  readonly drawn: ReadonlySignal<{ id: string; voice: { staff: number; voice: number } }>
+  /** Your line and what plays along with it, as practice.json has them, for the preview (D8). */
+  private readonly along: { part?: TimelineOptions['part']; silent: readonly string[]; ownLine: boolean }
+  /**
+   * The part being edited (change edit-parts, D1): your part (practice.json) when the editor opens, else the first.
+   * Switching clears the selection; selecting a note of another part (a warning's), or an undo or redo of an edit in
+   * another part, switches to it.
+   */
+  readonly part: ReadonlySignal<string>
+  /** What the score island draws: the part being edited, both staves and every voice of it. */
+  readonly drawn: ReadonlySignal<{ id: string }>
+  /** Where the selected note is (D2): "Bar 5 · Left hand · Chord, note 2 of 3", "Bar 2 · Note 3"; empty when no note is selected. */
+  readonly selectionLabel: ReadonlySignal<string>
+  /** Your part (practice.json), or the first part: the range warnings are for it. */
+  readonly yourPart: string
+  private readonly editing: Signal<string>
   private player: Player | undefined
   private dropGuard: (() => void) | undefined
 
@@ -205,9 +240,16 @@ export class EditorSession {
     this.deps = deps
     this.pieceId = info.id
     this.practiceTempo = practiceTempo
-    this.voice = editedVoice(score, chosen)
-    this.drawn = signal({ id: this.voice.part, voice: { staff: this.voice.staff, voice: this.voice.voice } })
-    this.session = new EditSession(score, this.voice)
+    this.yourPart = editedVoice(score, chosen).part
+    this.along = {
+      ...(chosen.part ? { part: { id: chosen.part, ...(chosen.hand ? { hand: chosen.hand } : {}) } } : {}),
+      silent: chosen.silent ?? [],
+      ownLine: chosen.ownLine ?? true,
+    }
+    this.editing = signal(this.yourPart)
+    this.part = this.editing
+    this.drawn = computed(() => ({ id: this.editing.value }))
+    this.session = new EditSession(score)
     this.version = signal(0)
     this.saved = signal(this.session.score)
     this.saveInfo = signal(info)
@@ -239,11 +281,16 @@ export class EditorSession {
     })
     this.selectedNote = computed(() => {
       const id = this.chosen.value?.noteId
-      return id ? findNote(this.score.value, this.voice, id)?.note : undefined
+      return id ? findNote(this.score.value, id)?.note : undefined
+    })
+    this.selectionLabel = computed(() => {
+      const id = this.chosen.value?.noteId
+      this.version.value
+      return (id && this.noteLabel(id)) || ''
     })
     this.selectedElement = computed(() => {
       const ref = this.chosenElement.value
-      const info = ref ? describeElement(lineOf(this.score.value, this.voice), ref) : undefined
+      const info = ref ? describeElement(this.score.value, ref) : undefined
       return ref && info ? { ref, info } : undefined
     })
     this.selectedBarLines = computed(() => {
@@ -258,7 +305,7 @@ export class EditorSession {
     // Range warnings are for your part (practice.json) with that instrument; a part the score does not have is the first part.
     this.warnings = computed(() => {
       const score = this.score.value
-      return computeScoreWarnings(score, this.voice.part, this.instrument.value)
+      return computeScoreWarnings(score, this.yourPart, this.instrument.value)
     })
     this.warningCount = computed(() => this.warnings.value.length)
     this.currentWarning = computed(() => {
@@ -269,10 +316,14 @@ export class EditorSession {
 
   // ---- Selection -----------------------------------------------------------------------------
 
-  /** Selects a note (tapped on the score). False, changing nothing, for an id that is not in the score. */
+  /**
+   * Selects a note (tapped on the score, or a warning's). A note of another part switches to that part. False,
+   * changing nothing, for an id that is not in the score.
+   */
   select(noteId: string): boolean {
-    const place = findNote(this.session.score, this.voice, noteId)
+    const place = findNote(this.session.score, noteId)
     if (!place) return false
+    if (place.part !== this.editing.peek()) this.editing.value = place.part
     this.chosenElement.value = null
     this.chosen.value = { bar: place.barIndex + 1, noteId }
     return true
@@ -291,7 +342,7 @@ export class EditorSession {
    * (`selectBar`). False, changing nothing, for an element that is not in the score.
    */
   selectElement(ref: ElementRef): boolean {
-    const info = describeElement(lineOf(this.session.score, this.voice), ref)
+    const info = describeElement(this.session.score, ref)
     if (!info) return false
     if (ref.kind === 'barline') return this.selectBar(info.bar + 1)
     this.chosenElement.value = ref
@@ -304,6 +355,50 @@ export class EditorSession {
     this.chosen.value = null
   }
 
+  /** Edits another part (the part switch, D1): the selection is cleared. False for a part that is not in the score. */
+  setPart(id: string): boolean {
+    if (partIndex(this.session.score, id) < 0) return false
+    if (id === this.editing.peek()) return true
+    this.editing.value = id
+    this.clearSelection()
+    this.focused.value = undefined
+    return true
+  }
+
+  /**
+   * Where a note is, as the editor names it (D2): the bar; the hand when its part has two staves; the voice when its
+   * staff has more than one voice with something in that bar; then for a chord's note its place from the bottom
+   * ("Chord, note 2 of 3"), else its place among the notes and rests of its voice in the bar, a chord counted once.
+   * Undefined for a note that is not in the score or not drawn (a hidden rest).
+   */
+  noteLabel(id: string): string | undefined {
+    const score = this.session.score
+    const place = placeOfNote(score, id)
+    if (!place || place.note.hidden) return undefined
+    const { t } = this.deps.i18n
+    const pi = partIndex(score, place.ref.part)
+    const staff = score.bars[place.barIndex]!.parts[pi]!.staves[place.ref.staff]!
+    const items = staff.voices[place.ref.voice]!
+    const parts = [t('bar.label', { bar: place.barIndex + 1 })]
+    if (score.parts[pi]!.staves === 2) parts.push(t(place.ref.staff === 0 ? 'part.right' : 'part.left'))
+    const filled = staff.voices.filter((v) => v.some((i) => isNote(i) && !i.hidden)).length
+    if (filled > 1) parts.push(t('editor.place.voice', { voice: place.ref.voice + 1 }))
+    let a = place.at
+    while (a > 0 && (items[a] as Note).chord) a--
+    let b = place.at
+    while (b + 1 < items.length && isNote(items[b + 1]!) && (items[b + 1] as Note).chord) b++
+    if (b > a && !place.note.rest) {
+      const chord = (items.slice(a, b + 1) as Note[]).map((n, k) => ({ n, k }))
+      const height = (n: Note): number => (n.pitch ? midiNumber(n.pitch) : 0)
+      chord.sort((x, y) => height(x.n) - height(y.n) || x.k - y.k)
+      parts.push(t('editor.place.chord', { note: chord.findIndex((c) => c.n === place.note) + 1, count: chord.length }))
+    } else {
+      const order = items.slice(0, place.at + 1).filter((i) => isNote(i) && !i.hidden && !i.chord).length
+      parts.push(t(place.note.rest ? 'editor.place.rest' : 'editor.place.note', { note: order }))
+    }
+    return parts.join(' · ')
+  }
+
   // ---- Edits ---------------------------------------------------------------------------------
 
   /**
@@ -314,26 +409,29 @@ export class EditorSession {
    *
    *   session.apply((s) => stepPitch(s, id, -1))
    */
-  apply<T>(edit: (view: VoiceScore) => T, options: { amend?: boolean } = {}): T {
+  apply<T>(edit: (score: Score) => T, options: { amend?: boolean } = {}): T {
     // An element that was already gone is forgotten by the next edit; one this edit deletes is kept for undo.
     const element = this.chosenElement.peek()
-    const wasGone = element !== null && !describeElement(lineOf(this.session.score, this.voice), element)
+    const wasGone = element !== null && !describeElement(this.session.score, element)
     const result = this.session.apply(edit, options)
     if (wasGone) this.chosenElement.value = null
     this.changed()
-    if (typeof result === 'string' && findNote(this.session.score, this.voice, result)) this.select(result)
+    if (typeof result === 'string' && findNote(this.session.score, result)) this.select(result)
     return result
   }
 
+  /** Undoes the last edit; when it was made in another part, the editor switches to that part (D1), so the user sees what changed. */
   undo(): boolean {
+    const before = this.session.score
     const done = this.session.undo()
-    if (done) this.changed()
+    if (done) this.followChange(before)
     return done
   }
 
   redo(): boolean {
+    const before = this.session.score
     const done = this.session.redo()
-    if (done) this.changed()
+    if (done) this.followChange(before)
     return done
   }
 
@@ -363,14 +461,27 @@ export class EditorSession {
     const bar = this.chosen.value?.bar
     if (bar === undefined) return undefined
     const score = this.session.score
-    const setup = tempoSetup(lineOf(score, this.voice))
+    // The tempo as practice works it out: from the first part's first voice, where the piece's marking is read.
+    const setup = tempoSetup(lineOf(score, firstVoice(score)))
+    const own = this.along.part && partIndex(score, this.along.part.id) >= 0 ? this.along.part : undefined
     return {
       bar,
-      score: barExcerpt(score, bar - 1, this.voice),
+      score: barExcerpt(score, bar - 1),
       bpm: startingTempo(this.practiceTempo, setup),
       beatUnit: setup.unit,
       instrument: this.instrument.value,
+      ...(own ? { part: own } : {}),
+      silent: this.along.silent,
+      ownLine: this.along.ownLine,
     }
+  }
+
+  /** The notes the preview of the selected bar sounds (D8): the bar's events as practice builds them, your line's only while it is on. */
+  previewNotes(): string[] {
+    const preview = this.barPreview()
+    if (!preview) return []
+    const timeline = buildTimeline(preview.score, preview.instrument, { ...(preview.part ? { part: preview.part } : {}), silent: preview.silent })
+    return timeline.events.filter((e) => preview.ownLine || !e.own).flatMap((e) => (e.pitches.length > 0 ? e.noteIds : []))
   }
 
   /**
@@ -387,6 +498,9 @@ export class EditorSession {
         instrument: preview.instrument,
         loadScore: () => this.barPreview()?.score ?? singleVoiceScore([]),
         backend,
+        ...(preview.part ? { part: preview.part } : {}),
+        silent: preview.silent,
+        ownLine: preview.ownLine,
         onState: (state) => {
           this.previewState.value = state === 'loading' || state === 'playing'
         },
@@ -395,6 +509,8 @@ export class EditorSession {
     }
     const player = this.player
     player.stop()
+    // What plays along is as practice.json has it; it does not change while the editor is open.
+    player.setPlayAlong(preview.part, preview.silent, preview.ownLine)
     player.setBeatUnit(preview.beatUnit)
     player.setTempo(preview.bpm)
     await player.setInstrument(preview.instrument)
@@ -404,6 +520,42 @@ export class EditorSession {
   /** Stops the preview. */
   stopPreview(): void {
     this.player?.stop()
+  }
+
+  // ---- Bar lines (change edit-parts, D9) -----------------------------------------------------
+
+  /**
+   * Whether "Bar line before" is offered for the note `noteId`: not for the first note of its bar (that would leave an
+   * empty bar), nor for a grace note at its bar's end. The same rule as `splitBar` (`canSplitBefore`); a note or
+   * triplet across the point is refused when tapped, with its explanation.
+   */
+  canAddBarLineBefore(noteId: string): boolean {
+    return findNote(this.session.score, noteId) !== undefined && canSplitBefore(this.session.score, noteId)
+  }
+
+  /**
+   * Whether "Remove bar line" is offered for the bar line after bar `barIndex` (from 0, in the working score): not after
+   * the last bar, and not where a page or a line of a page's photo ends (`PageInfo.staves`) in the piece as last saved,
+   * as a printed line always ends at a bar line (D9). The working score's bars are matched to the saved piece's through
+   * `from`: after a bar line added and not yet saved, the indices no longer match piece.json, and the bar line between
+   * the two halves of a split bar is never the end of a printed line. A time, key or clef change or an ending at the
+   * bar line is refused when tapped, with its explanation.
+   */
+  canRemoveBarLineAfter(barIndex: number): boolean {
+    const score = this.session.score
+    if (!Number.isInteger(barIndex) || barIndex < 0 || barIndex >= score.bars.length - 1) return false
+    const saved = barSpans(this.saved.value)
+    const now = barSpans(score)
+    /** The bars (from 0) of the score as last saved that the working bar `i` holds music of. */
+    const savedBars = (i: number): number[] => saved.flatMap((span, j) => (sameMusic(span, now[i]!) ? [j] : []))
+    const before = savedBars(barIndex)
+    const after = savedBars(barIndex + 1)
+    if (before.length === 0 || after.length === 0) return false
+    const last = Math.max(...before)
+    // Inside one saved bar: the bar line between the halves of a split bar.
+    if (Math.min(...after) <= last) return true
+    const end = last + 1
+    return !this.saveInfo.value.pages.some((page) => page.lastBar === end || page.staves.some((staff) => staff.lastBar === end))
   }
 
   // ---- Saving and leaving --------------------------------------------------------------------
@@ -417,16 +569,22 @@ export class EditorSession {
     if (name === '') return { ok: false, reason: 'empty-name' }
     if (this.busy.value) return { ok: false, reason: 'failed', error: new Error('a save is already running') }
     this.busy.value = true
+    /** Whether the score is written and the rename runs: only the rename refuses a name (a bar map that does not fit is a failure). */
+    let renaming = false
     try {
       let info = this.saveInfo.value
       const score = this.session.score
       if (score !== this.saved.value) {
-        info = await this.deps.library.writeScore(this.pieceId, serializeMusicXml(score), info.score)
+        // The map goes from the score as last saved, which piece.json counts in, to this one; both count `from` in the score as loaded (D10).
+        const map = barMap(this.saved.value, score)
+        const xml = serializeMusicXml(score)
+        info = map ? await this.deps.library.writeScore(this.pieceId, xml, info.score, map) : await this.deps.library.writeScore(this.pieceId, xml, info.score)
         // The base moves on at once: a rename that fails next must not make the retry conflict with this save.
         this.saveInfo.value = info
         this.saved.value = score
       }
       if (name !== info.name) {
+        renaming = true
         info = await this.deps.library.update(this.pieceId, { name })
         this.saveInfo.value = info
         // The rename is saved; a list that could not be read again only shows the old name a while longer.
@@ -437,7 +595,7 @@ export class EditorSession {
       return { ok: true, info }
     } catch (error) {
       if (error instanceof LibraryError && error.code === 'conflict') return { ok: false, reason: 'conflict', error }
-      if (error instanceof LibraryError && error.code === 'invalid') return { ok: false, reason: 'empty-name', error }
+      if (error instanceof LibraryError && error.code === 'invalid' && renaming) return { ok: false, reason: 'empty-name', error }
       return { ok: false, reason: 'failed', error }
     } finally {
       this.busy.value = false
@@ -501,20 +659,30 @@ export class EditorSession {
 
   // ---- inside --------------------------------------------------------------------------------
 
-  /** After the working score changed: the signals follow, and the selection is checked again. */
+  /** After an undo or redo: to the part it changed, when that is not the one shown, then as after any change. */
+  private followChange(before: Score): void {
+    const changed = changedParts(before, this.session.score)
+    if (changed.length > 0 && !changed.includes(this.editing.peek())) {
+      this.editing.value = changed[0]!
+      this.focused.value = undefined
+    }
+    this.changed()
+  }
+
+  /** After the working score changed: the signals follow, and the selection is checked again (a note of a part that is not shown is not kept). */
   private changed(): void {
     this.version.value++
     const selected = this.chosen.value
     if (!selected) return
     const score = this.session.score
     const element = this.chosenElement.value
-    const info = element ? describeElement(lineOf(score, this.voice), element) : undefined
+    const info = element ? describeElement(score, element) : undefined
     if (info) {
       this.chosen.value = { bar: info.bar + 1, noteId: null }
       return
     }
-    const place = selected.noteId ? findNote(score, this.voice, selected.noteId) : undefined
-    if (place) this.chosen.value = { bar: place.barIndex + 1, noteId: selected.noteId }
+    const place = selected.noteId ? findNote(score, selected.noteId) : undefined
+    if (place && place.part === this.editing.peek()) this.chosen.value = { bar: place.barIndex + 1, noteId: selected.noteId }
     else if (selected.bar <= score.bars.length) this.chosen.value = { bar: selected.bar, noteId: null }
     else this.chosen.value = null
   }
@@ -522,7 +690,7 @@ export class EditorSession {
   private keyOf(warning: ScoreWarning): Key {
     const score = this.session.score
     if (warning.noteId) {
-      const place = findNote(score, this.voice, warning.noteId)
+      const place = findNote(score, warning.noteId)
       if (place) return [place.barIndex, place.order]
     }
     if (warning.bar !== undefined) {
@@ -547,7 +715,7 @@ export class EditorSession {
     } else {
       const selected = this.chosen.value
       if (selected) {
-        const place = selected.noteId ? findNote(this.session.score, this.voice, selected.noteId) : undefined
+        const place = selected.noteId ? findNote(this.session.score, selected.noteId) : undefined
         // A selected note counts as just before itself, so its own warning is the next one.
         at = { key: place ? [place.barIndex, place.order - 0.5] : [selected.bar - 1, -1.5], index: dir > 0 ? -1 : warnings.length }
       }
@@ -558,6 +726,8 @@ export class EditorSession {
     const next = dir > 0 ? (ordered.find(after) ?? ordered[0]!) : ([...ordered].reverse().find(before) ?? ordered.at(-1)!)
     this.focused.value = next.warning
     if (next.warning.noteId && this.select(next.warning.noteId)) return next.warning
+    // A bar of another part's voice: that part is shown (D1), and the warning stays the current one.
+    if (next.warning.part !== undefined && next.warning.part !== this.editing.peek() && partIndex(this.session.score, next.warning.part) >= 0) this.editing.value = next.warning.part
     if (next.key[0] >= 0) this.selectBar(next.key[0] + 1)
     return next.warning
   }
@@ -565,45 +735,56 @@ export class EditorSession {
 
 /** The same warning, as it is computed again after an edit. */
 function sameWarning(a: ScoreWarning, b: ScoreWarning): boolean {
-  return a.kind === b.kind && a.bar === b.bar && a.noteId === b.noteId
+  return a.kind === b.kind && a.bar === b.bar && a.noteId === b.noteId && a.part === b.part && a.staff === b.staff && a.voice === b.voice
 }
 
 /**
- * The bar at [index] as a score of its own, for the preview: with the clef, key and time in force
- * there, without repeat barlines or endings (it plays once), and without hairpins that reach
- * outside it. The score is not changed.
+ * The bar at [index] as a score of its own, for the preview (change edit-parts, D8): every part, staff and voice of
+ * it, with the time in force there, each part's key and each staff's clef in force, without repeat bar lines or
+ * endings (it plays once), a multi-measure rest or hairpins that reach outside it. The score is not changed; a bar
+ * that is not there gives a score without bars.
  */
-export function barExcerpt(score: Score, index: number, ref: VoiceRef = firstVoice(score)): Score {
-  const source = lineOf(score, ref).measures[index]
-  if (!source) return singleVoiceScore([])
-  const m = structuredClone(source)
-  // The clef, key and time in force in the edited voice: its own staff's clef and its own part's key.
-  let clef: Clef | undefined
-  let key: KeySignature | undefined
+export function barExcerpt(score: Score, index: number): Score {
+  const parts = score.parts.map((p) => ({ ...p }))
+  const source = score.bars[index]
+  if (!source) return { parts, bars: [] }
+  const bar = structuredClone(source)
+  const before = score.bars.slice(0, index + 1)
   let time: TimeSignature | undefined
-  for (const b of lineOf(score, ref).measures.slice(0, index + 1)) {
-    clef = b.clef ?? clef
-    key = b.key ?? key
-    time = b.time ?? time
-  }
-  if (clef) m.clef = { ...clef }
-  if (key) m.key = { ...key }
-  if (time) m.time = { ...time }
-  delete m.leftBarline
-  delete m.rightBarline
-  const ids = new Set(m.items.filter(isNote).map((n) => n.id))
-  m.items = m.items.filter((item) => !isWedge(item) || (ids.has(item.start) && ids.has(item.stop)))
-  m.number = '1'
-  const name = score.parts.find((p) => p.id === ref.part)?.name
-  return singleVoiceScore([m], name ? { partName: name } : {})
+  for (const b of before) time = b.time ?? time
+  if (time) bar.time = { ...time }
+  delete bar.leftBarline
+  delete bar.rightBarline
+  delete bar.newSystem
+  bar.number = '1'
+  const ids = new Set(allItemLists({ parts, bars: [bar] }).flatMap((items) => items.filter(isNote).map((n) => n.id)))
+  bar.parts.forEach((pb, pi) => {
+    let key: KeySignature | undefined
+    for (const b of before) key = b.parts[pi]?.key ?? key
+    if (key) pb.key = { ...key }
+    delete pb.multiRest
+    pb.staves.forEach((sb, si) => {
+      let clef: Clef | undefined
+      for (const b of before) clef = b.parts[pi]?.staves[si]?.clef ?? clef
+      if (clef) sb.clef = { ...clef }
+      sb.voices = sb.voices.map((items) => items.filter((item) => !isWedge(item) || (ids.has(item.start) && ids.has(item.stop))))
+    })
+  })
+  const excerpt: Score = { parts, bars: [bar] }
+  if (score.title !== undefined) excerpt.title = score.title
+  return excerpt
 }
 
-/** What Practice tools remember for the piece (practice.json) that the editor needs: your part, and the piece's own instrument. */
+/** What Practice tools remember for the piece (practice.json) that the editor needs: your part, what plays along, and the piece's own instrument. */
 export interface ChosenInPractice {
   part?: string
   /** The hand chosen on a two-staff part. */
   hand?: 'right' | 'left'
   instrument?: string | null
+  /** The parts and hands switched off under "Plays along" ('P1', 'P2:left' ...). */
+  silent?: readonly string[]
+  /** Whether your own line sounds (absent: it does). */
+  ownLine?: boolean
 }
 
 /** How the editor opens a piece. `isNew`: adding music has just made it, so the editor asks for its name. */
@@ -622,6 +803,8 @@ export async function openEditor(deps: EditorDeps, pieceId: string, options: Ope
   const session = new EditorSession(deps, piece.info, parseMusicXml(piece.musicxml), practice?.tempo ?? null, options, {
     ...(practice?.part ? { part: practice.part.id, ...(practice.part.hand ? { hand: practice.part.hand } : {}) } : {}),
     ...(practice?.instrument !== undefined ? { instrument: practice.instrument } : {}),
+    ...(practice?.silent ? { silent: practice.silent } : {}),
+    ...(practice?.ownLine !== undefined ? { ownLine: practice.ownLine } : {}),
   })
   session.guardLeaving()
   return session

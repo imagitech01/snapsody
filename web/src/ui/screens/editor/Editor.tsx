@@ -1,13 +1,13 @@
 import { computed, signal } from '@preact/signals'
 import { useMemo, useRef, useState } from 'preact/hooks'
 import type { EditorSession } from '../../../app/editorSession.ts'
-import { EditError, addSlur, addTie, addWedge } from '../../../core/score/edit.ts'
+import { EditError, addSlur, addTie, addWedge, compareInTime } from '../../../core/score/edit.ts'
 import type { ElementRef } from '../../../core/score/elements.ts'
 import { lineOfBar } from '../../../core/score/lines.ts'
 import type { LineBars } from '../../../core/score/lines.ts'
-import { isNote } from '../../../core/score/model.ts'
+import { isNote, placeOfNote, sameVoice } from '../../../core/score/model.ts'
 import type { MeasureItem, Note, Score, VoiceRef, VoiceScore } from '../../../core/score/model.ts'
-import { voiceView } from '../../../core/score/model.ts'
+import { voiceView, voices } from '../../../core/score/model.ts'
 import { Button, Icon, IconButton, SegmentedControl } from '../../components/index.ts'
 import { ScoreIsland } from '../../ScoreIsland.tsx'
 import { useShell } from '../../ShellContext.ts'
@@ -15,7 +15,7 @@ import { ElementPanel } from './ElementPanel.tsx'
 import { MarksTab } from './MarksTab.tsx'
 import type { PickState, PickKind } from './MarksTab.tsx'
 import { NoteTab } from './NoteTab.tsx'
-import type { FailureKey } from './NoteTab.tsx'
+import type { Failure, FailureKey } from './NoteTab.tsx'
 import { ScoreTab } from './ScoreTab.tsx'
 
 /**
@@ -59,20 +59,19 @@ const PICK_ERROR: Readonly<Record<PickKind, FailureKey>> = {
 
 const noHeard = (): undefined => undefined
 
-/** The ids of every note and rest of the score, in order. */
 /** A note or rest that is drawn: a hidden rest (a `<forward>`) is not there to select or count. */
 const isShown = (item: MeasureItem): item is Note => isNote(item) && !item.hidden
 
 const lineOf = (score: Score, ref: VoiceRef): VoiceScore => voiceView(score, ref)
 
-const noteOrder = (score: Score, ref: VoiceRef): Map<string, number> => new Map(lineOf(score, ref).measures.flatMap((m) => m.items.filter(isShown)).map((n, index) => [n.id, index]))
 
 export function Editor({ session }: { session: EditorSession }) {
   const { router, i18n } = useShell()
   const { t } = i18n
   const [tab, setTab] = useState<Tab>('note')
   const [pick, setPick] = useState<PickState | null>(null)
-  const [message, setMessage] = useState<FailureKey | null>(null)
+  /** Why the last change did not happen: a fixed text, or one already made from the refusal. */
+  const [message, setMessage] = useState<FailureKey | { text: string } | null>(null)
   const [saveError, setSaveError] = useState<'empty-name' | 'conflict' | 'failed' | null>(null)
   /** The title has not had its first focus yet; and that focus selected the date name, which the press's own mouseup must not undo. */
   const firstFocus = useRef(true)
@@ -81,9 +80,16 @@ export function Editor({ session }: { session: EditorSession }) {
   // What the score island follows. One set per session: new signal objects would mount the island again.
   const island = useMemo(() => {
     const flagged = computed(() => session.warnings.value.flatMap((w) => (w.noteId ? [w.noteId] : [])))
+    // A bar that does not add up is marked on the notes of the voice it is about, in the part shown.
     const flaggedBars = computed(() => {
-      const bars = new Set(session.warnings.value.filter((w) => !w.noteId && w.bar !== undefined).map((w) => w.bar))
-      return lineOf(session.score.value, session.voice).measures.filter((m) => bars.has(m.number)).flatMap((m) => m.items.filter(isShown).map((n) => n.id))
+      const score = session.score.value
+      const part = session.part.value
+      return session.warnings.value
+        .filter((w) => !w.noteId && w.bar !== undefined && (w.part ?? part) === part)
+        .flatMap((w) => {
+          const refs = w.staff !== undefined && w.voice !== undefined ? [{ part, staff: w.staff, voice: w.voice }] : voices(score).filter((r) => r.part === part)
+          return refs.flatMap((ref) => lineOf(score, ref).measures.filter((m) => m.number === w.bar).flatMap((m) => m.items.filter(isShown).map((n) => n.id)))
+        })
     })
     const fullScore = signal(false)
     return {
@@ -121,14 +127,14 @@ export function Editor({ session }: { session: EditorSession }) {
   }
 
   /** Runs an edit as one undo step (or as part of the last, `amend`); an edit that cannot be done says why and changes nothing. */
-  const run = (edit: (view: VoiceScore) => unknown, failure: FailureKey = 'editor.error.edit', options: { amend?: boolean } = {}): void => {
+  const run = (edit: (score: Score) => unknown, failure: Failure = 'editor.error.edit', options: { amend?: boolean } = {}): void => {
     try {
       session.apply(edit, options)
       setMessage(null)
       setSaveError(null)
     } catch (error) {
       if (!(error instanceof EditError)) throw error
-      setMessage(failure)
+      setMessage(typeof failure === 'function' ? { text: failure(error) } : failure)
     }
   }
 
@@ -142,10 +148,20 @@ export function Editor({ session }: { session: EditorSession }) {
       return
     }
     // The notes may be tapped in either order: the first of them in the score is where the mark starts.
-    const order = noteOrder(session.score.value, session.voice)
-    const [from, to] = (order.get(pick.first) ?? 0) <= (order.get(id) ?? 0) ? [pick.first, id] : [id, pick.first]
+    const [from, to] = compareInTime(session.score.value, pick.first, id) <= 0 ? [pick.first, id] : [id, pick.first]
     const { kind } = pick
     setPick(null)
+    // A slur or tie stays in one voice, a hairpin in one staff (change edit-parts, D7): say so rather than "cannot".
+    const a = placeOfNote(session.score.value, from)?.ref
+    const b = placeOfNote(session.score.value, to)?.ref
+    if (a && b && (kind === 'slur' || kind === 'tie') && !sameVoice(a, b)) {
+      setMessage('mark.error.voice')
+      return
+    }
+    if (a && b && (kind === 'crescendo' || kind === 'diminuendo') && (a.part !== b.part || a.staff !== b.staff)) {
+      setMessage('mark.error.staff')
+      return
+    }
     run((s) => (kind === 'slur' ? addSlur(s, from, to) : kind === 'tie' ? addTie(s, from, to) : addWedge(s, kind, from, to)), PICK_ERROR[kind])
   }
 
@@ -171,6 +187,14 @@ export function Editor({ session }: { session: EditorSession }) {
   const startPick = (kind: PickKind | null): void => {
     setMessage(null)
     setPick(kind ? { kind, first: null } : null)
+  }
+
+  /** The part switch (change edit-parts, D1): another part is drawn, and the selection and a mark being chosen go. */
+  const switchPart = (id: string): void => {
+    setPick(null)
+    setMessage(null)
+    island.fullScore.value = false
+    session.setPart(id)
   }
 
   const chooseTab = (next: Tab): void => {
@@ -248,13 +272,9 @@ export function Editor({ session }: { session: EditorSession }) {
   }
 
   // "Bar 3 · Note 4": the place of the note among the bar's notes and rests.
-  const place = selection && note ? (lineOf(score, session.voice).measures[selection.bar - 1]?.items.filter(isShown).findIndex((n) => n.id === note.id) ?? -1) + 1 : 0
-  const heading =
-    tab === 'score'
-      ? t('score.whole')
-      : selection && note && place > 0
-        ? t(note.rest ? 'editor.selection.rest' : 'editor.selection.note', { bar: selection.bar, note: place })
-        : t('editor.selection.none')
+  // "Bar 5 · Left hand · Chord, note 2 of 3", or "Bar 2 · Note 3" in a one-line piece (change edit-parts, D2).
+  const label = session.selectionLabel.value
+  const heading = tab === 'score' ? t('score.whole') : selection && note && label ? label : t('editor.selection.none')
   const previewing = session.previewing.value
   const naming = session.naming.value
   const lines = island.lines.value
@@ -305,6 +325,14 @@ export function Editor({ session }: { session: EditorSession }) {
 
         <div class="editor-main">
           <section class="editor-score-card" aria-label={t('editor.scoreLabel')}>
+            {score.parts.length > 1 ? (
+              <SegmentedControl
+                label={t('editor.part')}
+                value={session.part.value}
+                options={score.parts.map((p, n) => ({ value: p.id, label: p.name || t('editor.part.number', { n: n + 1 }) }))}
+                onChange={switchPart}
+              />
+            ) : null}
             {warningCount > 0 ? (
               <div class="editor-warnings" role="group" aria-label={t('editor.warnings')}>
                 <div class="editor-warnings-row">
@@ -423,7 +451,7 @@ export function Editor({ session }: { session: EditorSession }) {
             {tab === 'score' ? <ScoreTab session={session} run={run} onAddPages={() => void addPages()} /> : null}
             {message ? (
               <p class="editor-message" role="status">
-                {t(message)}
+                {typeof message === 'string' ? t(message) : message.text}
               </p>
             ) : null}
           </section>
