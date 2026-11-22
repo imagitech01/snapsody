@@ -51,12 +51,12 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **browser** (
   - select a note, tap Trill, save, and the stored MusicXML has `<trill-mark/>` on it;
   - tap the trill on the score, Delete, and it is gone;
   - Arpeggio is disabled on a single note.
-- [ ] 4.4 Check the Marks tab by eye in browser-dev (`npm run dev`) at 360 × 780, in English: the extra chips fit without scrolling past the tools, and the new marks are highlighted when selected. Verify: manual by eye; `web/test/ui/density.test.ts` stays green.
+- [x] 4.4 Check the Marks tab by eye in browser-dev (`npm run dev`) at 360 × 780, in English: the extra chips fit without scrolling past the tools, and the new marks are highlighted when selected. Verify: manual by eye; `web/test/ui/density.test.ts` stays green. **Not done: waived by the user at archive (2026-11-22).**
 
 ## 5. Integration
 
 - [x] 5.1 Run `make test-browser` and `openspec validate more-marks --strict`. Verify: both are green.
-- [ ] 5.2 Tune the constants of D3 by ear: play the fixture of 1.2 at 60 and 120 bpm with the tenor sax and the piano, in browser-dev and on a real phone. Verify: manual by ear, on the real phone: trills, turns and grace notes sound like practice-tempo ornaments and never push the beat.
+- [x] 5.2 Tune the constants of D3 by ear: play the fixture of 1.2 at 60 and 120 bpm with the tenor sax and the piano, in browser-dev and on a real phone. Verify: manual by ear, on the real phone: trills, turns and grace notes sound like practice-tempo ornaments and never push the beat. **Not done: waived by the user at archive (2026-11-22).**
 
 ## Workflow follow-up
 

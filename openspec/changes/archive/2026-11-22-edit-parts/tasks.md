@@ -49,8 +49,8 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **browser** (
 ## 6. Integration
 
 - [x] 6.1 Run `make test-browser` and `openspec validate edit-parts --strict`. Verify: both are green.
-- [ ] 6.2 Check the editor by eye in browser-dev at 360 × 780, in English, on the melody-piano fixture: the part switch, a piano line with both staves, the label, the new tools, the bar-line tools and the Score tab. Verify: manual by eye; `web/test/ui/density.test.ts` stays green.
-- [ ] 6.3 On a real phone, open a piece read from one of the piano photos of `parts-and-accompaniment` task 1.1, and fix a chord note, a note in the wrong hand, a left-hand clef and a missed or extra bar line. Then play it in practice. Verify: manual by eye and by ear on the real phone: a single chord note can be tapped, and the fixes are heard.
+- [x] 6.2 Check the editor by eye in browser-dev at 360 × 780, in English, on the melody-piano fixture: the part switch, a piano line with both staves, the label, the new tools, the bar-line tools and the Score tab. Verify: manual by eye; `web/test/ui/density.test.ts` stays green. **Not done: waived by the user at archive (2026-11-22).**
+- [x] 6.3 On a real phone, open a piece read from one of the piano photos of `parts-and-accompaniment` task 1.1, and fix a chord note, a note in the wrong hand, a left-hand clef and a missed or extra bar line. Then play it in practice. Verify: manual by eye and by ear on the real phone: a single chord note can be tapped, and the fixes are heard. **Not done: waived by the user at archive (2026-11-22).**
 
 ## Workflow follow-up
 

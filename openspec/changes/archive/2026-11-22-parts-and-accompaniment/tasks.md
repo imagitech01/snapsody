@@ -6,8 +6,8 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **browser** (
 
 The other groups do not wait for this one. It can run whenever the user has photos at hand.
 
-- [ ] 1.1 Run a few real piano pages through the local prototype (`prototype/run.sh`), ideally a grand staff alone and a melody with piano. Photos stay in `fixtures/local/piano/`, never in the repo. For each page, note the notes that are wrong or missing, against the book. Verify: manual by eye. A short note in this change's folder (`first-look.md`, no images, no music from the books) with the counts per page.
-- [ ] 1.2 Read one of those pages on a real phone with today's app. Note the reading time and whether any system was cut at the 608-token limit (bars that don't add up at the end of a system). Verify: manual on the real phone (GPU speed). Added to `first-look.md`.
+- [x] 1.1 Run a few real piano pages through the local prototype (`prototype/run.sh`), ideally a grand staff alone and a melody with piano. Photos stay in `fixtures/local/piano/`, never in the repo. For each page, note the notes that are wrong or missing, against the book. Verify: manual by eye. A short note in this change's folder (`first-look.md`, no images, no music from the books) with the counts per page. **Not done: waived by the user at archive (2026-11-22).**
+- [x] 1.2 Read one of those pages on a real phone with today's app. Note the reading time and whether any system was cut at the 608-token limit (bars that don't add up at the end of a system). Verify: manual on the real phone (GPU speed). Added to `first-look.md`. **Not done: waived by the user at archive (2026-11-22).**
 
 ## 2. Model and voice view (D1, D2)
 
@@ -44,7 +44,7 @@ The other groups do not wait for this one. It can run whenever the user has phot
 
 - [x] 5.1 Add the parts step to the add-music flow (`addMusic.ts`, `AddMusicViews.tsx`): checkboxes, "I play this", the first line of each part drawn small, Continue and Back, texts in `en.ts`. Verify: quick, `web/test/addMusic.test.ts`: with one part there is no step; with two, the kept parts and the chosen part are saved; Back creates no piece.
 - [x] 5.2 Extend the add-music journey test. Verify: mac, `web/test/ui/addMusic.test.ts`: a scripted reading of the melody-piano fixture shows the step, unticking Piano gives a melody-only piece that opens in the editor.
-- [ ] 5.3 Check the step by eye in browser-dev at 360 × 780, in English. Verify: manual by eye.
+- [x] 5.3 Check the step by eye in browser-dev at 360 × 780, in English. Verify: manual by eye. **Not done: waived by the user at archive (2026-11-22).**
 
 ## 6. Practice (D5, D7, D9)
 
@@ -57,7 +57,7 @@ The other groups do not wait for this one. It can run whenever the user has phot
   - a one-line piece shows neither the card nor the row.
 - [x] 6.4 Add the parts hint, once per piece, with its wording per combination (melody with piano, piano alone, several melodies). Verify: quick, `web/test/practiceSession.test.ts`: shown on the first open only.
 - [x] 6.5 Add *Instrument for this piece*, with the default from Settings followed until the user chooses. Verify: quick, `web/test/practiceSession.test.ts`: the scenarios "A clarinet piece in a sax player's library" and "Default changed later".
-- [ ] 6.6 Check the practice screen and Practice tools by eye in browser-dev at 360 × 780 and in landscape, in English, with the melody-piano fixture. Verify: manual by eye; `web/test/ui/density.test.ts` stays green.
+- [x] 6.6 Check the practice screen and Practice tools by eye in browser-dev at 360 × 780 and in landscape, in English, with the melody-piano fixture. Verify: manual by eye; `web/test/ui/density.test.ts` stays green. **Not done: waived by the user at archive (2026-11-22).**
 
 ## 7. Editor until `edit-parts` (D8)
 
@@ -72,7 +72,7 @@ The other groups do not wait for this one. It can run whenever the user has phot
 
   Verify: `grep -n "single-line\|grand staff" docs/store/listing.md` and `grep -n "every piece" openspec/specs/instruments/spec.md` show the new texts.
 - [x] 8.2 Run `make test-browser` and `openspec validate parts-and-accompaniment --strict`. Verify: both are green.
-- [ ] 8.3 On a real phone, read one of the piano pages of task 1.1, keep both parts, play the melody with the piano along, then take the left hand. Verify: manual by eye and by ear on the real phone: the parts are in time, the faded hand is visible, and the piano sounds as piano.
+- [x] 8.3 On a real phone, read one of the piano pages of task 1.1, keep both parts, play the melody with the piano along, then take the left hand. Verify: manual by eye and by ear on the real phone: the parts are in time, the faded hand is visible, and the piano sounds as piano. **Not done: waived by the user at archive (2026-11-22).**
 
 ## Workflow follow-up
 
