@@ -29,7 +29,7 @@ Research done on 2026-11-22 (versions as of that day):
 - Build and test exactly as today: `make test-quick`, `make test-browser`, `make test-device`, `make dev-phone` and `make bundle`. The APK keeps the same permissions, uncompressed models and behaviour.
 
 **Non-Goals:**
-- LiteRT 2.x (CompiledModel port). It gets a separate change.
+- LiteRT 2.x (CompiledModel port). LiteRT stays at 1.4.2 (proposal, "Not in this change").
 - Raising `targetSdk` or `minSdk`. A `targetSdk` raise changes platform behaviour and follows Play's deadline on its own schedule.
 - Clearing the Gradle 10 deprecations that come from Chaquopy or Capacitor themselves.
 

@@ -18,7 +18,7 @@ The Android build runs on the toolchain the spike settled for Capacitor 8: AGP 8
 - No user-visible behaviour changes. The app, its stored pieces, its permissions and its recognition results stay the same.
 
 Not in this change:
-- **LiteRT 2.x.** LiteRT 2.x drops the Interpreter GPU delegate we use. Moving to it means rewriting segnet inference onto the CompiledModel API, so it gets its own change. The LiteRT 1.4.2 we ship already meets Play's 16 KB page-size rule.
+- **LiteRT 2.x.** LiteRT 2.x drops the Interpreter GPU delegate we use. Moving to it means rewriting segnet inference onto the CompiledModel API. We stay on 1.4.2 (decided 2026-11-22): segnet on the GPU takes 1.9–2.5 s of an 8–12 s page read on the S24, most of it the one-time GPU start-up, so the port gains too little. 1.4.2 already meets Play's 16 KB page-size rule.
 - The Python toolchains: Chaquopy's Python 3.10, and the model build on 3.12.
 
 ## Capabilities

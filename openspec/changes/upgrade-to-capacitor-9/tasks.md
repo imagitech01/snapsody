@@ -46,4 +46,3 @@
 ## Workflow follow-up
 
 - Archive the change once tasks 1–4 are done.
-- Plan the separate change that moves LiteRT 1.4.2 → 2.x (segnet on the CompiledModel API, the GPU self-test kept, the new `FOREGROUND_SERVICE_DATA_SYNC` permission handled).
