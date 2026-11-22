@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- The dev build (build type `dev`, app id be.imagitech.snapsody.dev): installed next to the Play app, with its own name. -->
+<resources>
+    <string name="app_name">Snapsody Dev</string>
+    <string name="title_activity_main">Snapsody Dev</string>
+    <string name="package_name">be.imagitech.snapsody.dev</string>
+    <string name="custom_url_scheme">be.imagitech.snapsody.dev</string>
+</resources>

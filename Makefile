@@ -7,6 +7,9 @@
 # Each target prints its duration and exits non-zero when a test fails.
 #
 #   make bundle        the signed release bundle for Google Play (docs/release.md)
+#
+#   make dev-phone     builds the dev app (be.imagitech.snapsody.dev, next to the Play app) and installs it on the phone
+#   make dev-log       follows its diagnostics in logcat (docs/testing.md "Dev build on the phone")
 
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
@@ -22,7 +25,7 @@ define timed
 	exit $$status
 endef
 
-.PHONY: test-quick test-mac test-device bundle
+.PHONY: test-quick test-mac test-device bundle dev-phone dev-log
 
 GRADLE = cd android && ./gradlew --console=plain -q
 
@@ -38,3 +41,20 @@ test-device:
 bundle:
 	$(GRADLE) :app:bundleRelease
 	@echo "android/app/build/outputs/bundle/release/app-release.aab"
+
+# The phone: ANDROID_SERIAL when set, else the first device adb lists that is not an emulator.
+ADB = $${ANDROID_HOME:-$$HOME/Library/Android/sdk}/platform-tools/adb
+PHONE = $${ANDROID_SERIAL:-$$($(ADB) devices | awk 'NR > 1 && $$2 == "device" && $$1 !~ /^emulator-/ { print $$1; exit }')}
+DEV_APP = be.imagitech.snapsody.dev
+
+dev-phone:
+	$(GRADLE) :app:assembleDev
+	@serial=$(PHONE); [ -n "$$serial" ] || { echo "no phone connected (adb devices)" >&2; exit 1; }; \
+	$(ADB) -s "$$serial" install -r android/app/build/outputs/apk/dev/app-dev.apk
+
+# Follows the dev app's [diag] lines and console errors, also across restarts of the app (the Play app logs nothing:
+# Capacitor forwards the console of debug builds only). Clears the old log first.
+dev-log:
+	@serial=$(PHONE); [ -n "$$serial" ] || { echo "no phone connected (adb devices)" >&2; exit 1; }; \
+	$(ADB) -s "$$serial" logcat -c; \
+	$(ADB) -s "$$serial" logcat -v time -s Capacitor/Console:V AndroidRuntime:E | grep --line-buffered -E '\[diag\]|/Console.*(Error|error|Uncaught)|AndroidRuntime'

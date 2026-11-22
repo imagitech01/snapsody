@@ -1,5 +1,6 @@
 import { effect } from '@preact/signals'
 import type { ReadonlySignal } from '@preact/signals'
+import { diag } from '../core/diag.ts'
 import { CursorDriver, CursorTracker, scrollDelta } from '../core/playback/cursor.ts'
 import type { HighlightTarget } from '../core/playback/cursor.ts'
 import type { Position } from '../core/playback/scheduler.ts'
@@ -127,6 +128,8 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
 
   let score = options.score
   let disposed = false
+  const islandId = diag.id()
+  diag.log('island.mount', { island: islandId, bars: score.bars.length, playing: options.playing.peek(), bar: options.bar.peek() })
   /** The note under the cursor while playing: what `heard()` last gave. */
   let shown: { noteIds: string[]; barIndex: number } | undefined
   let firstLayout = true
@@ -267,6 +270,7 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
     },
     onRender: () => {
       if (disposed) return
+      diag.log('island.render', { island: islandId, first: firstLayout, width: view.lastRender?.width, ms: view.lastRender?.ms, playing: options.playing.peek(), shown: shown?.noteIds })
       const wanted = firstLayout ? { barIndex: options.bar.peek() - 1, how: 'visible' as const } : anchor
       firstLayout = false
       anchor = undefined
@@ -314,6 +318,7 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
       const playing = options.playing.value
       if (playing === running) return
       running = playing
+      diag.log(playing ? 'cursor.start' : 'cursor.stop', { island: islandId })
       if (playing) driver.start()
       else driver.stop()
     }),
@@ -452,6 +457,7 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
     dispose() {
       if (disposed) return
       disposed = true
+      diag.log('island.dispose', { island: islandId, running })
       for (const stop of stops) stop()
       driver.stop()
       for (const type of inputEvents) root.removeEventListener(type, noteInput)

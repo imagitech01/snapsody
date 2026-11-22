@@ -364,6 +364,19 @@ Measured on the development Mac, 18 Nov 2026, at the end of the practice-app cha
 The first version's smoke test took 38–77 s for recognition and save and 90–124 s for the whole
 run on the same emulator; on the S24 the self-test picked the GPU and the page took 14 s.
 
+## Dev build on the phone
+
+For a problem that shows only on the phone, `make dev-phone` builds the `dev` build type (a debug build with the
+app id `be.imagitech.snapsody.dev`, named "Snapsody Dev") and installs it on the connected phone, next to the Play
+app. It has its own files, so its library starts empty and the Play app's pieces are never touched.
+
+The web layer turns on its diagnostics (`web/src/core/diag.ts`, `web/src/ui/diagnostics.ts`) when the app id ends in
+`.dev`; everywhere else they are off. It then logs one `[diag]` line per audio context, player state, practice
+session and score island event, and, while a piece plays, a heartbeat each second that compares the note heard
+with the note highlighted (`beat.MISMATCH` when they differ). `make dev-log` follows those lines in logcat, also
+across restarts of the app. Being debuggable, the dev build's WebView can also be inspected from
+`chrome://inspect`, where `window.__snapsody.activePractice` is the open practice session.
+
 ## What happened to the instrumented tests
 
 The test-pyramid change replaced the 15 instrumented test classes; each one is in git history.

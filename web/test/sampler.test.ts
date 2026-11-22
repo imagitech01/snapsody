@@ -3,8 +3,8 @@ import { test } from 'node:test'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { PITCH_REFERENCE_DEFAULT, clampPitchReference, parseSampleMap, pickSample, pitchFactor, soundFolder } from '../src/core/playback/samples.ts'
-import { MIN_RELEASE_FADE, OUTPUT_LATENCY_FALLBACK, Sampler, SoundLibrary, loadSampleBank, outputLatency } from '../src/core/playback/webaudio.ts'
-import type { AudioContextLike, GainLike, ParamLike, SampleBank, SourceLike } from '../src/core/playback/webaudio.ts'
+import { MAX_OUTPUT_LATENCY, MIN_RELEASE_FADE, OUTPUT_LATENCY_FALLBACK, Sampler, SoundLibrary, loadSampleBank, outputLatency, trustedOutputLatency } from '../src/core/playback/webaudio.ts'
+import type { AudioContextLike, GainLike, LatencyMemory, ParamLike, SampleBank, SourceLike } from '../src/core/playback/webaudio.ts'
 
 const SAMPLES_DIR = fileURLToPath(new URL('./fixtures/samples/placeholder', import.meta.url))
 
@@ -232,6 +232,48 @@ test('latency: outputLatency when reported, else baseLatency plus a fallback', (
   assert.equal(outputLatency({ outputLatency: 0.08, baseLatency: 0.01 }), 0.08)
   assert.equal(outputLatency({ outputLatency: 0, baseLatency: 0.01 }), 0.01 + OUTPUT_LATENCY_FALLBACK)
   assert.equal(outputLatency({}), OUTPUT_LATENCY_FALLBACK)
+})
+
+test('latency: a context that once reports an impossible output latency is not believed again, and takes the last good one of an earlier context (Android WebView after another context closed)', () => {
+  // What the S24 reported (WebView 157): the first context 0.016 s; the next one, made after the first had run 35.17 s
+  // and closed, reported about that time once it played, counting down with its clock. Believed, the cursor stood still
+  // for 17 s and then ran at double speed.
+  const memory: LatencyMemory = { last: undefined }
+  const first = trustedOutputLatency(memory)
+  assert.deepEqual([0, 0.016, 0.016].map((r) => first(r)), [0, 0.016, 0.016])
+  assert.equal(memory.last, 0.016)
+  const second = trustedOutputLatency(memory)
+  assert.deepEqual(
+    [0, 0.008, 35.136, 35.08, 34.08, 0.9, 0.024].map((r) => second(r)),
+    [0, 0.008, 0.016, 0.016, 0.016, 0.016, 0.016],
+  )
+  assert.equal(outputLatency({ outputLatency: second(0.02), baseLatency: 0.004 }), 0.016)
+  // The broken context leaves nothing of its own (not its 0.008 s from before the jump): the next one still inherits 0.016 s.
+  assert.equal(memory.last, 0.016)
+
+  // Bluetooth: the last good latency is the headset's, and that is what a broken context gets.
+  const headset: LatencyMemory = { last: undefined }
+  trustedOutputLatency(headset)(0.25)
+  assert.equal(trustedOutputLatency(headset)(12.5), 0.25)
+
+  // No earlier context measured anything: undefined, so `outputLatency` falls back to the base latency plus the fallback.
+  const fresh: LatencyMemory = { last: undefined }
+  const alone = trustedOutputLatency(fresh)
+  assert.equal(alone(0.008), 0.008)
+  assert.equal(alone(35.1), undefined)
+  assert.equal(outputLatency({ outputLatency: alone(0.016), baseLatency: 0.004 }), 0.004 + OUTPUT_LATENCY_FALLBACK)
+  assert.equal(fresh.last, undefined)
+
+  // A real latency up to the limit is believed every time; NaN is not.
+  const bluetooth = trustedOutputLatency({ last: undefined })
+  assert.deepEqual([0.25, MAX_OUTPUT_LATENCY, 0.3].map((r) => bluetooth(r)), [0.25, MAX_OUTPUT_LATENCY, 0.3])
+  const broken = trustedOutputLatency({ last: undefined })
+  assert.equal(broken(Number.NaN), undefined)
+  assert.equal(broken(0.02), undefined)
+  // Not reported at all (an older WebView): nothing to judge, nothing remembered.
+  const none = trustedOutputLatency({ last: undefined })
+  assert.equal(none(undefined), undefined)
+  assert.equal(none(0.02), 0.02)
 })
 
 // --- click-free envelopes ---

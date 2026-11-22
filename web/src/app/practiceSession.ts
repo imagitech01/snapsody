@@ -1,5 +1,6 @@
 import { computed, effect, signal } from '@preact/signals'
 import type { ReadonlySignal, Signal } from '@preact/signals'
+import { diag } from '../core/diag.ts'
 import { instrumentById, instrumentOrDefault } from '../core/instruments/instruments.ts'
 import type { Instrument } from '../core/instruments/instruments.ts'
 import { Player } from '../core/playback/player.ts'
@@ -392,7 +393,9 @@ export class PracticeSession {
     } catch {
       // Only a convenience: the piece opens with the defaults.
     }
-    return new PracticeSession(piece.info, score, saved ?? DEFAULT_PRACTICE, deps)
+    const session = new PracticeSession(piece.info, score, saved ?? DEFAULT_PRACTICE, deps)
+    diag.log('session.open', { piece: pieceId, player: session.player.diagId, bars: score.bars.length, parts: score.parts.length, bar: session.bar.peek() })
+    return session
   }
 
   // ---- Playing -------------------------------------------------------------------------------
@@ -675,6 +678,7 @@ export class PracticeSession {
    */
   async close(): Promise<void> {
     if (this.closed) return
+    diag.log('session.close', { piece: this.pieceId, player: this.player.diagId, state: this.player.state, backends: this.backends.length })
     this.closing = true
     this.player.stopMetronomeAlone()
     const state = this.player.state

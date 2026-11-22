@@ -13,6 +13,16 @@ export function isNative(): boolean {
   return Capacitor.isNativePlatform()
 }
 
+/** True in the dev build on the phone (app id `be.imagitech.snapsody.dev`, docs/testing.md "Dev build on the phone"), which logs diagnostics. */
+export async function isDevBuild(): Promise<boolean> {
+  if (!isNative()) return false
+  try {
+    return (await App.getInfo()).id.endsWith('.dev')
+  } catch {
+    return false
+  }
+}
+
 /**
  * The platform of the app on the phone, over the real plugins: Capacitor's Filesystem and App, the community KeepAwake, and our Scanner, Reader and AtomicFiles (android/app/src/main/
  * java/be/imagitech/snapsody/).

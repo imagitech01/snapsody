@@ -53,6 +53,15 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             if (hasUploadKey) signingConfig signingConfigs.upload
         }
+        // The dev build (`make dev-phone`, docs/testing.md "Dev build on the phone"): a debug build under its own app id,
+        // so it installs next to the Play app and keeps its own pieces. Debuggable: its console goes to logcat and its
+        // WebView can be inspected; the web layer turns its diagnostics on for an app id that ends in ".dev".
+        dev {
+            initWith debug
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            matchingFallbacks = ['debug']
+        }
     }
     androidResources {
         // Models are memory-mapped by LiteRT / ONNX Runtime: keep them uncompressed (the release

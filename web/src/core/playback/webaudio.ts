@@ -314,6 +314,43 @@ export class Sampler implements NoteOutput {
 /** Seconds between the audio clock and what the listener hears. */
 export const OUTPUT_LATENCY_FALLBACK = 0.04
 
+/** No real output is heard later than this after the audio clock (a slow Bluetooth headset is well under it), in seconds. */
+export const MAX_OUTPUT_LATENCY = 1
+
+/** The last believable output latency (above 0) that an audio context of this app run reported: what a broken context falls back to. */
+export interface LatencyMemory {
+  last: number | undefined
+}
+
+/**
+ * Judges the `outputLatency` one audio context reports, for the life of that context: the value while it is
+ * believable, and from the first reading that is not, for good, the last good latency of an earlier context (the
+ * output, speaker or headset, is nearly always still the same one), or undefined when there is none, so that
+ * `outputLatency` falls back.
+ *
+ * Why: the Android WebView (seen on a Galaxy S24, WebView 157) reports, for a new context made after another one
+ * closed, about the time the old one ran, counting down with the new clock (35.1 s, 35.0 s, 34.0 s, ...). The cursor
+ * reads the music as heard that long ago: it stands still for half that time and then runs at double speed, while
+ * the music plays as it should. The countdown passes through believable values on its way down, so a single bad
+ * reading is enough to stop believing that context; and what it reported before (0.008 s just before the jump) is
+ * not kept for the contexts after it either.
+ */
+export function trustedOutputLatency(memory: LatencyMemory): (reported: number | undefined) => number | undefined {
+  const inherited = memory.last
+  let broken = false
+  return (reported) => {
+    if (broken) return memory.last
+    if (reported === undefined) return undefined
+    if (!(reported >= 0 && reported <= MAX_OUTPUT_LATENCY)) {
+      broken = true
+      memory.last = inherited
+      return memory.last
+    }
+    if (reported > 0) memory.last = reported
+    return reported
+  }
+}
+
 export function outputLatency(ctx: { outputLatency?: number; baseLatency?: number }): number {
   const out = ctx.outputLatency
   if (typeof out === 'number' && out > 0) return out

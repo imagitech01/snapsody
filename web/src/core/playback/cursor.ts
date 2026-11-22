@@ -1,3 +1,4 @@
+import { diag } from '../diag.ts'
 import type { Position } from './scheduler.ts'
 import type { PlaybackEvent } from './timeline.ts'
 
@@ -114,7 +115,14 @@ export class CursorDriver {
     this.o.tracker.reset()
     const frame = this.o.frame ?? ((fn) => globalThis.requestAnimationFrame(fn))
     const loop = (): void => {
-      this.step()
+      diag.count('cursor.frame')
+      try {
+        this.step()
+      } catch (e) {
+        // Logged in the dev build, and thrown as before: the loop ends here.
+        diag.log('cursor.error', { error: e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e) })
+        throw e
+      }
       this.id = frame(loop)
     }
     this.id = frame(loop)

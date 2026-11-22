@@ -1,3 +1,4 @@
+import { diag } from '../diag.ts'
 import { instrumentById } from '../instruments/instruments.ts'
 import type { Instrument } from '../instruments/instruments.ts'
 import type { Score, VoiceScore } from '../score/model.ts'
@@ -155,6 +156,9 @@ export class Player {
   /** A start of the metronome on its own that is waiting for the backend or the score. */
   private aloneStarting: Promise<void> | undefined
 
+  /** Tells this player apart in the dev build's log (`core/diag.ts`). */
+  readonly diagId = diag.id()
+
   constructor(options: PlayerOptions) {
     this.o = options
     this.bpmValue = clampTempo(options.bpm ?? DEFAULT_BPM)
@@ -241,6 +245,7 @@ export class Player {
 
   private setState(state: PlayerState): void {
     if (this.stateValue === state) return
+    diag.log('player.state', { player: this.diagId, from: this.stateValue, to: state, run: this.runId, t: this.audio?.currentTime })
     this.stateValue = state
     this.o.onState?.(state)
   }
@@ -278,6 +283,7 @@ export class Player {
     this.scheduler?.stop()
     const run = this.runId
     let keepBackend = false
+    diag.log('player.play', { player: this.diagId, run, resuming, from: options.fromNoteId, backend: this.backendPromise ? 'kept' : 'new' })
     this.setState('loading')
     try {
       this.backendPromise ??= this.o.backend(this.instrumentValue)
@@ -333,9 +339,14 @@ export class Player {
       this.scheduler = scheduler
       this.setState('playing')
       // Paused, stopped or played again by a listener of the state: that run wins, this one never sounds.
-      if (run !== this.runId) return
+      if (run !== this.runId) {
+        diag.log('player.overtaken', { player: this.diagId, run, now: this.runId })
+        return
+      }
       scheduler.start(first?.index ?? 0, start)
+      diag.log('player.started', { player: this.diagId, run, first: first?.index, note: first?.noteIds[0], countIn: !!start.countIn, loop: !!loop, t: audio.currentTime, out: audio.outputLatency, base: audio.baseLatency })
     } catch (e) {
+      diag.log('player.failed', { player: this.diagId, run, now: this.runId, error: e instanceof Error ? e.message : String(e) })
       if (run === this.runId) {
         // A run that failed leaves nothing sounding: the music would play on with the player stopped and the screen not following it.
         this.scheduler?.stop()
