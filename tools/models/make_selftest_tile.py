@@ -10,7 +10,7 @@ The tile is self-made, so no book content ships in the app (design D4, D12):
    symbols") hardly occurs on Verovio's engraving (at most 6 pixels in any tile), so it
    is not required.
 
-Its CPU reference is the argmax of the packaged LiteRT segnet on the Mac's CPU.
+Its CPU reference is the argmax of the packaged LiteRT segnet on a Mac's CPU.
 
 Writes to build/models/ (package_models.py then copies both files into the app):
 - selftest_tile.u8       320 x 320 uint8, the grey tile exactly as segnet sees it

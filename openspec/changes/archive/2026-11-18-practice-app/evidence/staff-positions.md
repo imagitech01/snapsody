@@ -129,7 +129,7 @@ second system ends at x 417, at its final double barline.
 | 0 | 6193 chars (the committed `page-1.musicxml` is 6193 bytes) | 1–5 at (0.0302, 0.2096, 0.9339, 0.1537); 6–8 at (0.0302, 0.6402, 0.5443, 0.1498) | false |
 | 1 | 5384 chars (`page-2.musicxml`: 5384 bytes) | 1–5 at (0.0302, 0.2117, 0.9339, 0.1470); 6–6 at (0.0302, 0.6442, 0.1793, 0.1459) | true |
 
-The boxes are the Mac's to the fourth decimal. The emulator's recognition stack differs from the Mac's
+The boxes are a Mac's to the fourth decimal. The emulator's recognition stack differs from a Mac's
 (segnet on LiteRT, OpenCV 4.5.1; see `spike.md`), and on these pages any difference stayed below the
 4-decimal precision the engine sends. Mapping the event to the
 port's `ReaderEvent` (`toReaderEvent`) is covered by `web/test/capacitorAdapter.test.ts`, not
@@ -144,5 +144,5 @@ repeated here. The scans were removed afterwards.
   - `capacitorAdapter.test.ts`;
   - `addMusic.test.ts`;
   - `pages.test.ts`, which shows that an estimated time at a page start counts as absent.
-- **A real phone photo** went through the Mac path only (the book photo above). The S24 run is
+- **A real phone photo** went through a Mac path only (the book photo above). A Galaxy S24 run is
   10.6's smoke test, before archive.

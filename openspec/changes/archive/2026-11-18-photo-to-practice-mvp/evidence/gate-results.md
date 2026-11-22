@@ -96,7 +96,7 @@ The user accepted the result: *"it is what it is.. just use it.. if its not perf
 ## 3.5–3.7 On-device gate (Galaxy S24, 2026-11-17)
 
 **Decision: the gate PASSES** against design D11:
-- Bars 1–19 come out the same as the Mac's homr output.
+- Bars 1–19 come out the same as a Mac's homr output.
 - Recognition takes at most 30 s (target) and never more than 60 s (limit).
 - The app was not killed for memory.
 
@@ -153,11 +153,11 @@ The in-app check compares pitch, duration, tuplets, slurs and staccato in bars 1
 | full page | `fixtures/local/page.musicxml` | pass | pass |
 | ex. 87 crop | `fixtures/local/exercise87_crop.mac.musicxml` | pass | pass |
 
-For the full page, the phone's MusicXML has the same musical content as the Mac's
+For the full page, the phone's MusicXML has the same musical content as a Mac's
 OpenCV-4.5 run for the *whole* page, on the GPU as well as the CPU. Only homr's `imgpos`
 comments differ.
 
-**homr reads the crop slightly differently from the full page.** This happens on the Mac
+**homr reads the crop slightly differently from the full page.** This happens on a Mac
 too, so it is not a port issue. Compared with the full-page reference:
 
 - **Bar 15:** the crop loses the triplet marks, and the final quarter is also read as an
@@ -169,9 +169,9 @@ too, so it is not a port issue. Compared with the full-page reference:
     exactly the repair case.)
 - **Bar 17:** the slur ends on a different note. The full-page reference is itself known
   to miss a slur end in bar 17.
-- **Margins:** trying other crop margins on the Mac moved these differences around
+- **Margins:** trying other crop margins on a Mac moved these differences around
   (bars 1 and 15–18) but never removed them.
-- **Decision:** with the user's agreement, the gate compares each input with the Mac's output
+- **Decision:** with the user's agreement, the gate compares each input with a Mac's output
   for the *same* image. Task 3.6, design D11 and the spec scenario were updated to say so.
 
 ### Notes for later tasks
@@ -201,7 +201,7 @@ triplets and misread the final quarter as an eighth.
 
 - Bar 17's slur end is ambiguous in print (the reference misses one there too), and a
   slur never changes a bar's length.
-- The chosen padding (5% / 12%) passes all 19 bars on the exercise-87 crop. The Mac
+- The chosen padding (5% / 12%) passes all 19 bars on the exercise-87 crop. A Mac
   output is in `fixtures/local/exercise87_crop_padded.mac.musicxml`.
 
 **S24 result** (padded, compared directly with the full-page reference `page.musicxml`):
@@ -224,7 +224,7 @@ eighths and a quarter add up to 4 beats, not 3.5.
 - **Reference tile.** One 320 × 320 tile cut from the self-engraved test page
   (`tools/models/make_selftest_tile.py`). It has a slur, staccato, a triplet, a dynamic, an
   accidental and ledger lines, and 14,432 symbol pixels.
-- **CPU reference.** LiteRT CPU on the Mac. Both files are packaged into the app with their
+- **CPU reference.** LiteRT CPU on a Mac. Both files are packaged into the app with their
   hashes in `models.json`.
 - **First launch** after clearing the app's data: the self-test ran in the background.
 
@@ -250,7 +250,7 @@ The cache file is 37 MB, kept in `code_cache/litert_gpu/`, which Android clears 
 - The self-test reruns when the stored app version, a model hash or the driver string differs.
 - It does not rerun otherwise.
 
-The key on the S24 is app version `0.1.0 (1)`, the five asset hashes, and
+The key on a Galaxy S24 is app version `0.1.0 (1)`, the five asset hashes, and
 `Samsung Electronics Co., Ltd. | ANGLE ((Samsung Xclipse 940) on Vulkan 1.3.304) | OpenGL ES 3.2
 Driver version: 25.6.4 …` plus the build fingerprint.
 
@@ -277,7 +277,7 @@ evidence covers each step, but not as one offline run of exercise 87:
   also gave 19 bars.
 - **Practice steps on exercise 87:**
   - The user played it at 96 and 50 bpm with the bundled sax and heard the same pitch (12.2).
-  - Count-in, looping bars 9–12 and tap-seek pass in `PracticeControlsTest` on the S24, and the
+  - Count-in, looping bars 9–12 and tap-seek pass in `PracticeControlsTest` on a Galaxy S24, and the
     user heard no gap at the loop wrap (12.5).
 - **Permissions:** the merged manifests have no `INTERNET` permission.
 

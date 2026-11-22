@@ -38,7 +38,7 @@ See proposal.md (Why) for the motivation. The requirements are in `specs/test-su
 - **Settings:** the default instrument and the pitch reference.
 
 **Goals:**
-- A task that changes app logic or UI is verified on the Mac, in seconds (quick) or minutes (mac).
+- A task that changes app logic or UI is verified on a Mac, in seconds (quick) or minutes (mac).
 - Tests do not slow the redesign. Logic lives in pure modules with node tests. Each screen has at most one journey test, which the change that redesigns the screen updates.
 - The setup is small: two toolchains that already exist (npm, Gradle) plus Playwright.
 
@@ -55,7 +55,7 @@ See proposal.md (Why) for the motivation. The requirements are in `specs/test-su
 |---|---|---|---|
 | quick | `make test-quick` | `npm test` (web units) and `./gradlew :app:testDebugUnitTest` (Kotlin JVM) | ≤ 30 s warm |
 | mac | `make test-mac` | quick, then `npm run test:ui` (Playwright) | ≤ 3 min warm |
-| device | `make test-device` (`DEVICE=phone` for the S24) | the smoke test on the emulator | before archive |
+| device | `make test-device` (`DEVICE=phone` for a Galaxy S24) | the smoke test on the emulator | before archive |
 
 Each target prints its duration.
 
@@ -99,7 +99,7 @@ The JVM tests take over `ExerciseStoreTest` (lifecycle, invalid ids, failed crea
 
 **A phone-shaped context.**
 - Headless Chromium with `--autoplay-policy=no-user-gesture-required`.
-- A fresh context per test: 384×832 (the S24's CSS size), with `hasTouch` and `isMobile`.
+- A fresh context per test: 384×832 (a Galaxy S24's CSS size), with `hasTouch` and `isMobile`.
 - Taps use `page.touchscreen.tap`.
 
 **The fake bridge** (`test/ui/fakeBridge.ts`, injected with `addInitScript`):
@@ -128,7 +128,7 @@ The detailed rules sit in node unit tests, where they are faster and survive any
 
 **Design review against Figma.** Figma is the design to aim for, not a specification. The goal is to look as close to it as sensible. A deliberate deviation, such as a choice that does not work in practice, is fine when it is written down. So the comparison is by eye and never a gate. A pixel diff would mostly report noise (fonts, real score engraving, live data).
 - **Reference frames.** When a change implements a screen, it exports that screen's Figma frame as a PNG into `docs/design/figma/<frame-name>.png` and records the frame's node id in `docs/design/figma/frames.json`. Figma is still changing, so the PNG holds the design that change built against: the fallback you asked for.
-- **App screenshots at the frame's size.** A journey step can name a frame: `review(page, '02.1 · Play along — Portrait')`. The page is then also screenshotted at that frame's size (400×900 portrait, 900×400 landscape) into `build/ui-review/`. Journeys run at the S24's 384×832 as usual.
+- **App screenshots at the frame's size.** A journey step can name a frame: `review(page, '02.1 · Play along — Portrait')`. The page is then also screenshotted at that frame's size (400×900 portrait, 900×400 landscape) into `build/ui-review/`. Journeys run at a Galaxy S24's 384×832 as usual.
 - **`make ui-review`** writes `build/ui-review/index.html`. It shows each app screenshot next to its Figma frame, with an overlay toggle (Figma at 50% opacity over the app) and the deviation notes for that frame. It runs after `make test-mac` and fails on nothing.
 - **Deviation notes.** These live in `docs/design/deviations.md`, one line per frame: what differs and why ("bar numbers shown above the staff, not inside it: Verovio's layout"). The review page shows them, so a known deviation is not mistaken for a new one.
 
@@ -177,14 +177,14 @@ It checks that each step completes. It asserts no music comparison, no accelerat
 
 ### T7b. The device layer runs on the emulator
 
-**The emulator is enough.** The Mac is Apple Silicon, so the arm64-only APK (Chaquopy) runs natively in an arm64 emulator. The AVD `ia_test_api36` already exists: Android 36.1, Google Play image, 4 GB RAM. The smoke test needs none of what the emulator lacks:
+**The emulator is enough.** A Mac is Apple Silicon, so the arm64-only APK (Chaquopy) runs natively in an arm64 emulator. The AVD `ia_test_api36` already exists: Android 36.1, Google Play image, 4 GB RAM. The smoke test needs none of what the emulator lacks:
 - it uses the debug test-image entry, not the camera or the scanner;
 - without OpenCL the GPU self-test picks the CPU, and the smoke test does not care which one runs;
-- CPU recognition took 15–30 s and peaked at 1.3 GB on the S24, which fits the AVD.
+- CPU recognition took 15–30 s and peaked at 1.3 GB on a Galaxy S24, which fits the AVD.
 
 **What `make test-device` does:**
 1. Builds the debug and test APKs.
-2. Stops the Gradle daemon (`./gradlew --stop`). The Mac has 8 GB, and the daemon's 4 GB heap plus the 4 GB AVD would not fit together.
+2. Stops the Gradle daemon (`./gradlew --stop`). On a Mac with 8 GB, the daemon's 4 GB heap plus the 4 GB AVD would not fit together.
 3. Boots the AVD headless (`-no-window -no-boot-anim`) from a saved snapshot, with audio left on so `AudioContext` works.
 4. Waits for `sys.boot_completed`.
 5. Installs the APKs and runs the test with `adb shell am instrument`.
@@ -192,7 +192,7 @@ It checks that each step completes. It asserts no music comparison, no accelerat
 
 With `DEVICE=phone`, it skips the emulator steps and uses the connected S24.
 
-**The S24 is for the few things an emulator cannot show.** These are checked by hand, only when a change touches them:
+**A Galaxy S24 is for the few things an emulator cannot show.** These are checked by hand, only when a change touches them:
 - the camera and the ML Kit scanner (the multi-page capture in the Figma design is one);
 - GPU speed;
 - how sound and the screen feel on the real phone.
@@ -222,7 +222,7 @@ Add to `openspec/config.yaml`:
   - a new or redesigned screen updates or adds its journey test;
   - a UI task names its Figma frame and is checked by eye in `make ui-review`; each deviation is recorded in `docs/design/deviations.md` with its reason;
   - by-ear and by-eye checks are named as manual;
-  - the device smoke test runs once, before archive, on the emulator; a manual check on the S24 is named only for the camera, the scanner, GPU speed, or by-ear and by-eye checks on the real phone.
+  - the device smoke test runs once, before archive, on the emulator; a manual check on a Galaxy S24 is named only for the camera, the scanner, GPU speed, or by-ear and by-eye checks on the real phone.
 - `rules.design`:
   - a design for UI work lists the Figma frames it implements and any deviation it plans, with the reason;
   - a new bridge message comes with its contract example;
@@ -231,7 +231,7 @@ Add to `openspec/config.yaml`:
 
 ## Risks / Trade-offs
 
-- **[The app does not run on the emulator: a native crash in the GPU delegate without OpenCL, or a WebView or audio problem in headless mode]** → task 6.1 checks this first. A GPU crash is fixed in the app, because the self-test should fall back on a phone without OpenCL too. If the emulator cannot work, `make test-device` falls back to the S24 and the smoke test stays once per change.
+- **[The app does not run on the emulator: a native crash in the GPU delegate without OpenCL, or a WebView or audio problem in headless mode]** → task 6.1 checks this first. A GPU crash is fixed in the app, because the self-test should fall back on a phone without OpenCL too. If the emulator cannot work, `make test-device` falls back to a Galaxy S24 and the smoke test stays once per change.
 - **[8 GB of RAM]** → the device target stops the Gradle daemon first. If the AVD still swaps, its RAM drops to 3 GB, since recognition peaks at 1.3 GB.
 - **[Desktop Chromium differs from the Android WebView]** → the UI tests check behaviour and the DOM. The smoke test runs the real WebView once per change. A WebView-only problem gets a narrow phone test when it is found.
 - **[The fake bridge drifts from the host]** → the contract (T5) is checked from both sides in the quick layer.

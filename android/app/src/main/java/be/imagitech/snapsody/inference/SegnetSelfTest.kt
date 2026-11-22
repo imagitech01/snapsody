@@ -58,7 +58,7 @@ fun interface SelfTest {
  *
  * segnet runs on the bundled self-engraved reference tile (tools/models/make_selftest_tile.py)
  * on the CPU and on the GPU: one warm-up, then [RUNS] timed runs each. The GPU is chosen only
- * if its classes agree with the bundled CPU reference (LiteRT on the Mac's CPU) on at least
+ * if its classes agree with the bundled CPU reference (LiteRT on a Mac's CPU) on at least
  * [GPU_MIN_AGREEMENT] of the symbol pixels and its median time is lower than the CPU's.
  * Otherwise, including any GPU error, the CPU is chosen. The interpreter not chosen is closed
  * to save memory.

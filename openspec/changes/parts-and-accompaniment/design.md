@@ -15,7 +15,7 @@ See proposal.md for why. Today:
 - **Playback** plays one instrument per session (`practiceSession.ts`, `backend(instrument)`). The timeline is one list of events in time order, and legato, ties and the cursor assume that consecutive events are consecutive notes.
 - **Page layout:** `addMusic.ts` keeps homr's staff boxes per page, with bar ranges, to show the photo of a line in the editor.
 - **Evidence:**
-  - The local prototype (`prototype/`, untracked) reads photos with homr 0.7.1 on the Mac and draws every part with Verovio. On one melody-and-piano book page, all 294 notes were read correctly, chords and second voices included.
+  - The local prototype (`prototype/`, untracked) reads photos with homr 0.7.1 on a Mac and draws every part with Verovio. On one melody-and-piano book page, all 294 notes were read correctly, chords and second voices included.
   - Real phone photos of piano pages and the reading time on a real phone are still untested (task group 1).
 - **Mock:** an interactive mock of the practice screen (shared privately in the explore session) shows the agreed look: the "your part" card, the hint, and the Practice tools rows.
 

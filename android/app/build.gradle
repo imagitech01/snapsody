@@ -156,11 +156,8 @@ chaquopy {
 def modelManifest = new File(modelAssets, 'models/models.json')
 def checkModelAssets = tasks.register('checkModelAssets') {
     doLast {
-        def howTo = "Build and package the models first:\n" +
-            "  .venv-convert/bin/python -I tools/models/build_segnet.py --onnx <homr segnet fp16 onnx>\n" +
-            "  .venv-convert/bin/python -I tools/models/make_selftest_tile.py\n" +
-            "  python3 tools/models/package_models.py\n" +
-            "or point at packaged models elsewhere with -Pia.modelAssets=<dir>."
+        def howTo = "Build and package the models first: run `make models` in the repository root (needs Python 3.12,\n" +
+            "see the README), or point at packaged models elsewhere with -Pia.modelAssets=<dir>."
         if (!modelManifest.exists()) throw new GradleException("Missing ${modelManifest}. ${howTo}")
         def text = modelManifest.text
         ['segnet', 'encoder', 'decoder', 'selftest_tile', 'selftest_reference'].each { role ->

@@ -1,4 +1,4 @@
-"""Checks homr's model-backend patch on the Mac (vendor/homr/_backend.py).
+"""Checks homr's model-backend patch on a Mac (vendor/homr/_backend.py).
 
 Registers a backend built from onnxruntime (segnet argmax, encoder, and the replica
 decoder loop that returns token ids, like the Kotlin InferenceService) and checks that

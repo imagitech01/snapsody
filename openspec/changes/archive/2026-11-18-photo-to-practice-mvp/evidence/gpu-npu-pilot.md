@@ -20,7 +20,7 @@
 
 **What this says about the NPU:** we never reached it. Through NNAPI, Samsung's ENN driver placed the whole graph on its own GPU user driver (logcat: 27× `GpuUserDriver::ExecuteSubGraph`, no NPU driver activity). On this phone, NNAPI is not a route to the NPU for this model, and NNAPI is deprecated anyway. Samsung's own NPU SDK is the only other route, and it isn't worth pursuing given the GPU result.
 
-Reference: the Mac (Apple Silicon, CPU, 4 threads) does ~70 ms/tile.
+Reference: a Mac (Apple Silicon, CPU, 4 threads) does ~70 ms/tile.
 
 ## What happened on the NNAPI/ENN path
 

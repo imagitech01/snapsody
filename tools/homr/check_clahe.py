@@ -1,6 +1,6 @@
 """Check vendor/homr/clahe.py against the installed OpenCV's CLAHE.
 
-Run it with an OpenCV 4.14 environment (the version that produced the Mac
+Run it with an OpenCV 4.14 environment (the version that produced the
 reference): every case must match bit for bit. With older OpenCV builds a small
 number of x.5-tie pixels is expected to differ, which is why the patch exists.
 

@@ -123,7 +123,7 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`) and **mac** (`
   - the launcher shows the new icon and the splash uses the new ground.
 
   Verify: device, the smoke test passes and the screenshots are saved with the change.
-- [x] 8.2 On the S24: Home, Practice, the editor and About in the new look, and the new icon on the home screen. Check Public Sans, the status bar icons over the new ground, and the playing bar's blue in daylight. Verify: manual by eye on the real phone (the user).
+- [x] 8.2 On a Galaxy S24: Home, Practice, the editor and About in the new look, and the new icon on the home screen. Check Public Sans, the status bar icons over the new ground, and the playing bar's blue in daylight. Verify: manual by eye on the real phone (the user).
 
 ## Workflow follow-up
 

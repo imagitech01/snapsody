@@ -1,6 +1,6 @@
-# Manual checks on the S24 (task 16.2)
+# Manual checks on a Galaxy S24 (task 16.2)
 
-Done by the user on 18 Nov 2026 on the Galaxy S24 (SM-S921B), with the release candidate of the app
+Done by the user on 18 Nov 2026 on a Galaxy S24 (SM-S921B), with the release candidate of the app
 (`app.snapsody`, the build of commit 22c3db1). Reported as "everything works".
 
 | Check | Result |

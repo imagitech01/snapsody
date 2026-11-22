@@ -5,7 +5,7 @@
 There is no code yet; this is the project's first change (see proposal.md, Why). Three spikes in `spike/` shape the design:
 
 - **homr 0.7.1** (Python + OpenCV + 3 ONNX models, ~120 MB, AGPL-3.0) read exercise 87 perfectly on a Mac in ~20 s. About half of that is segnet, the page-segmentation model, run on 320×320 tiles. The rest is the transformer encoder and decoder, plus Python pre- and post-processing.
-- **On the Galaxy S24 (Exynos 2400, Android 17),** segnet converted to TFLite runs correctly on the GPU through the LiteRT GPU delegate at ~21–26 ms per tile, against ~120–180 ms on the CPU. NNAPI/ENN does not reach the NPU and gives wrong results (`spike/npu/results.md`).
+- **On a Galaxy S24 (Exynos 2400, Android 17),** segnet converted to TFLite runs correctly on the GPU through the LiteRT GPU delegate at ~21–26 ms per tile, against ~120–180 ms on the CPU. NNAPI/ENN does not reach the NPU and gives wrong results (`spike/npu/results.md`).
 - **Claude's artifact** used pre-rendered MP3s at two fixed tempos and a hand-coded score, so nothing in it can be reused, but it set the UX bar: score, moving cursor, tempo choice, count-in, tap to seek.
 
 Constraints: Android first and only for now, personal use, free and open source, fully offline, and the UI should stay portable to iOS later.
@@ -43,7 +43,7 @@ homr's Python code (pinned to 0.7.1, vendored with a small patch set) runs insid
 - **encoder and decoder:** ONNX Runtime for Android on the CPU, using homr's existing ONNX files. The encoder may move to the GPU later if profiling shows it is worth it.
 - **The decoder loop runs entirely in Kotlin.** homr's decoder is called once per output token with 32 growing key/value cache tensors. Crossing the Python–Java bridge per token would copy that cache hundreds of times per staff. Python passes the encoder output once per staff; Kotlin runs the full autoregressive loop (cache kept native) and returns the token sequence; Python continues with homr's post-processing.
 - Title detection (RapidOCR) and PDF input are disabled.
-- **Python versions:** Chaquopy's package index has OpenCV only for Python 3.8/3.10 (4.5.1) and numpy up to 1.26.2, while homr 0.7.1 declares Python ≥3.11, numpy ≥2.4 and OpenCV ≥4.13. A scan of homr shows no 3.11-only syntax and only basic numpy calls, so the plan is **Python 3.10 + numpy 1.26.2 + OpenCV 4.5.1 with homr's pins relaxed**, proven first on the Mac with the closest installable versions (MusicXML identical to the reference for exercise 87). Byte-identity for the whole page is not required: OpenCV's float results differ between releases and even between builds, so other exercises on the page may differ slightly (see `docs/gate-results.md` and `vendor/PATCHES.md`). If that fails, in order:
+- **Python versions:** Chaquopy's package index has OpenCV only for Python 3.8/3.10 (4.5.1) and numpy up to 1.26.2, while homr 0.7.1 declares Python ≥3.11, numpy ≥2.4 and OpenCV ≥4.13. A scan of homr shows no 3.11-only syntax and only basic numpy calls, so the plan is **Python 3.10 + numpy 1.26.2 + OpenCV 4.5.1 with homr's pins relaxed**, proven first on a Mac with the closest installable versions (MusicXML identical to the reference for exercise 87). Byte-identity for the whole page is not required: OpenCV's float results differ between releases and even between builds, so other exercises on the page may differ slightly (see `docs/gate-results.md` and `vendor/PATCHES.md`). If that fails, in order:
   1. Patch the specific incompatibilities in the vendored homr.
   2. Build newer OpenCV/numpy wheels for Android ourselves (Chaquopy's wheel-build tooling, or PEP 738 Android wheels on Python 3.13+).
   3. Port homr's image processing to Kotlin with the official OpenCV Android SDK.
@@ -56,7 +56,7 @@ On first launch, and whenever the app version, a model hash or the GPU driver st
 - symbol-pixel agreement is at least 99.5% (the pilot measured 99.92%), and
 - its median over 5 runs is faster than the CPU.
 
-The tile is the densest one on the engraved page that contains stems/rests, noteheads, clefs/keys and staff lines. Segnet's fifth class (other symbols) barely occurs on Verovio's engraving, so the tile cannot cover it. The "GPU driver string" is GL_VENDOR, GL_RENDERER and GL_VERSION (which carries the driver version), plus the build fingerprint, because the OpenCL driver the delegate uses is updated with the system. The result is stored, and the GPU delegate's compiled-kernel cache (in `codeCacheDir`) is enabled to avoid the GPU initialisation on later launches (measured on the S24: about 1.6 s without the cache, 0.17 s with it). Any GPU error during recognition falls back to the CPU for that run and marks the GPU as failed until the next self-test. (score-recognition, "Accelerated with safe fallback")
+The tile is the densest one on the engraved page that contains stems/rests, noteheads, clefs/keys and staff lines. Segnet's fifth class (other symbols) barely occurs on Verovio's engraving, so the tile cannot cover it. The "GPU driver string" is GL_VENDOR, GL_RENDERER and GL_VERSION (which carries the driver version), plus the build fingerprint, because the OpenCL driver the delegate uses is updated with the system. The result is stored, and the GPU delegate's compiled-kernel cache (in `codeCacheDir`) is enabled to avoid the GPU initialisation on later launches (measured on a Galaxy S24: about 1.6 s without the cache, 0.17 s with it). Any GPU error during recognition falls back to the CPU for that run and marks the GPU as failed until the next self-test. (score-recognition, "Accelerated with safe fallback")
 - *Alternatives:* a per-device allowlist (doesn't scale, and the Exynos and Snapdragon variants of the same S24 already differ); always-CPU (5–7× slower segmentation).
 
 ### D5. Recognition runs as a cancellable background job
@@ -109,8 +109,8 @@ App-private storage holds one folder per exercise with:
 The web layer reads and writes through the bridge. Deleting an exercise removes its folder.
 
 ### D11. Feasibility gate (first milestone)
-The gate passes when, on the S24:
-- recognition on the phone is faithful to homr on the Mac: bars 1–19 match in pitch, duration, tuplets, slurs and staccato, both for the full reference photo (vs `page.musicxml`) and for the exercise-87 crop (vs the Mac's output for the same crop). homr itself reads a crop slightly differently from the full page (on the Mac as well); those differences are recorded, not counted against the port,
+The gate passes when, on a Galaxy S24:
+- recognition on the phone is faithful to homr on a Mac: bars 1–19 match in pitch, duration, tuplets, slurs and staccato, both for the full reference photo (vs `page.musicxml`) and for the exercise-87 crop (vs a Mac's output for the same crop). homr itself reads a crop slightly differently from the full page (on a Mac as well); those differences are recorded, not counted against the port,
 - total recognition time is **at most 30 s (target) and must not exceed 60 s**, and
 - the app is not killed for memory.
 
@@ -121,7 +121,7 @@ Photos of the method book and outputs derived from them (`page.musicxml`, `tile.
 
 ## Risks / Trade-offs
 
-- [Chaquopy has no OpenCV/numpy builds matching homr's declared versions (verified on chaquo.com/pypi-13.1)] → Python 3.10 + numpy 1.26 + OpenCV 4.5.1 with relaxed pins, proven on the Mac first; ordered fallbacks in D3. This is gate task 3.1, because everything in group 3 depends on it.
+- [Chaquopy has no OpenCV/numpy builds matching homr's declared versions (verified on chaquo.com/pypi-13.1)] → Python 3.10 + numpy 1.26 + OpenCV 4.5.1 with relaxed pins, proven on a Mac first; ordered fallbacks in D3. This is gate task 3.1, because everything in group 3 depends on it.
 - [Python pre/post-processing may be slow on the phone (dewarping, staff detection)] → The gate measures it. Cropping to one exercise cuts the work; port hotspots to Kotlin only if measured.
 - [Sample quality may disappoint, especially legato] → Listening test before committing (D9); recording your own sax as the fallback; legato crossfade parameters tunable.
 - [WebView audio latency varies across devices] → Cursor compensates with `outputLatency`; start latency is acceptable for practice.

@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -35,7 +36,7 @@ import onnxruntime as ort
 from onnx import TensorProto, helper, numpy_helper
 
 # homr 0.7.1 segnet_308 (fp16). The build refuses any other input.
-SEGNET_FP16_SHA256 = "60f495496cb41473c0521d0811d8f44b9d5cff892d287974a8aebb3eaee2fa83"
+SEGNET_FP16_SHA256 = json.loads((Path(__file__).parent / "pinned_hashes.json").read_text())["segnet_fp16"]
 OUTPUT_NAME = "segnet_fp32_b1.tflite"
 TILE = 320
 F16, F32 = TensorProto.FLOAT16, TensorProto.FLOAT

@@ -13,7 +13,7 @@ Snapsody, `app.snapsody` (design D5).
 | 1.2 Gradle setup: Chaquopy, homr sync, LiteRT, ONNX Runtime, noCompress, models | **pass** |
 | 1.3 Reader plugin: list of pages as one job, progress, app switch | **pass**; needs the `mediaProcessing` service type for long queues |
 | 1.4 Web platform: wasm, Verovio, sampler, Filesystem across a restart | **pass** (see the note on `instantiateStreaming`) |
-| 1.5 Scanner plugin | **pass** on the S24 (2 pages, 2 file paths); also opened and returned 2 pages on the emulator |
+| 1.5 Scanner plugin | **pass** on a Galaxy S24 (2 pages, 2 file paths); also opened and returned 2 pages on the emulator |
 | 1.6 Gate decision | left for the user |
 
 **Recommendation:** Capacitor. Every point D1 asks the spike to show works on the emulator. The
@@ -136,7 +136,7 @@ The code is in `spike/capacitor/android/app/src/main/java/app/scoremate/reader/`
 
 ### Expected output (added: there was no committed expected output for engraved pages)
 
-- `spike/capacitor/tools/expected_musicxml.py` runs in `.venv-py310` on the Mac (OpenCV 4.5.4, the
+- `spike/capacitor/tools/expected_musicxml.py` runs in `.venv-py310` on a Mac (OpenCV 4.5.4, the
   closest to Chaquopy's 4.5.1). It writes `fixtures/expected/page-{1,2,3}.musicxml`.
   - It follows the job's steps: `ia_engine.pad_for_recognition`, then homr with the app's
     `ProcessingConfig`, on the CPU.
@@ -170,8 +170,8 @@ Job `57b0cef0…`, `mediaProcessing`, started from the spike page.
 | 3 | no | **yes** | 8/8 | 9 of 45, up to 3 px |
 
 The only differing line in each file is the one carrying the `imgpos` comments. This is the same
-class of difference the gate saw between the Mac and the phone: LiteRT segnet and OpenCV 4.5.1 on
-the device, against ONNX Runtime and OpenCV 4.5.4 on the Mac.
+class of difference the gate saw between a Mac and the phone: LiteRT segnet and OpenCV 4.5.1 on
+the device, against ONNX Runtime and OpenCV 4.5.4 on a Mac.
 
 **Also checked:**
 - The two pages from the emulator scan (1.5 below) went through the Reader. Each gave
@@ -194,7 +194,7 @@ the device, against ONNX Runtime and OpenCV 4.5.4 on the Mac.
 
   - The limit is a hard 180 s from `startForeground`, and it is not extendable from the background.
     It counts the whole job, so the limit is the queue's total time, not the time per page.
-  - On the S24 CPU a full page takes about 28 s, so about 6 pages fit, and 10 pages (about 280 s) do
+  - On a Galaxy S24 CPU a full page takes about 28 s, so about 6 pages fit, and 10 pages (about 280 s) do
     not. On the GPU (about 12 s per page) 10 pages fit, but the CPU is the fallback.
   - The emulator's engraved pages are smaller and quicker (7–18 s), which is why run 2 (15 pages,
     `shortService`, 147.7 s) still finished.
@@ -280,10 +280,10 @@ cropped them in its own UI, and tapped Done:
 14:14:13.067 Capacitor/Console: [spike] scanner: PASS 2 pages: …/page-1.jpg 3721x349, …/page-2.jpg 3625x392
 ```
 
-The same launch also logged `instantiateStreaming: PASS` and `verovio: PASS` on the S24.
+The same launch also logged `instantiateStreaming: PASS` and `verovio: PASS` on a Galaxy S24.
 
-**How to run the 1.5 check on the S24:**
-1. Connect the S24 and run `cd spike/capacitor && npm ci && npm run build:www && npx cap sync android`.
+**How to run the 1.5 check on a Galaxy S24:**
+1. Connect a Galaxy S24 and run `cd spike/capacitor && npm ci && npm run build:www && npx cap sync android`.
 2. Run `cd android && ./gradlew assembleDebug && adb -d install -r app/build/outputs/apk/debug/app-debug.apk`.
 3. Open the check page: `adb -d shell am start -n app.scoremate/.MainActivity --es page spike/index.html`,
    and watch `adb -d logcat -s Capacitor/Console:* ScannerPlugin:*`.
@@ -344,7 +344,7 @@ history; the last commit that has them is `e2622f5`.
 
 ## 1.6 Gate decision
 
-**Capacitor**, agreed with the user on 18 Nov 2026 after the S24 scanner check. The fallback (our own
+**Capacitor**, agreed with the user on 18 Nov 2026 after a Galaxy S24 scanner check. The fallback (our own
 slimmed-down host behind the same port) is not needed. The toolchain for `android/` in 10.1 is the
 one above: Capacitor 8.6.2, AGP 8.13.2, Gradle 8.14.3, Chaquopy 17.2.0, compileSdk 36. The Reader
 uses the `mediaProcessing` foreground service type.

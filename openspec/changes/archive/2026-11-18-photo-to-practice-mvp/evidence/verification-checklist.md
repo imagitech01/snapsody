@@ -27,7 +27,7 @@ selection" and "Retake photo". Since group 6, "Adjust selection" returns to regi
 with the same page and "Retake photo" opens the scanner again.
 
 ### 5.4 Airplane mode: done
-The user ran recognition on the S24 in airplane mode on 2026-11-17, from the debug
+The user ran recognition on a Galaxy S24 in airplane mode on 2026-11-17, from the debug
 test-image entry, because capture does not exist yet. Both runs completed (logcat 22:01).
 The full offline run, from photo to playback, is task 14.1.
 
@@ -51,7 +51,7 @@ The full offline run, from photo to playback, is task 14.1.
 
 ## Group 9: score rendering (done, 2026-11-17, S24)
 
-`ScoreRenderTest` passes on the S24:
+`ScoreRenderTest` passes on a Galaxy S24:
 - **Rendering:** exercise 87 renders as one page, 328 px wide. It shows 127 notes, none
   unmapped, the clef, key, 3/4, 36 triplets with their "3", slurs and staccato.
 - **Speed:** the first render takes 460 ms, including loading Verovio; a re-render takes
@@ -63,39 +63,39 @@ The screenshot looks right: clef, G major, 3/4, *mf*, triplet brackets, staccato
 
 **Open, cosmetic:**
 - ~~Eighth notes are flagged, not beamed~~: fixed on 2026-11-18, at the user's request (task
-  9.3). Beams are computed by beat when the score is drawn (`web/src/score/beams.ts`). On the S24,
+  9.3). Beams are computed by beat when the score is drawn (`web/src/score/beams.ts`). On a Galaxy S24,
   exercise 87 shows 36 beamed triplet groups, and `ScoreRenderTest` and `EditingTest` still pass.
 - The slurs look shorter than printed, because homr places some slur ends where no slur
   started.
 
 ## Group 10: playback engine
 
-Unit tests cover 10.1–10.3 and 10.5 (74 web tests pass). On the S24:
+Unit tests cover 10.1–10.3 and 10.5 (74 web tests pass). On a Galaxy S24:
 - Play starts a Web Audio player (`dumpsys audio`).
 - After about 4 s the cursor highlight is at the end of bar 2.
 
-**10.4: done (2026-11-18).** The user checked on the S24 that the highlight keeps step with the
+**10.4: done (2026-11-18).** The user checked on a Galaxy S24 that the highlight keeps step with the
 heard notes and scrolls between lines: "yeah, pretty good".
 
 ## Group 12: practice controls
 
-12.1, 12.3, 12.4 and 12.6 are done: unit tests, plus `PracticeControlsTest` on the S24.
+12.1, 12.3, 12.4 and 12.6 are done: unit tests, plus `PracticeControlsTest` on a Galaxy S24.
 - 12.1: pause in bar 5 resumes at the paused note.
 - 12.3: the tempo is restored after reopening and after an activity restart.
 - 12.4: the count-in shows 1-2-3 with 3 clicks.
 - 12.6: tapping bar 9 while stopped, and bar 3 while playing, works.
 
 **By ear (person):**
-- **12.2: done (2026-11-18).** The user heard the same pitch at 50 and 96 bpm on the S24. A tempo
+- **12.2: done (2026-11-18).** The user heard the same pitch at 50 and 96 bpm on a Galaxy S24. A tempo
   change in bar 6 continuing from bar 6 was already checked on the device.
-- **12.5: done (2026-11-18).** The user listened to the loop on the S24: "there is no gap in the
+- **12.5: done (2026-11-18).** The user listened to the loop on a Galaxy S24: "there is no gap in the
   loop". The scheduling is exact in the unit tests.
 - **Count-in click:** judge its sound. It is a 1760 Hz accent and 1175 Hz other beats,
   `CLICK` in `web/src/playback/webaudio.ts`.
 
 ## User test, 2026-11-17 (build 87ddd9e)
 
-The user tried the app on the S24: "stuff works great".
+The user tried the app on a Galaxy S24: "stuff works great".
 - **Small crackle in the audio** with the synthesised placeholder samples. Check again with the
   FreePats tenor-sax set (11.4). If it remains, look at the loop seams and the crossfade or
   release ramps in `web/src/playback/webaudio.ts` (`PLAYBACK_TUNING`).
@@ -107,7 +107,7 @@ The user tried the app on the S24: "stuff works great".
     sounding alteration.
   - "Moderato" gives a default of 108.
   - Lengthening a quarter to a half flags a full 3/4 bar, and editing continues.
-- `EditingTest` passes on the S24, with real taps:
+- `EditingTest` passes on a Galaxy S24, with real taps:
   - **13.1:** two injected flags are marked, and Next/Previous move through them.
   - **13.2:** the first note of bar 5, stepped to C5 and then down once, is B4 in
     `current.musicxml`, drawn on the middle line, and the panel reads "Bar 5: B4"
@@ -126,7 +126,7 @@ The user tried the app on the S24: "stuff works great".
   now shows the flag of the selected note's bar, and beats read as "2⅔", not "8/3".
 
 ## 11.4 Bundled sound (done, 2026-11-18)
-The mf layer is bundled. On the S24 the user judged that slurred notes connect, staccato notes are
+The mf layer is bundled. On a Galaxy S24 the user judged that slurred notes connect, staccato notes are
 clearly short, and the sax has no crackle (the crackle was only in the synth placeholder). No
 change to `PLAYBACK_TUNING` was needed.
 
@@ -137,7 +137,7 @@ change to `PLAYBACK_TUNING` was needed.
 2. Make sure exercise 87 is in the library.
 3. Library → "Developer (debug build)" → "Listening page (sample sets)".
 4. Tap "Check that every file decodes". Expect "all 33 files decode" for each set.
-   `ListeningTest` already passed on the S24 on 2026-11-18, with both FreePats sets packaged:
+   `ListeningTest` already passed on a Galaxy S24 on 2026-11-18, with both FreePats sets packaged:
    Ogg/Opus decodes in the WebView, 33 samples per set.
 5. For each set, listen to "Play at 96" and "Play at 50". Tap "Choose this sound" on the
    winner, then tell me the choice so it can be recorded in `docs/samples.md`.

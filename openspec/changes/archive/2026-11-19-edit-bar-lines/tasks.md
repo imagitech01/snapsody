@@ -30,7 +30,7 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **mac** (`mak
 ## 4. Spec and integration
 
 - [x] 4.1 Run `make test-mac` and `openspec validate edit-bar-lines --strict`. Verify: both are green.
-- [x] 4.2 By ear on the Mac: play exercise 82 after adding `||:` to bar 3, and hear bar 3 repeat, not the half G. Verify: manual by ear in `npm run dev` with the exercise's MusicXML.
+- [x] 4.2 By ear on a Mac: play exercise 82 after adding `||:` to bar 3, and hear bar 3 repeat, not the half G. Verify: manual by ear in `npm run dev` with the exercise's MusicXML.
 
 ## Workflow follow-up
 

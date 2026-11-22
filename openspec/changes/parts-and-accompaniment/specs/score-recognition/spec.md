@@ -45,7 +45,7 @@ The recognised score SHALL include, where printed: parts, the staves of a grand 
 
 #### Scenario: Exercise 87 reference
 - **WHEN** the reference photo of exercise 87 (`20261111_1701026728888866947001497.jpg`, kept in the local-only fixtures folder) is cropped to exercise 87 and recognised on the phone
-- **THEN** the score has G major, 3/4, *mf* and 19 bars, and its pitches, durations, triplets, slurs and staccato in bars 1–19 match homr 0.7.1's output on the Mac for the same image, including a dotted half note G in bar 19
+- **THEN** the score has G major, 3/4, *mf* and 19 bars, and its pitches, durations, triplets, slurs and staccato in bars 1–19 match homr 0.7.1's output on a Mac for the same image, including a dotted half note G in bar 19
 
 #### Scenario: Tempo marking not read
 - **WHEN** an exercise printed with "Moderato" is recognised
@@ -68,7 +68,7 @@ The recognised score SHALL include, where printed: parts, the staves of a grand 
 - **THEN** the note is kept without it, and the reading reports that the mark was dropped
 
 #### Scenario: Melody and piano reference
-- **WHEN** a clean engraved page with a melody part and a piano grand staff is read on the Mac with homr 0.7.1
+- **WHEN** a clean engraved page with a melody part and a piano grand staff is read on a Mac with homr 0.7.1
 - **THEN** the piece has two parts, the piano part has two staves, and every note homr read for both parts, chords and second voices included, is in the piece
 
 ### Requirement: Range check

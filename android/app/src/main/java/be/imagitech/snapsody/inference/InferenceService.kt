@@ -300,7 +300,7 @@ class InferenceService(context: Context, private val threads: Int = 4) : Closeab
         return encode(FloatArray(floats.remaining()).also { floats.get(it) })
     }
 
-    /** Wraps a context computed elsewhere (tests: the Mac's encoder output). */
+    /** Wraps a context computed elsewhere (tests: a Mac's encoder output). */
     fun encodedFrom(context: FloatArray, shape: LongArray): EncodedStaff =
         EncodedStaff(OnnxTensor.createTensor(env, FloatBuffer.wrap(context), shape), 0)
 

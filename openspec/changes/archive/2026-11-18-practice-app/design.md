@@ -121,7 +121,7 @@ settings.json         { defaultInstrument, pitchReference, countIn, language | n
 
 ### D5. A fresh start: new application id, no migration
 
-- The first version has been uninstalled from the S24, so there is no data to carry over.
+- The first version has been uninstalled from a Galaxy S24, so there is no data to carry over.
 - The app gets a new application id and code namespace, `app.snapsody`. Nothing reads the old `exercises/` folders.
 - The app was first named Scoremate (`app.scoremate`). That name was already taken, so it became Snapsody before any release. An installed `app.scoremate` build is a separate app and can be uninstalled.
 - The `ExerciseStore` format (format 1) is not supported. Pieces start at format 2.
@@ -143,7 +143,7 @@ settings.json         { defaultInstrument, pitchReference, countIn, language | n
 - The editor's photo strip shows the box of the staff that holds the selected bar. When none is known, it shows the whole photo.
 - **The same patch says whether the time signature was read or estimated.** homr always writes a `<time>`: when the page has none printed, it writes n/4 from the median bar length, with no mark. Merged as is, a page 2 without a printed meter after a 6/8 page 1 becomes a time change to 3/4 at the page break (found in group 6). The Reader therefore returns `timeEstimated` per page next to the staff positions, outside the MusicXML, so the MusicXML stays byte-identical. `core/pages` treats an estimated time at a page start as absent: on a later page the time in force carries on, and on the first page the existing inference runs and is flagged as inferred.
 - **Verification (rule: recognition changes bring their own):**
-  - on the Mac, homr with the patch gives byte-identical MusicXML for the committed self-engraved page and for the local reference photos;
+  - on a Mac, homr with the patch gives byte-identical MusicXML for the committed self-engraved page and for the local reference photos;
   - the staff boxes and bar counts for the engraved page match its known layout;
   - one run on the emulator in the spike shows that the positions reach the web layer.
   - The test layers don't re-test this.
@@ -321,7 +321,7 @@ After trying the built app, the user asked for these changes before the archive:
 
 ### D18. A denser look, and the height for the score in landscape (user feedback, 18 Nov 2026)
 
-After the checks on the S24 the user said: "in general i notice app is large, large texts and a lot of space between everything. this takes away from the practice focus. also in landscape there is a lot of empty space with no use." The phone runs the WebView at **360 × 780** CSS px (480 dpi; `evidence/device-checks.md`), narrower than the 384 × 832 the mac journeys used, so the app looked bigger there than in the review. The frames' sizes are the other half: they are generous for a 400 px wide frame.
+After the checks on a Galaxy S24 the user said: "in general i notice app is large, large texts and a lot of space between everything. this takes away from the practice focus. also in landscape there is a lot of empty space with no use." The phone runs the WebView at **360 × 780** CSS px (480 dpi; `evidence/device-checks.md`), narrower than the 384 × 832 the mac journeys used, so the app looked bigger there than in the review. The frames' sizes are the other half: they are generous for a 400 px wide frame.
 
 - **Look at the user's phone.** The mac journeys and `make ui-review` render at 360 × 780 and 780 × 360. The Figma PNG stays next to each screen for comparison.
 - **Type, one step smaller per role.** The role classes and component rules change, not the meaning of the `--fs-N` tokens:
@@ -358,7 +358,7 @@ After the checks on the S24 the user said: "in general i notice app is large, la
 
 ### D19. A plain practice header and a shorter Settings screen (user feedback, 18 Nov 2026)
 
-After trying D18 on the S24 the user said "better", and asked for these changes:
+After trying D18 on a Galaxy S24 the user said "better", and asked for these changes:
 
 - **The practice header shows only the title.** "Bar 1 of 88" and "Following" go, in portrait and landscape. "Return to playing" stays, because it is the way back after scrolling away. The session still knows the bar and the follow state; only the header stops showing them.
 - **Settings: the default instrument and the language are one line each.** The line shows the current choice. Tapping it opens a sheet with the whole list as radio buttons. Picking one saves it at once and closes the sheet. Back or Close leaves the choice as it was.
@@ -386,7 +386,7 @@ After trying D18 on the S24 the user said "better", and asked for these changes:
 | A tie or slur across the page break is lost | Not detectable from separate pages. The user adds it in the editor (Marks: Tie). |
 | homr's bars per staff are off (merged or dropped measures) | The strip then shows the wrong staff, at worst a neighbouring one. When the counts don't add up to the page's bars, store no positions and show the whole photo. |
 | Warnings computed at load time make large pieces slower to open | Pieces are tens of bars, and the checks are linear in the notes. |
-| Self-built sheets and gestures feel clumsy | Keep them simple: a tap on the backdrop or Close dismisses, a drag only on the handle. Check by eye on the S24 at the end. |
+| Self-built sheets and gestures feel clumsy | Keep them simple: a tap on the backdrop or Close dismisses, a drag only on the handle. Check by eye on a Galaxy S24 at the end. |
 
 ## Migration Plan
 

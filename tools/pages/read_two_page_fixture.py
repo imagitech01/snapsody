@@ -1,4 +1,4 @@
-"""The raw page readings of the pages-merge fixture (openspec practice-app 6.3), made on the Mac.
+"""The raw page readings of the pages-merge fixture (openspec practice-app 6.3), made on a Mac.
 
 Reads web/test/fixtures/two-page/page-{1,2}.png (tools/pages/make_two_page_fixture.py) the way the
 app's job reads a page: the page gets the white recognition margin (ia_engine.pad_for_recognition),

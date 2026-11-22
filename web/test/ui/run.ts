@@ -12,5 +12,5 @@ function run(command: string, args: string[]): void {
 
 run('npx', ['vite', 'build', '--config', 'test/ui/vite.config.ts', '--outDir', BUILD_DIR, '--emptyOutDir', '--logLevel', 'warn'])
 const files = process.argv.slice(2)
-// One file at a time: each test file starts its own Chromium, and the Mac has 8 GB.
+// One file at a time: each test file starts its own Chromium, so an 8 GB machine keeps up.
 run(process.execPath, ['--test', '--test-concurrency=1', ...(files.length > 0 ? files : ['test/ui/*.test.ts'])])

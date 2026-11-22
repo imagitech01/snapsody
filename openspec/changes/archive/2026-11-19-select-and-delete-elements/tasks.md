@@ -33,7 +33,7 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **mac** (`mak
 ## 4. Integration
 
 - [x] 4.1 Run `make test-mac` and `openspec validate select-and-delete-elements --strict`. Verify: both are green.
-- [x] 4.2 On the S24, open exercise 91, delete the clef at bar 11, and play bars 10–14. Verify: manual by eye and by ear on the real phone. The notes stay in place in treble clef, and the passage sounds as in the book.
+- [x] 4.2 On a Galaxy S24, open exercise 91, delete the clef at bar 11, and play bars 10–14. Verify: manual by eye and by ear on the real phone. The notes stay in place in treble clef, and the passage sounds as in the book.
 
 ## Workflow follow-up
 

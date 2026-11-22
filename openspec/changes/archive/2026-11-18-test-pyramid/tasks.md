@@ -65,9 +65,9 @@ Each task deletes the phone tests it replaces in the same commit. Tests use role
 ## 6. Smoke test and cleanup
 
 - [x] 6.1 Check that the app runs on the emulator (design T7b). Boot `ia_test_api36` headless, install the debug APK, and run a recognition of the engraved page from the debug test-image entry. The self-test must pick the CPU without crashing, the exercise must render, and playback must start. If the GPU delegate crashes without OpenCL, fix the self-test to fall back. Verify: the run completes, and `docs/testing.md` records the boot time, the recognition time and the peak memory on the emulator.
-- [x] 6.2 Add `EndToEndSmokeTest` (design T7) and `make test-device` (design T7b: build, stop the Gradle daemon, boot from a snapshot, install, run, shut down; `DEVICE=phone` for the S24). Verify:
+- [x] 6.2 Add `EndToEndSmokeTest` (design T7) and `make test-device` (design T7b: build, stop the Gradle daemon, boot from a snapshot, install, run, shut down; `DEVICE=phone` for a Galaxy S24). Verify:
   - `make test-device` passes with no phone connected and leaves no emulator running;
-  - `make test-device DEVICE=phone` passes on the S24;
+  - `make test-device DEVICE=phone` passes on a Galaxy S24;
   - the time of a full `make test-device` run is recorded in `docs/testing.md`.
 - [x] 6.3 Delete the remaining instrumented tests (design T8): `AcceleratorSelfTestTest`, `AcceleratorSelectorTest`, `InferenceServiceTest`, `HomrBridgeTest`, `GpuFallbackTest`, `RecognitionTest`, `WebLayerTest` and `LibraryTest`. Also remove the code only those tests and the feasibility gate used: the debug `GateActivity` with its manifest entry, `ia_gate.py`, `ia_engine.segnet_bridge_agreement` and `transformer_bridge_symbols`, and the outputs of `tools/models/make_inference_fixtures.py` that only the deleted tests read (keep `engraved_page.png` for the smoke test). Verify: `androidTest` holds only the smoke test, `./gradlew assembleDebug` passes, `./gradlew compileDebugAndroidTestKotlin` passes, and the T8 table is copied into `docs/testing.md`.
 

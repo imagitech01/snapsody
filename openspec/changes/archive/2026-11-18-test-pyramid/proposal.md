@@ -2,16 +2,16 @@
 
 ## Why
 
-In the first change (photo-to-practice-mvp), most checks needed the Galaxy S24, which slowed development. That was right while recognition on the phone was the risk. It is not the risk any more: the feasibility gate and the end-to-end check proved that the models and recognition work on the S24.
+In the first change (photo-to-practice-mvp), most checks needed a Galaxy S24, which slowed development. That was right while recognition on the phone was the risk. It is not the risk any more: the feasibility gate and the end-to-end check proved that the models and recognition work on a Galaxy S24.
 
-The next changes are mostly app logic and UI. They need fast tests on the Mac. They do not need the model and recognition checks repeated on every change.
+The next changes are mostly app logic and UI. They need fast tests on a Mac. They do not need the model and recognition checks repeated on every change.
 
 ## What Changes
 
 - **Three layers, one command each:**
   - **quick:** unit tests in seconds, run on every edit. These are the existing web tests (`node --test`, 149 tests) and new plain-JVM Kotlin tests for the exercise store and the bridge handlers.
   - **mac:** the quick layer plus the built web app in headless desktop Chromium (Playwright), with a fake `window.nativeBridge` and a committed score. It has one journey test per main flow: practise, edit, scan, library. It also has a check that every bundled instrument sample decodes. This replaces the phone for UI flows.
-  - **device:** one end-to-end smoke test, run before a change is archived, not per task. It runs on the Android emulator on the Mac (headless, arm64), so the phone does not have to be at hand. The S24 is only for what an emulator cannot show: camera and scanner, GPU speed, and how sound and the screen feel on the real phone. Those checks are manual and rare.
+  - **device:** one end-to-end smoke test, run before a change is archived, not per task. It runs on the Android emulator on a Mac (headless, arm64), so the phone does not have to be at hand. A Galaxy S24 is only for what an emulator cannot show: camera and scanner, GPU speed, and how sound and the screen feel on the real phone. Those checks are manual and rare.
 - **Fits the coming redesign** (Figma: library tabs, multi-page scans, the new editor, instruments, landscape practice):
   - new logic goes into pure modules with node unit tests;
   - journey tests find elements by role and accessible name, never by CSS or position;

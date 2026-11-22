@@ -5,7 +5,7 @@
 Saxophone method-book exercises often use notation (triplets, articulation patterns) that the theory lessons haven't covered yet, and hearing an exercise played correctly is the quickest way to learn it. A frontier AI model can already turn a photo into an interactive play-along, but that costs tokens per photo and needs the cloud. Two spikes on 2026-11-17 showed it can run on the phone instead, for free and offline:
 
 - **homr** read exercise 87 from a phone photo with all 19 bars' pitches and triplet rhythms correct, and the slur/staccato pattern almost complete (one slur end missing in bar 17).
-- homr's segmentation model runs on the Galaxy S24's **GPU** at ~21–26 ms per tile, giving correct output.
+- homr's segmentation model runs on a Galaxy S24's **GPU** at ~21–26 ms per tile, giving correct output.
 
 See `spike/homr/` and `spike/npu/results.md`.
 
@@ -20,7 +20,7 @@ See `spike/homr/` and `spike/npu/results.md`.
 - **Correction:** fix a wrongly read note, duration or articulation on screen.
 - **Playback:** show the score with a cursor following the music, played with a tenor-saxophone sound at concert pitch (a major ninth below written). Repeats are followed, slurs play legato, and staccato notes are shortened.
 - **Practice controls (v1):** free tempo control, count-in, loop a range of bars, tap a note to start from there.
-- **First milestone is a feasibility gate:** homr runs end to end on the S24 (Chaquopy, GPU segnet) and produces the same MusicXML for exercise 87 as on the Mac, in acceptable time. Building beyond the gate depends on passing it.
+- **First milestone is a feasibility gate:** homr runs end to end on a Galaxy S24 (Chaquopy, GPU segnet) and produces the same MusicXML for exercise 87 as on a Mac, in acceptable time. Building beyond the gate depends on passing it.
 
 **Out of scope for this change:**
 - iOS and App Store publishing

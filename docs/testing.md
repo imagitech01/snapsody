@@ -404,11 +404,9 @@ A change that touches models, inference or recognition brings its own checks; th
 - **Python 3.10** in a virtualenv at `.venv-py310/` (for example `uv venv --python 3.10 .venv-py310`).
   Chaquopy uses it at build time, so the Kotlin JVM tests in `make test-quick` need it too.
 - **For building the app:** `npm ci` in `tools/capacitor/` (the Capacitor CLI), and the packaged
-  models (`android/model-assets/`, see the how-to that `./gradlew assembleDebug` prints without
-  them).
+  models in `android/model-assets/`: run `make models` (needs Python 3.12).
 - **For the device layer:** the AVD `ia_test_api36` (Android 36.1 Google Play arm64 image, 4 GB
-  RAM), the packaged models (`android/model-assets/`, see the how-to that `./gradlew assembleDebug`
-  prints without them) and the smoke test's page
+  RAM), the packaged models (`make models`) and the smoke test's page
   (`.venv-convert/bin/python -I tools/models/make_inference_fixtures.py`).
 
 ## Which layer a new test goes in

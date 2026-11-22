@@ -150,18 +150,21 @@ You need **JDK 21**, the **Android SDK** (`ANDROID_HOME`), and Node 26. Then:
 1. Install the web dependencies and the Capacitor CLI: `npm ci` in both `web/` and
    `tools/capacitor/`.
 2. Create the Python 3.10 virtualenv at `.venv-py310/` (see "Run the tests" above).
-3. **Build and package the recognition models.** They are not committed. Link the three ONNX
-   models of an installed homr 0.7.1 into `vendor/homr/segmentation/` and
-   `vendor/homr/transformer/` (see [`vendor/PATCHES.md`](vendor/PATCHES.md)). Then create a
-   Python 3.12 virtualenv at `.venv-convert/` with `tools/models/requirements.txt` and run:
+3. **Build and package the recognition models.** They are not committed. You need
+   **Python 3.12** (for TensorFlow; pass `PYTHON312=<path>` if it isn't on the PATH as
+   `python3.12`). Then run:
 
    ```sh
-   .venv-convert/bin/python -I tools/models/build_segnet.py --onnx <homr segnet fp16 onnx>
-   .venv-convert/bin/python -I tools/models/make_selftest_tile.py
-   python3 tools/models/package_models.py
+   make models
    ```
 
-   If the models are missing, `./gradlew assembleDebug` stops and prints these steps.
+   This downloads homr 0.7.1's three ONNX models from
+   [homr's GitHub release](https://github.com/liebharc/homr/releases/tag/onnx_checkpoints) into
+   `vendor/homr/` and checks them against `tools/models/pinned_hashes.json`. It sets up the
+   conversion toolchain in `.venv-convert/`, converts segnet to LiteRT, makes the GPU self-test
+   tile, and packages everything into `android/model-assets/`. The first run downloads about
+   1.5 GB and takes a few minutes. A rerun skips every step that is already up to date. If the
+   models are missing, `./gradlew assembleDebug` stops and tells you to run it.
 4. Build: `cd android && ./gradlew assembleDebug`. This also builds the web layer and syncs it
    into the app.
 

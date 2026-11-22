@@ -1,5 +1,5 @@
 """The staff positions and the time-signature flag the app's Reader reports for a page (practice-app
-design D7, task 10.4), made on the Mac the way the job makes them.
+design D7, task 10.4), made on a Mac the way the job makes them.
 
 Each image gets the white recognition margin (ia_engine.pad_for_recognition), then homr runs with the
 app's ProcessingConfig on the CPU and fills a homr.page_layout.PageLayout, and ia_engine.staves_in_source
