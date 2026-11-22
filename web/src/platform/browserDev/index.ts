@@ -4,17 +4,23 @@ import { BrowserDevFiles } from './files.ts'
 import { BrowserDevReader } from './reader.ts'
 import type { BrowserDevReaderOptions } from './reader.ts'
 import { BrowserDevScanner } from './scanner.ts'
-import melodyPiano from '../../../test/fixtures/melody-piano.musicxml?raw'
 
 export interface BrowserDevOptions extends BrowserDevReaderOptions {
   /** The IndexedDB database that holds the files. */
   databaseName?: string
 }
 
-/** `?reading=melody-piano` in the page's address: pages read as the melody-and-piano fixture, to try the parts step. */
-function readingFromAddress(): string | undefined {
+/**
+ * The MusicXML every page is read as: with `?reading=melody-piano` in the page's address the
+ * melody-and-piano fixture, to try the parts step; otherwise the recognised practice exercise (what homr
+ * made of the self-engraved practice exercise). Only in `npm run dev`: the fixtures are imported behind
+ * `import.meta.env.DEV`, so they are not in the build the app ships.
+ */
+async function committedScore(): Promise<string | undefined> {
+  if (!import.meta.env.DEV) return undefined
   const reading = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('reading')
-  return reading === 'melody-piano' ? melodyPiano : undefined
+  if (reading === 'melody-piano') return (await import('../../../test/fixtures/melody-piano.musicxml?raw')).default
+  return (await import('../../../test/fixtures/practice-exercise.recognised.musicxml?raw')).default
 }
 
 /**
@@ -22,9 +28,9 @@ function readingFromAddress(): string | undefined {
  * browser's file dialog as the scanner, and a reader that answers with committed MusicXML (the
  * melody-and-piano fixture with `?reading=melody-piano`).
  */
-export function createBrowserDevPlatform(options: BrowserDevOptions = {}): Platform {
+export async function createBrowserDevPlatform(options: BrowserDevOptions = {}): Promise<Platform> {
   const files = new BrowserDevFiles(options.databaseName ?? 'snapsody-browser-dev')
-  const musicxml = options.musicxml ?? readingFromAddress()
+  const musicxml = options.musicxml ?? (await committedScore())
   return {
     files,
     scanner: new BrowserDevScanner(files),

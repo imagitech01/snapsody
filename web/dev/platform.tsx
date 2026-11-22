@@ -8,7 +8,7 @@ import { signal } from '@preact/signals'
 import { createBrowserDevPlatform } from '../src/platform/browserDev/index.ts'
 import type { ReaderEvent, ReaderJob } from '../src/platform/port.ts'
 
-const platform = createBrowserDevPlatform()
+const platform = await createBrowserDevPlatform()
 const { files, scanner, reader } = platform
 
 const FOLDER = 'dev-check'
