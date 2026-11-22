@@ -65,7 +65,7 @@ The other groups do not wait for this one. It can run whenever the user has phot
 
 ## 8. Specs, texts and integration
 
-- [ ] 8.1 Update the texts that still describe one line and one instrument:
+- [x] 8.1 Update the texts that still describe one line and one instrument:
   - the Play Store text (`docs/store/listing.md`, "Good to know") no longer says Snapsody reads only single-line melodies;
   - the comment in `library.ts` about the instrument being only a general setting;
   - the Purpose of `openspec/specs/instruments/spec.md` ("the user chooses one instrument for every piece in Settings"), edited directly at archive, as deltas do not carry a Purpose.

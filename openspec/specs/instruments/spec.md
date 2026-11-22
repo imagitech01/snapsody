@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The instruments a piece can be played with. Each has its own sound, transposition and written range. The user chooses one instrument for every piece in Settings, so the playback sounds like what they will play.
+The instruments a piece can be played with. Each has its own sound, transposition and written range. The user chooses a default instrument in Settings and can give a piece an instrument of its own, so the playback sounds like what they will play. A piano part always sounds as piano.
 
 ## Requirements
 
