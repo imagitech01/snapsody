@@ -323,6 +323,64 @@ test('timeline: slur over notes 1-2 then a staccato note 3 (triplet)', () => {
   assert.deepEqual(ev(t.events, 2).sounding, frac(1, 6)) // half of 1/3 beat
 })
 
+test('timeline: a slur start that is never closed connects nothing (it is not drawn either)', () => {
+  const body = n({ slur: 'start' }) + n({}) + n({}) + n({})
+  const t = tenorTimeline(scoreOf([{ body }, { body: n({}) + n({}) + n({}) + n({}) }]))
+  assert.ok(t.events.every((e) => e.attack && !e.legatoNext))
+})
+
+test('timeline: loose slur starts before a real slur (piece 95, pencil marks read as slurs) leave the bars between unslurred', () => {
+  // Bars 1-2 of the piece: a start on bar 1, another on bar 2, then the one slur the paper has, in bar 3.
+  const bars = [
+    { body: n({ slur: 'start' }) + n({ stac: true }) + n({}) + n({ stac: true }) },
+    { body: n({}) + n({ slur: 'start' }) + n({}) + n({}) },
+    { body: n({ slur: 'start' }) + n({ slur: 'stop' }) + n({}) + n({}) },
+  ]
+  const t = tenorTimeline(scoreOf(bars))
+  assert.deepEqual(
+    t.events.map((e) => e.legatoNext),
+    [false, false, false, false, false, false, false, false, true, false, false, false],
+  )
+  assert.deepEqual(
+    t.events.map((e) => e.attack),
+    [true, true, true, true, true, true, true, true, true, false, true, true],
+  )
+})
+
+test('timeline: a slur that starts on the note the previous one ends on continues the legato', () => {
+  const both = (): string => n({ slur: 'stop' }).replace('<slur type="stop" number="1"/>', '<slur type="stop" number="1"/><slur type="start" number="1"/>')
+  const body = n({ slur: 'start' }) + both() + n({ slur: 'stop' }) + n({})
+  const t = tenorTimeline(scoreOf([{ body }]))
+  assert.deepEqual(
+    t.events.map((e) => [e.attack, e.legatoNext]),
+    [
+      [true, true],
+      [false, true],
+      [false, false],
+      [true, false],
+    ],
+  )
+})
+
+test('timeline: a slur whose end sits on a chord member ends where it is drawn', () => {
+  // Ends on the top note of a chord (notes 2 and 3 are one chord): the chord is the slur's last note, the note after it gets an attack.
+  const toChord = n({ slur: 'start' }) + n({}) + inChord(n({ step: 'E', slur: 'stop' })) + n({})
+  assert.deepEqual(
+    tenorTimeline(scoreOf([{ body: toChord }])).events.map((e) => [e.attack, e.legatoNext]),
+    [
+      [true, true],
+      [false, false],
+      [true, false],
+    ],
+  )
+  // Starts on a chord member: the chord connects into the next note.
+  const fromChord = n({}) + inChord(n({ step: 'E', slur: 'start' })) + n({ slur: 'stop' }) + n({}) + n({})
+  assert.deepEqual(
+    tenorTimeline(scoreOf([{ body: fromChord }])).events.map((e) => e.legatoNext),
+    [true, false, false, false],
+  )
+})
+
 test('timeline: a slur does not connect across a rest', () => {
   const body = n({ slur: 'start' }) + n({ rest: true }) + n({ slur: 'stop' })
   const t = tenorTimeline(scoreOf([{ body }]))

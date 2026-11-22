@@ -344,22 +344,43 @@ export function expandMeasureOrder(measures: Measure[]): PlayedBar[] {
 
 /**
  * For each note id: does its sound connect into the following note of the score (it lies inside a
- * slur and is not the slur's last note)? Rests and staccato notes never connect.
+ * slur and is not the slur's last note)? Rests and staccato notes never connect. Every slur in the model has
+ * both ends: the reader drops loose ones (musicxml.ts `dropLooseSlurEnds`), as the drawing ignores them.
  */
 function slurJoins(measures: Measure[]): { joins: Set<string>; successor: Map<string, string> } {
   const joins = new Set<string>()
   const successor = new Map<string, string>()
   const open = new Set<number>()
   let previous: Note | undefined
+  // The note a chord member belongs to: a slur that ends or starts on any note of a chord does so on the chord.
+  let head: Note | undefined
+  const decide = (): void => {
+    if (head && open.size > 0 && !head.rest && !head.staccato && !head.staccatissimo) joins.add(head.id)
+    else if (head) joins.delete(head.id)
+  }
+  const mark = (note: Note): void => {
+    // Stops first: a slur may end on the note the next one starts on.
+    for (const s of note.slurs) if (s.type === 'stop') open.delete(s.number)
+    for (const s of note.slurs) if (s.type === 'start') open.add(s.number)
+  }
   for (const m of measures) {
     for (const item of m.items) {
-      if (!isNote(item) || item.grace) continue
-      if (item.chord) continue
+      if (!isNote(item)) continue
+      // A grace note's slur marks count (a slur may start on it), but it is not an event of its own.
+      if (item.grace) {
+        mark(item)
+        continue
+      }
+      if (item.chord) {
+        mark(item)
+        decide()
+        continue
+      }
       if (previous) successor.set(previous.id, item.id)
       previous = item
-      for (const s of item.slurs) if (s.type === 'start') open.add(s.number)
-      for (const s of item.slurs) if (s.type === 'stop') open.delete(s.number)
-      if (open.size > 0 && !item.rest && !item.staccato && !item.staccatissimo) joins.add(item.id)
+      head = item
+      mark(item)
+      decide()
     }
   }
   return { joins, successor }

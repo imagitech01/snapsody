@@ -270,6 +270,49 @@ test('musicxml: unpaired hairpins are dropped with a warning, never kept with a 
   assert.deepEqual(wedgesOf(parseMusicXml(serializeMusicXml(s))), [])
 })
 
+const slur = (type: string, number = 1): string => `<slur type="${type}" number="${number}"/>`
+const slursOf = (s: ReturnType<typeof parseMusicXml>): string[] =>
+  firstLine(s).measures.flatMap((m) => notesOf(m).flatMap((n) => n.slurs.map((x) => `${n.id}:${x.type}${x.number}`)))
+
+test('musicxml: loose slur ends are dropped as read (pencil marks read as slurs, piece 95), the slur with both ends is kept', () => {
+  const warnings: string[] = []
+  const s = parseMusicXml(
+    bars(
+      q('a', slur('start')) + q('b') + q('c', slur('start')) + q('d'), // two starts of slur 1 before any stop
+      q('e', slur('start')) + q('f', slur('stop')) + q('g', slur('stop', 2)) + q('h', slur('start')), // a real slur; a stop with no start; a start that never ends
+    ),
+    warnings,
+  )
+  assert.deepEqual(slursOf(s), ['e:start1', 'f:stop1'])
+  assert.deepEqual(warnings, [
+    'Measure 1: a slur that never ends was dropped',
+    'Measure 1: a slur that never ends was dropped',
+    'Measure 2: a slur stop without a start was dropped',
+    'Measure 2: a slur that never ends was dropped',
+  ])
+  // What is dropped is not written, so the saved file holds what the screen shows.
+  const written = serializeMusicXml(s)
+  assert.equal((written.match(/<slur /g) ?? []).length, 2)
+  roundTrips(written)
+})
+
+test('musicxml: a slur that ends on the note the next one starts on, a nested slur and a continue mark are kept', () => {
+  const warnings: string[] = []
+  const s = parseMusicXml(
+    bars(q('a', slur('start')) + q('b', slur('stop') + slur('start')) + q('c', slur('start', 2)) + q('d', slur('stop', 2)), q('e', slur('continue')) + q('f', slur('stop')) + q('g') + q('h')),
+    warnings,
+  )
+  assert.deepEqual(slursOf(s), ['a:start1', 'b:stop1', 'b:start1', 'c:start2', 'd:stop2', 'e:continue1', 'f:stop1'])
+  assert.deepEqual(warnings, [])
+})
+
+test('musicxml: the continue marks of a slur that never ends go with it', () => {
+  const warnings: string[] = []
+  const s = parseMusicXml(bars(q('a', slur('start')) + q('b', slur('continue')) + q('c', slur('start')) + q('d', slur('stop')), q('e') + q('f') + q('g') + q('h', slur('continue'))), warnings)
+  assert.deepEqual(slursOf(s), ['c:start1', 'd:stop1'])
+  assert.deepEqual(warnings, ['Measure 1: a slur that never ends was dropped', 'Measure 2: a slur continue without a start was dropped'])
+})
+
 test('musicxml: a hairpin whose notes are gone from the model is not written', () => {
   const s = parseMusicXml(bars(wedge('crescendo') + q('a') + q('b') + wedge('stop') + q('c') + q('d')))
   const w = measure(firstLine(s).measures, 0).items.find(isWedge)!

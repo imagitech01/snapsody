@@ -177,6 +177,17 @@ test('pages: slurs, ties, tuplets, marks, dynamics and barlines go through as re
   assert.deepEqual(withoutIds({ measures: [firstLine(merged).measures[1]!] }), withoutIds({ measures: [{ ...firstLine(reading).measures[0]!, number: '2', clef: undefined, key: undefined }] }))
 })
 
+test('pages: a slur over a page break is kept once the pages are merged; a slur that never ends is dropped', () => {
+  const slurred = (step: string, type: string): string => note({ step, type: 'quarter' }).replace('<staff>', `<notations><slur type="${type}" number="1"/></notations><staff>`)
+  const plain = (step: string): string => note({ step, type: 'quarter' })
+  const one = page([plain('A') + plain('B') + slurred('C', 'start')], { time: [3, 4] }) // the slur goes on to page 2
+  const two = page([slurred('D', 'stop') + slurred('E', 'start') + plain('F')], { time: [3, 4] }) // this one never ends
+  const slurs = (xml: string): string[] => firstLine(parseMusicXml(xml)).measures.flatMap((m) => notesOf(m).flatMap((n) => n.slurs.map((s) => `${n.pitch?.step}:${s.type}`)))
+  assert.deepEqual(slurs(preparePages([one, two]).musicxml), ['C:start', 'D:stop'])
+  assert.deepEqual(slurs(appendPages(preparePages([one]).musicxml, [two]).musicxml), [], 'page 1 alone has a slur that never ends; once stored it is gone')
+  assert.deepEqual(slurs(appendPages(preparePages([page([plain('G') + plain('A') + plain('B')], { time: [3, 4] })]).musicxml, [one, two]).musicxml), ['C:start', 'D:stop'])
+})
+
 test('pages: a page with no bars, no page at all, and a reading that is not MusicXML are errors that name the page', () => {
   assert.throws(() => mergePages([parsed(page(threeQuarters(1))), singleVoiceScore([])]), /Page 2 has no bars/)
   assert.throws(() => preparePages([]), /No pages/)

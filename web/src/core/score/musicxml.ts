@@ -21,7 +21,7 @@ import type {
   VoiceScore,
   WedgeItem,
 } from './model.ts'
-import { allItemLists, isNote, isWedge, partMultiRestRuns, singleVoiceScore } from './model.ts'
+import { allItemLists, isNote, isWedge, partMultiRestRuns, singleVoiceScore, voiceView, voices } from './model.ts'
 import type { BeamMark } from './beams.ts'
 import type { Frac } from './rational.ts'
 import { ZERO, add, cmp, eq, frac, lcm, mul, sub } from './rational.ts'
@@ -112,8 +112,10 @@ function numOf(e: XmlElement | undefined): number | undefined {
  * voice whose next note starts later than its last one ended gets a hidden rest for the gap; so does an
  * extra voice that ends before the rest of its staff. Every staff bar has the same number of voices.
  * Bar attributes come from the first part; a later part that disagrees is reported once per bar.
+ * Slurs without both ends are dropped (`dropLooseSlurEnds`), unless `options.keepLooseSlurs`: the pages of
+ * a piece are read one by one, and a slur over a page break only finds its other end once they are merged.
  */
-export function parseMusicXml(source: string, warnings: string[] = []): Score {
+export function parseMusicXml(source: string, warnings: string[] = [], options: { keepLooseSlurs?: boolean } = {}): Score {
   const root = parseXml(source)
   if (root.name === 'score-timewise') throw new Error('Timewise MusicXML is not supported')
   if (root.name !== 'score-partwise') throw new Error(`Not MusicXML: root element is <${root.name}>`)
@@ -186,7 +188,53 @@ export function parseMusicXml(source: string, warnings: string[] = []): Score {
     const firstTime = bars.find((b) => b.time)?.time
     if (firstTime) firstTime.inferred = true
   }
+  if (!options.keepLooseSlurs) dropLooseSlurEnds(score, warnings)
   return score
+}
+
+/**
+ * Keeps only slurs with both ends, voice by voice: a start is paired with the next stop of its number in
+ * the voice. A start that another start of the same number follows first, or that the voice never closes,
+ * is dropped (with its `continue` marks), and so is a stop or `continue` with no start, each with a
+ * warning. Like a hairpin without an end, such a slur is not drawn, and it is not played or edited either:
+ * the score holds only what the reader sees. Recognition reads these loose ends from pencil marks above
+ * the staff.
+ */
+export function dropLooseSlurEnds(score: Score, warnings: string[] = []): void {
+  for (const ref of voices(score)) {
+    type Mark = { note: Note; mark: SlurMark; bar: string }
+    // The waiting start per slur number, with the `continue` marks that came after it.
+    const waiting = new Map<number, { start: Mark; continues: Mark[] }>()
+    const loose: { marks: Mark[]; message: string }[] = []
+    for (const m of voiceView(score, ref).measures) {
+      for (const item of m.items) {
+        if (!isNote(item)) continue
+        const at = (mark: SlurMark): Mark => ({ note: item, mark, bar: m.number })
+        // Stops first: a slur may end on the note the next one starts on.
+        for (const s of item.slurs) {
+          if (s.type === 'start') continue
+          const open = waiting.get(s.number)
+          if (!open) {
+            loose.push({ marks: [at(s)], message: `Measure ${m.number}: a slur ${s.type} without a start was dropped` })
+            continue
+          }
+          if (s.type === 'continue') open.continues.push(at(s))
+          else waiting.delete(s.number)
+        }
+        for (const s of item.slurs) {
+          if (s.type !== 'start') continue
+          const earlier = waiting.get(s.number)
+          if (earlier) loose.push({ marks: [earlier.start, ...earlier.continues], message: `Measure ${earlier.start.bar}: a slur that never ends was dropped` })
+          waiting.set(s.number, { start: at(s), continues: [] })
+        }
+      }
+    }
+    for (const open of waiting.values()) loose.push({ marks: [open.start, ...open.continues], message: `Measure ${open.start.bar}: a slur that never ends was dropped` })
+    for (const { marks, message } of loose) {
+      for (const { note, mark } of marks) note.slurs = note.slurs.filter((s) => s !== mark)
+      warnings.push(message)
+    }
+  }
 }
 
 function sameJson(a: unknown, b: unknown): boolean {

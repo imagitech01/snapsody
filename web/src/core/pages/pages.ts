@@ -1,7 +1,7 @@
 import type { Bar, Clef, KeySignature, Measure, Note, Part, PartBar, Score, TimeSignature } from '../score/model.ts'
 import { allItemLists, firstVoice, voiceView } from '../score/model.ts'
 import { isDirection, isNote, isWedge } from '../score/model.ts'
-import { parseMusicXml, serializeMusicXml } from '../score/musicxml.ts'
+import { dropLooseSlurEnds, parseMusicXml, serializeMusicXml } from '../score/musicxml.ts'
 import { prepareScore, repairVoices } from '../score/prepare.ts'
 import type { PreparedScore } from '../score/prepare.ts'
 import type { Frac } from '../score/rational.ts'
@@ -362,6 +362,8 @@ export function preparePages(rawPages: readonly string[], options: ReadonlyArray
   const merged = mergePages(parseAll(rawPages, options))
   const partsRead: PartRead[] = merged.score.parts.map((p, i) => ({ staves: p.staves, kept: keep[i] !== false }))
   const score = keepParts(merged.score, keep)
+  // The pages were read with their loose slur ends (`parseAll`): a slur over a page break is whole now.
+  dropLooseSlurEnds(score)
   return { ...prepareScore(score), pages: merged.ranges, partsRead, warnings: merged.warnings }
 }
 
@@ -383,23 +385,24 @@ export function preparePages(rawPages: readonly string[], options: ReadonlyArray
  */
 export function appendPages(current: string, rawPages: readonly string[], options: ReadonlyArray<PageOptions | undefined> = [], partsRead?: readonly PartRead[]): PreparedPages {
   if (rawPages.length === 0) throw new Error('No pages to combine')
-  const existing = parseMusicXml(current)
+  const existing = parseMusicXml(current, [], { keepLooseSlurs: true })
   if (existing.bars.length === 0) return preparePages(rawPages, options)
   const { score: added, ranges, warnings } = mergePages(parseAll(rawPages, options), existing, partsRead)
   const firstNew = existing.bars.length
   existing.bars.push(...added.bars)
   padVoices(existing)
+  dropLooseSlurEnds(existing)
   const repairs = repairVoices(existing, firstNew)
   const result: PreparedPages = { musicxml: serializeMusicXml(existing), repairs, bars: existing.bars.length, pages: ranges, partsRead: partsRead ? partsRead.map((p) => ({ ...p })) : existing.parts.map((p) => ({ staves: p.staves, kept: true })), warnings }
   return result
 }
 
-/** Parses the readings; a time signature the reader estimated at the start of a page is taken out (`PageOptions`). */
+/** Parses the readings, loose slur ends kept for after the merge; a time signature the reader estimated at the start of a page is taken out (`PageOptions`). */
 function parseAll(rawPages: readonly string[], options: ReadonlyArray<PageOptions | undefined>): Score[] {
   return rawPages.map((raw, index) => {
     let score: Score
     try {
-      score = parseMusicXml(raw)
+      score = parseMusicXml(raw, [], { keepLooseSlurs: true })
     } catch (error) {
       throw new Error(`Page ${index + 1}: ${error instanceof Error ? error.message : String(error)}`)
     }
