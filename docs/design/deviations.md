@@ -11,7 +11,7 @@ Figma file; the exported PNGs are in git history under `docs/design/figma/`.
 
 ## All frames: denser than the frames (D18)
 
-- After the checks on the S24 ("large texts and a lot of space between everything"), the whole app is denser than the frames
+- After the checks on a Galaxy S24 ("large texts and a lot of space between everything"), the whole app is denser than the frames
   (practice-app design D18). The review and the mac journeys now run at the phone's own size, 360 × 780 (780 × 360 in
   landscape); the Figma frame is shown next to each screen scaled to the same height, so sizes and spacing differ on purpose.
 - **Type, one step smaller per role:** screen title 30 → 22, continue card title 28 → 20, sheet title and practice title

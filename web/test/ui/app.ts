@@ -18,7 +18,7 @@ import { BUILD_DIR } from './paths.ts'
 export const HOST = 'localhost'
 export const START_URL = `https://${HOST}/`
 
-/** The Galaxy S24's CSS viewport as its WebView reports it (360 x 780, evidence/device-checks.md), and turned on its side. */
+/** A typical phone WebView's CSS viewport (360 x 780, as a Galaxy S24 reports it, evidence/device-checks.md), and turned on its side. */
 export const PHONE = { width: 360, height: 780 }
 export const PHONE_LANDSCAPE = { width: 780, height: 360 }
 
@@ -77,7 +77,7 @@ export interface AppOptions {
   seed?: string
   /** `manual`: the fake reader's jobs send their events only when the journey steps them (the seeded entry only). */
   reader?: 'manual'
-  /** Viewport; the S24's by default. */
+  /** Viewport; PHONE by default. */
   viewport?: { width: number; height: number }
   /** Device pixels per CSS pixel; 1 by default (the store screenshots use 3). */
   deviceScaleFactor?: number

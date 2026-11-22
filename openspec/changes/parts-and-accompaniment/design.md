@@ -16,7 +16,7 @@ See proposal.md for why. Today:
 - **Page layout:** `addMusic.ts` keeps homr's staff boxes per page, with bar ranges, to show the photo of a line in the editor.
 - **Evidence:**
   - The local prototype (`prototype/`, untracked) reads photos with homr 0.7.1 on the Mac and draws every part with Verovio. On one melody-and-piano book page, all 294 notes were read correctly, chords and second voices included.
-  - Real phone photos of piano pages and the reading time on the S24 are still untested (task group 1).
+  - Real phone photos of piano pages and the reading time on a real phone are still untested (task group 1).
 - **Mock:** an interactive mock of the practice screen (shared privately in the explore session) shows the agreed look: the "your part" card, the hint, and the Practice tools rows.
 
 ## Goals / Non-Goals
@@ -174,7 +174,7 @@ The editor opens the voice view of the first voice of your part and edits it as 
 
 ## Risks / Trade-offs
 
-- **[Risk] homr is not reliable enough on real phone photos of piano pages.** → Task group 1 is a first look: a few real piano pages through the prototype, and one on the S24. It does not block the work; what it shows tunes the parts step and the warnings.
+- **[Risk] homr is not reliable enough on real phone photos of piano pages.** → Task group 1 is a first look: a few real piano pages through the prototype, and one on a real phone. It does not block the work; what it shows tunes the parts step and the warnings.
 - **[Risk] Reading takes too long on the phone for dense three-staff systems,** or a system hits homr's limit of 608 tokens and is cut short. → Measured in the first look (task 1.2). If it is slow, the progress screen already shows per-staff progress. A system cut at the limit is flagged by the bar check, because its bars don't add up.
 - **[Risk] The page-matching rule (in order, by number of staves) matches the wrong parts** when pages differ, for example a melody that is printed on page 1 only. → Handled: a part missing on a page gets rests. The odd remaining case, a part that appears later, is dropped with a warning. The test fixtures include a two-page piece (task 3.3).
 - **[Risk] The fermata map changes timing for existing one-line pieces.** → The existing fermata tests stay green unchanged, and the map is the identity without fermatas.

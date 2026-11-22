@@ -13,7 +13,7 @@ write is under `build/`, which is git-ignored, so the graphics can be made again
 
 ## capture.ts
 
-Drives the real web app on the UI tests' fake platform (`web/test/ui/app.ts`), at the S24's
+Drives the real web app on the UI tests' fake platform (`web/test/ui/app.ts`), at a typical phone's
 360 x 780 viewport with 3x pixels (1080 x 2340), in English: the app is English only. The pieces come
 from the `store` seed (`web/test/ui/storePieces.ts`). Only public-domain melodies are used, typed in for this; the
 page photo is that music rendered with Verovio. Never use material from `fixtures/local/`

@@ -1,6 +1,6 @@
 # Tasks
 
-Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **mac** (`make test-mac`) and **device** (`make test-device`, once before archive). Design references are D1–D5 in design.md. This change comes first of the three: `parts-and-accompaniment` and `edit-parts` build on it.
+Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **browser** (`make test-browser`) and **device** (`make test-device`, once before archive). Design references are D1–D5 in design.md. This change comes first of the three: `parts-and-accompaniment` and `edit-parts` build on it.
 
 ## 1. Model and reading (D1, D2)
 
@@ -55,8 +55,8 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **mac** (`mak
 
 ## 5. Integration
 
-- [x] 5.1 Run `make test-mac` and `openspec validate more-marks --strict`. Verify: both are green.
-- [ ] 5.2 Tune the constants of D3 by ear: play the fixture of 1.2 at 60 and 120 bpm with the tenor sax and the piano, in browser-dev and on the S24. Verify: manual by ear, on the real phone: trills, turns and grace notes sound like practice-tempo ornaments and never push the beat.
+- [x] 5.1 Run `make test-browser` and `openspec validate more-marks --strict`. Verify: both are green.
+- [ ] 5.2 Tune the constants of D3 by ear: play the fixture of 1.2 at 60 and 120 bpm with the tenor sax and the piano, in browser-dev and on a real phone. Verify: manual by ear, on the real phone: trills, turns and grace notes sound like practice-tempo ornaments and never push the beat.
 
 ## Workflow follow-up
 

@@ -10,7 +10,7 @@ import { n, scoreXml } from './playbackHelpers.ts'
 // The app shell (practice-app task 12, design D2, D4, D11, D12; specs `app-shell`, `practice-home`): the
 // start-up in its order, the list refreshed when a screen that shows it comes back, the background, the
 // back button, and what is reported when a save or a read fails. Against the fake platform; the screens
-// that draw it are the mac layer's journeys (web/test/ui/).
+// that draw it are the browser layer's journeys (web/test/ui/).
 
 /** Lets what the shell started on its own finish: the fake files answer in microtasks, so a few milliseconds is plenty. */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10))

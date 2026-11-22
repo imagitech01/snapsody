@@ -11,7 +11,7 @@ object GpuInfo {
     private const val TAG = "GpuInfo"
 
     /**
-     * "GL_VENDOR | GL_RENDERER | GL_VERSION | build fingerprint". On the S24 GL_VERSION carries
+     * "GL_VENDOR | GL_RENDERER | GL_VERSION | build fingerprint". On a Galaxy S24 GL_VERSION carries
      * the driver version ("OpenGL ES 3.2 Driver version: 25.6.4 git hash: ...").
      *
      * The build fingerprint is included because LiteRT's GPU delegate uses OpenCL where available,

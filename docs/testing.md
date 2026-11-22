@@ -8,7 +8,7 @@ The requirements are in `openspec/specs/test-suite/spec.md`; the design behind t
 | Layer | Command | What runs | Budget | When |
 |---|---|---|---|---|
 | quick | `make test-quick` | web unit tests (`node --test`) and Kotlin JVM unit tests | ≤ 30 s warm | on every edit |
-| mac | `make test-mac` | quick, then the web UI tests in headless Chromium (Playwright) | ≤ 3 min warm | before a commit |
+| browser | `make test-browser` | quick, then the web UI tests in headless Chromium (Playwright) | ≤ 3 min warm | before a commit |
 | device | `make test-device` | the end-to-end smoke test on the Android emulator | — | once per change, before archive |
 
 Each command prints its duration and exits non-zero when a test fails. The failing test is named
@@ -50,7 +50,7 @@ and is the one list to change when a screen is built (practice-app groups 14 and
 
   | Adapter | Folder | Used by | What it is |
   |---|---|---|---|
-  | fake | `platform/fake/` | quick layer (`app/` tests), mac layer | in-memory files; a scripted scanner and reader; helpers to arrange and inspect |
+  | fake | `platform/fake/` | quick layer (`app/` tests), browser layer | in-memory files; a scripted scanner and reader; helpers to arrange and inspect |
   | browser-dev | `platform/browserDev/` | `npm run dev` in desktop Chrome | IndexedDB files, the browser's file dialog as the scanner, a reader that answers with committed MusicXML |
   | capacitor | `platform/capacitor/` | the app on the phone | Capacitor's Filesystem, App and Device plugins, the community KeepAwake plugin, and our Scanner, Reader and AtomicFiles plugins (`android/`); see "The Capacitor app" below |
 
@@ -150,7 +150,7 @@ stands in for the back button, and a hidden tab for the app going to the backgro
   puts each in the fake platform's files and loads it with the current library and settings code.
   The first version's Kotlin store and its fixtures went with the old host (practice-app task 10.1).
 
-Measured on the development Mac (Apple Silicon, 8 GB), 18 Nov 2026:
+Measured on an Apple Silicon laptop (8 GB), 18 Nov 2026:
 
 | Run | Time |
 |---|---|
@@ -166,15 +166,15 @@ At the end of the practice-app change (task 16.1: 556 web tests and 26 JVM tests
 with no emulator running: 2.8–3.1 s warm with nothing changed, against the budget of 30 s, and
 11 s right after the Gradle daemon was stopped (the first run after `make test-device`).
 
-## Mac layer
+## Browser layer
 
 `npm run test:ui` (in `web/`) builds the app with Vite into `build/web-test/`, the same build the
 Capacitor app bundles, and runs `web/test/ui/*.test.ts` with `node --test` and the Playwright
 library in headless Chromium, one file at a time.
 
 - **The harness** (`web/test/ui/app.ts`) serves the build at Capacitor's local origin
-  (`https://localhost/`) with the MIME types Capacitor's server gives, in a fresh 384×832 touch
-  context per test (the S24's CSS size). Other hosts are refused, as in the app. The test entry lives in `test/ui/`, so
+  (`https://localhost/`) with the MIME types Capacitor's server gives, in a fresh 360×780 touch
+  context per test (a typical phone WebView). Other hosts are refused, as in the app. The test entry lives in `test/ui/`, so
   `seeded.html` sets `<base href="/">`: the sample sets the player fetches next to the page come from the app's `samples/`,
   as they do at the root on the phone.
 - **Two ways to start the app** (`App.start`, `withApp`):
@@ -243,12 +243,12 @@ library in headless Chromium, one file at a time.
   (`sampleSets`) and `touchAndClock` went with the old screens (practice-app task 2.3). The decode check of every bundled
   sample is back as `samples.test.ts` (task 7.3).
 
-Measured on the development Mac, 18 Nov 2026, after practice-app group 2: `make test-mac` takes
+Measured on the same laptop, 18 Nov 2026, after practice-app group 2: `make test-browser` takes
 4–5 s warm (quick layer about 2 s, Vite build and 4 harness tests the rest). The first version's
-12 journeys took 21–22 s. After group 12 the mac layer has 43 UI tests.
+12 journeys took 21–22 s. After group 12 the browser layer has 43 UI tests.
 
 At the end of the practice-app change (task 16.1: 76 UI tests), on 18 Nov 2026 with no emulator
-running: `make test-mac` takes 87–95 s warm, against the budget of 3 min (the quick layer about
+running: `make test-browser` takes 87–95 s warm, against the budget of 3 min (the quick layer about
 3 s of it, the Vite build and the UI tests the rest).
 
 ### Fast loop
@@ -256,7 +256,7 @@ running: `make test-mac` takes 87–95 s warm, against the budget of 3 min (the 
 - `npm test -- --watch` (in `web/`): the unit tests on every save.
 - `npm run test:ui -- test/ui/<journey>.test.ts`: one journey (builds first).
 - `node --test test/ui/<journey>.test.ts`: one journey against the last build, without building.
-- `make test-mac`: everything, before a commit.
+- `make test-browser`: everything, before a commit.
 
 ## Checking a screen by eye
 
@@ -264,7 +264,7 @@ The Figma design is finished and is not updated; new screens are not compared wi
 eye in the app itself and is named as manual in its tasks:
 
 - Run the app in browser-dev (`cd web && npm run dev`, see "Running the app in browser-dev") in desktop Chrome, with the
-  device toolbar at 360 × 780 (the S24's WebView size; 780 × 360 for landscape).
+  device toolbar at 360 × 780 (a typical phone WebView, as a Galaxy S24 reports it; 780 × 360 for landscape).
 - Look at the screen in English. The app is English only (there is no language setting).
 - `docs/design/deviations.md` records how the screens differed from the last Figma design on 2026-11-19. It is not
   added to.
@@ -347,11 +347,11 @@ the AVD already runs, for example as `emulator-5554` started by hand: stop that 
 (`adb -s emulator-5554 emu kill`). `make test-device DEVICE=phone` runs the same test on the
 connected phone instead.
 
-Run it once per change, before archive. The S24 is only for what the emulator cannot show, checked
+Run it once per change, before archive. A real phone is only for what the emulator cannot show, checked
 by hand when a change touches it: the camera and the ML Kit scanner, GPU speed, and how sound and
 the screen feel on the real phone.
 
-Measured on the development Mac, 18 Nov 2026, at the end of the practice-app change (task 16.3):
+Measured on the same laptop, 18 Nov 2026, at the end of the practice-app change (task 16.3):
 
 | | Emulator |
 |---|---|
@@ -362,7 +362,7 @@ Measured on the development Mac, 18 Nov 2026, at the end of the practice-app cha
 | full `make test-device` (build up to date, snapshot boot, fresh install) | 81 s |
 
 The first version's smoke test took 38–77 s for recognition and save and 90–124 s for the whole
-run on the same emulator; on the S24 the self-test picked the GPU and the page took 14 s.
+run on the same emulator; on a Galaxy S24 the self-test picked the GPU and the page took 14 s.
 
 ## Dev build on the phone
 
@@ -383,7 +383,7 @@ The test-pyramid change replaced the 15 instrumented test classes; each one is i
 
 | Before | After |
 |---|---|
-| `EditingTest`, `PracticeControlsTest`, `ScoreRenderTest`, `LibraryTest`, `RegionSelectionTest` | replaced by the four journeys (mac layer). Their detailed checks are node unit tests (`edit`, `player`, `practice`, `cursor`, `render`, `beams`). The restart survival is in the smoke test. These screens are about to be redesigned, so the old phone assertions were not ported one by one |
+| `EditingTest`, `PracticeControlsTest`, `ScoreRenderTest`, `LibraryTest`, `RegionSelectionTest` | replaced by the four journeys (browser layer). Their detailed checks are node unit tests (`edit`, `player`, `practice`, `cursor`, `render`, `beams`). The restart survival is in the smoke test. These screens are about to be redesigned, so the old phone assertions were not ported one by one |
 | `RecognitionTest` | its screens (progress, cancel, no music) are in the scan journey with scripted events; the real run is in the smoke test |
 | `CaptureFallbackTest` | the fallback screen is in the scan journey; the picker part is dropped |
 | `ExerciseStoreTest`, `WebLayerTest.forceCpuSettingOverTheBridge` | replaced by Kotlin JVM tests |
@@ -399,7 +399,8 @@ A change that touches models, inference or recognition brings its own checks; th
 - **Node** 26 and npm, then `npm ci` in `web/`.
 - **Chromium for the UI tests** (about 150 MB, development only, never in the app):
   `npx playwright install chromium` in `web/`. Playwright is pinned in `web/package.json`.
-- **JDK** 21 and the **Android SDK** (`ANDROID_HOME`, with `platform-tools` and `emulator`).
+- **JDK** 21 and the **Android SDK** (`ANDROID_HOME`, with `platform-tools` and `emulator`). Without `ANDROID_HOME` or
+  `ANDROID_SDK_ROOT`, the scripts look where Android Studio installs it: `~/Library/Android/sdk` on macOS, `~/Android/Sdk` on Linux.
 - **Python 3.10** in a virtualenv at `.venv-py310/` (for example `uv venv --python 3.10 .venv-py310`).
   Chaquopy uses it at build time, so the Kotlin JVM tests in `make test-quick` need it too.
 - **For building the app:** `npm ci` in `tools/capacitor/` (the Capacitor CLI), and the packaged
@@ -416,12 +417,12 @@ A change that touches models, inference or recognition brings its own checks; th
   Put the logic in a plain `.ts` module (`web/src/core/`, or `web/src/app/` for the app's state
   and flows, tested against the fake platform) and test it with `node --test` in
   `web/test/<module>.test.ts`. Kotlin logic gets a JVM test in `android/app/src/test/java/` (plugin logic in a plain handler class).
-- **A screen or a user flow:** the mac layer. Update or extend the journey test for that flow;
+- **A screen or a user flow:** the browser layer. Update or extend the journey test for that flow;
   do not add a second journey for the same screen.
 - **Something only the real device shows** (camera, scanner, GPU speed, how sound and the screen
   feel): a manual check on the phone, named as manual in the task. Not an automated test.
 - The device layer holds only the smoke test. It is not extended per change.
 
-Tests in the quick and mac layers use only committed, self-made material. A test that needs the
+Tests in the quick and browser layers use only committed, self-made material. A test that needs the
 local fixtures in `fixtures/local/` must skip with a message when they are absent, and must not be
 the only test of a behaviour.

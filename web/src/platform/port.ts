@@ -3,7 +3,7 @@
  * parts: files, the page scanner, the music reader and the device. The adapters implement it:
  *
  *   platform/capacitor/  the app on the phone (Capacitor plugins; practice-app task 10.5)
- *   platform/fake/       the quick and mac layers: in-memory files, scripted scanner and reader
+ *   platform/fake/       the quick and browser layers: in-memory files, scripted scanner and reader
  *   platform/browserDev/ `npm run dev` in desktop Chrome: IndexedDB files, a file-input "scanner",
  *                        a reader that answers with committed MusicXML
  *

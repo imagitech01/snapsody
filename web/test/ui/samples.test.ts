@@ -7,7 +7,7 @@ import { withApp } from './app.ts'
 import { BUILD_DIR } from './paths.ts'
 
 // Every file of every bundled instrument folder decodes in Chromium and matches its map
-// (practice-app task 7.3; the mac-layer "decode every sample" test of design D9). A broken, missing
+// (practice-app task 7.3; the browser-layer "decode every sample" test of design D9). A broken, missing
 // or stray file is caught here; how the sound is, is judged by ear (docs/samples.md, "Listening
 // check"). The folders come from tools/samples/convert_soundfont.py.
 

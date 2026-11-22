@@ -235,7 +235,7 @@ test('latency: outputLatency when reported, else baseLatency plus a fallback', (
 })
 
 test('latency: a context that once reports an impossible output latency is not believed again, and takes the last good one of an earlier context (Android WebView after another context closed)', () => {
-  // What the S24 reported (WebView 157): the first context 0.016 s; the next one, made after the first had run 35.17 s
+  // What a Galaxy S24 reported (WebView 157): the first context 0.016 s; the next one, made after the first had run 35.17 s
   // and closed, reported about that time once it played, counting down with its clock. Believed, the cursor stood still
   // for 17 s and then ran at double speed.
   const memory: LatencyMemory = { last: undefined }

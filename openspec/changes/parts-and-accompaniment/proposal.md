@@ -32,7 +32,7 @@ This is the second of three changes. It builds on `more-marks`, which is applied
   - The cursor follows your part.
 - **Library:** existing pieces keep working with no migration. They are one part with one staff and one voice.
 - **Specs and texts:** the "melody only" limit is removed from the instruments spec, and the Play Store listing text no longer says Snapsody reads only single-line melodies.
-- **A first look, not a gate:** a few real piano pages go through the local prototype, and one is read on the S24 for its reading time. What they show goes into the notes of this change. The work does not wait for it.
+- **A first look, not a gate:** a few real piano pages go through the local prototype, and one is read on a real phone for its reading time. What they show goes into the notes of this change. The work does not wait for it.
 - **Not in this change:**
   - Upgrading homr, which stays at 0.7.1.
   - MusicXML import or export.

@@ -1,6 +1,6 @@
 # Tasks
 
-Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **mac** (`make test-mac`) and **device** (`make test-device`, once before archive). Design references are D1–D10 in design.md. Changes `more-marks` and `parts-and-accompaniment` are applied first. This change lands together with `parts-and-accompaniment`, before the release. The fixture `web/test/fixtures/melody-piano.musicxml` comes from that change.
+Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **browser** (`make test-browser`) and **device** (`make test-device`, once before archive). Design references are D1–D10 in design.md. Changes `more-marks` and `parts-and-accompaniment` are applied first. This change lands together with `parts-and-accompaniment`, before the release. The fixture `web/test/fixtures/melody-piano.musicxml` comes from that change.
 
 ## 1. Edits on any voice and chord (D3, D4, D5)
 
@@ -48,9 +48,9 @@ Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **mac** (`mak
 
 ## 6. Integration
 
-- [x] 6.1 Run `make test-mac` and `openspec validate edit-parts --strict`. Verify: both are green.
+- [x] 6.1 Run `make test-browser` and `openspec validate edit-parts --strict`. Verify: both are green.
 - [ ] 6.2 Check the editor by eye in browser-dev at 360 × 780, in English, on the melody-piano fixture: the part switch, a piano line with both staves, the label, the new tools, the bar-line tools and the Score tab. Verify: manual by eye; `web/test/ui/density.test.ts` stays green.
-- [ ] 6.3 On the S24, open a piece read from one of the piano photos of `parts-and-accompaniment` task 1.1, and fix a chord note, a note in the wrong hand, a left-hand clef and a missed or extra bar line. Then play it in practice. Verify: manual by eye and by ear on the real phone: a single chord note can be tapped, and the fixes are heard.
+- [ ] 6.3 On a real phone, open a piece read from one of the piano photos of `parts-and-accompaniment` task 1.1, and fix a chord note, a note in the wrong hand, a left-hand clef and a missed or extra bar line. Then play it in practice. Verify: manual by eye and by ear on the real phone: a single chord note can be tapped, and the fixes are heard.
 
 ## Workflow follow-up
 

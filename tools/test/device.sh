@@ -14,7 +14,8 @@ set -uo pipefail
 AVD=ia_test_api36
 SNAPSHOT=ia_test_clean
 PORT=5584
-SDK=${ANDROID_HOME:-$HOME/Library/Android/sdk}
+# The SDK: ANDROID_HOME, else ANDROID_SDK_ROOT, else where Android Studio puts it (macOS or Linux).
+SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$([ "$(uname)" = Darwin ] && echo "$HOME/Library/Android/sdk" || echo "$HOME/Android/Sdk")}}
 ADB=$SDK/platform-tools/adb
 EMULATOR=$SDK/emulator/emulator
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

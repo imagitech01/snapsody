@@ -14,7 +14,7 @@ export type { FakeScannedPage } from './scanner.ts'
 
 export type FakePlatformOptions = FakeReaderOptions
 
-/** The platform of the quick and mac layers (practice-app design D2): in-memory files, a scripted scanner and a scripted reader. */
+/** The platform of the quick and browser layers (practice-app design D2): in-memory files, a scripted scanner and a scripted reader. */
 export interface FakePlatform extends Platform {
   files: FakeFiles
   scanner: FakeScanner

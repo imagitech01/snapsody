@@ -4,7 +4,7 @@ import type { Page } from 'playwright'
 import { PHONE, PHONE_LANDSCAPE, withApp } from './app.ts'
 import { ID } from './pieces.ts'
 
-// The density guard (practice-app design D18, task 11.4): the app at the S24's WebView size (360 x 780 CSS px, and on its
+// The density guard (practice-app design D18, task 11.4): the app at a typical phone WebView size (360 x 780 CSS px, and on its
 // side 780 x 360), shows every main screen and sheet without sideways scroll, and every control
 // that is tapped has a touch box of at least 44 x 44. The screens are opened through the router, as the journeys of the
 // edit tests do; what each screen does is tested in its own journey.

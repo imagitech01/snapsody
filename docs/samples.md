@@ -224,7 +224,7 @@ error. `convert_soundfont.py` checks that the GM program has the preset name the
 (D8's numbers are 1-based GM numbers: 67 is "Tenor Sax", while 68 would silently give the baritone), and
 `check_map.mjs` takes the range per instrument from the same config. The config's `range` must agree with
 D8 and `core/instruments` (task 3.1); a cross-check test is not written yet. Opus is 80 kbps, mono, 48 kHz.
-In the mac layer, `web/test/ui/samples.test.ts` decodes every file in Chromium.
+In the browser layer, `web/test/ui/samples.test.ts` decodes every file in Chromium.
 
 ## Sizes (task 7.4)
 

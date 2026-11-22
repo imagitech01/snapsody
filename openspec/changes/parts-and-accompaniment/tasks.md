@@ -1,13 +1,13 @@
 # Tasks
 
-Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **mac** (`make test-mac`) and **device** (`make test-device`, once before archive). Design references are D1–D9 in design.md. Change `more-marks` is applied first, and change `edit-parts` lands together with this one, before the release.
+Layers are as in `docs/testing.md`: **quick** (`make test-quick`), **browser** (`make test-browser`) and **device** (`make test-device`, once before archive). Design references are D1–D9 in design.md. Change `more-marks` is applied first, and change `edit-parts` lands together with this one, before the release.
 
 ## 1. First look at real piano pages (does not block)
 
 The other groups do not wait for this one. It can run whenever the user has photos at hand.
 
 - [ ] 1.1 Run a few real piano pages through the local prototype (`prototype/run.sh`), ideally a grand staff alone and a melody with piano. Photos stay in `fixtures/local/piano/`, never in the repo. For each page, note the notes that are wrong or missing, against the book. Verify: manual by eye. A short note in this change's folder (`first-look.md`, no images, no music from the books) with the counts per page.
-- [ ] 1.2 Read one of those pages on the S24 with today's app. Note the reading time and whether any system was cut at the 608-token limit (bars that don't add up at the end of a system). Verify: manual on the real phone (GPU speed). Added to `first-look.md`.
+- [ ] 1.2 Read one of those pages on a real phone with today's app. Note the reading time and whether any system was cut at the 608-token limit (bars that don't add up at the end of a system). Verify: manual on the real phone (GPU speed). Added to `first-look.md`.
 
 ## 2. Model and voice view (D1, D2)
 
@@ -71,8 +71,8 @@ The other groups do not wait for this one. It can run whenever the user has phot
   - the Purpose of `openspec/specs/instruments/spec.md` ("the user chooses one instrument for every piece in Settings"), edited directly at archive, as deltas do not carry a Purpose.
 
   Verify: `grep -n "single-line\|grand staff" docs/store/listing.md` and `grep -n "every piece" openspec/specs/instruments/spec.md` show the new texts.
-- [x] 8.2 Run `make test-mac` and `openspec validate parts-and-accompaniment --strict`. Verify: both are green.
-- [ ] 8.3 On the S24, read one of the piano pages of task 1.1, keep both parts, play the melody with the piano along, then take the left hand. Verify: manual by eye and by ear on the real phone: the parts are in time, the faded hand is visible, and the piano sounds as piano.
+- [x] 8.2 Run `make test-browser` and `openspec validate parts-and-accompaniment --strict`. Verify: both are green.
+- [ ] 8.3 On a real phone, read one of the piano pages of task 1.1, keep both parts, play the melody with the piano along, then take the left hand. Verify: manual by eye and by ear on the real phone: the parts are in time, the faded hand is visible, and the piano sounds as piano.
 
 ## Workflow follow-up
 

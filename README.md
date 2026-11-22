@@ -129,9 +129,9 @@ practising, playback and the editor without Android. See
 ### Run the tests
 
 ```sh
-make test-quick    # web unit tests + Kotlin JVM unit tests (≤ 30 s)
-make test-mac      # + UI journeys in headless Chromium via Playwright (≤ 3 min)
-make test-device   # end-to-end smoke test on an Android emulator
+make test-quick     # web unit tests + Kotlin JVM unit tests (≤ 30 s)
+make test-browser   # + UI journeys in headless Chromium via Playwright (≤ 3 min)
+make test-device    # end-to-end smoke test on an Android emulator
 ```
 
 `test-device` also needs an emulator image, the packaged models (see below) and a generated test
@@ -139,7 +139,7 @@ page. These are listed under [One-time setup](docs/testing.md#one-time-setup).
 
 The Kotlin part of `test-quick` needs JDK 21, the Android SDK (`ANDROID_HOME`) and a
 **Python 3.10** virtualenv at `.venv-py310/`, which Chaquopy uses at build time (for example
-`uv venv --python 3.10 .venv-py310`). `test-mac` needs a one-time
+`uv venv --python 3.10 .venv-py310`). `test-browser` needs a one-time
 `npx playwright install chromium` in `web/`. The full test strategy, including which layer a new
 test belongs in, is in [`docs/testing.md`](docs/testing.md).
 
@@ -177,7 +177,7 @@ Contributions are welcome, from bug reports and recognition failures to fixes an
 - **Before a larger change,** open an issue to discuss it. Design decisions live in `openspec/`.
   [`openspec/changes/archive/2026-11-18-practice-app/design.md`](openspec/changes/archive/2026-11-18-practice-app/design.md) explains
   the current architecture.
-- **Keep the tests fast and green.** Run `make test-quick` while you work and `make test-mac`
+- **Keep the tests fast and green.** Run `make test-quick` while you work and `make test-browser`
   before you open a pull request.
 
 ### Test material

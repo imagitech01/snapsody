@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Keeps development fast and changes safe. Behaviour is proven by tests on the development Mac that run in seconds to minutes. An Android device, normally the emulator, is used once per change for an end-to-end smoke test.
+Keeps development fast and changes safe. Behaviour is proven by tests on a development machine that run in seconds to minutes. An Android device, normally the emulator, is used once per change for an end-to-end smoke test.
 
 ## Requirements
 
@@ -19,7 +19,7 @@ Each command SHALL exit non-zero when any test in it fails, and SHALL name the f
 - **THEN** that layer's command exits non-zero and names the failing test
 
 ### Requirement: Quick layer is fast and needs nothing external
-The quick layer SHALL finish in 30 seconds or less on the development Mac, with the build tools warm. It SHALL NOT need:
+The quick layer SHALL finish in 30 seconds or less on a development laptop, with the build tools warm. It SHALL NOT need:
 - a phone or emulator;
 - network access;
 - the recognition model files;
@@ -40,15 +40,15 @@ Score, editing, playback and practice logic SHALL be tested in the quick layer, 
 - **WHEN** a change adds a rest of one bar between loop repeats
 - **THEN** a quick-layer test proves the timing, and no UI test is needed for it
 
-### Requirement: Mac layer proves the user flows without the phone
-The mac layer SHALL run the built web app in a desktop headless browser. It SHALL use a fake platform (page scanner, music reader and file storage) and committed scores instead of a recognition run. It SHALL have one journey test per main user flow, which checks that the flow works end to end. It SHALL NOT assert layout or pixels. It SHALL finish in 3 minutes or less, warm.
+### Requirement: Browser layer proves the user flows without the phone
+The browser layer SHALL run the built web app in a desktop headless browser. It SHALL use a fake platform (page scanner, music reader and file storage) and committed scores instead of a recognition run. It SHALL have one journey test per main user flow, which checks that the flow works end to end. It SHALL NOT assert layout or pixels. It SHALL finish in 3 minutes or less, warm.
 
 #### Scenario: Screen redesigned
 - **WHEN** a change redesigns a screen
 - **THEN** that change updates the screen's journey test, and the other journey tests are unaffected
 
 #### Scenario: Editing without the phone
-- **WHEN** the mac layer opens a committed piece, steps a note's pitch down and saves
+- **WHEN** the browser layer opens a committed piece, steps a note's pitch down and saves
 - **THEN** the test sees the note change in the rendered score and in the stored piece, while the original reading is unchanged
 
 #### Scenario: Recognition outcomes without a recognition run
@@ -77,15 +77,15 @@ The device layer SHALL be one end-to-end smoke test, run before a change is arch
 The device command SHALL run the smoke test on an Android emulator that it starts and stops itself, so no phone has to be connected. A connected phone SHALL be used only when asked. The smoke test SHALL NOT depend on GPU acceleration.
 
 #### Scenario: Smoke test on the phone
-- **WHEN** the device command is asked to use the connected S24
+- **WHEN** the device command is asked to use a connected phone
 - **THEN** the same smoke test runs on the phone
 
 ### Requirement: Bundled sound files are checked off the phone
-The mac layer SHALL decode every bundled instrument sample file in the desktop browser, and SHALL fail when a file is missing from its map or does not decode.
+The browser layer SHALL decode every bundled instrument sample file in the desktop browser, and SHALL fail when a file is missing from its map or does not decode.
 
 #### Scenario: Broken sample file
 - **WHEN** a new instrument's sample set contains a file that does not decode
-- **THEN** the mac layer fails, naming the file
+- **THEN** the browser layer fails, naming the file
 
 ### Requirement: Stored exercises stay readable
 The quick layer SHALL load a committed piece folder in every storage format the app has written since the change that introduced pieces, and SHALL fail when the current code cannot open one.
@@ -95,15 +95,15 @@ The quick layer SHALL load a committed piece folder in every storage format the 
 - **THEN** the committed piece folders of the earlier formats still load, with their pages, score, photos and practice settings
 
 ### Requirement: Lower layers use committed fixtures only
-The quick and mac layers SHALL pass using only committed, self-made test material. A test that uses local copyrighted fixtures SHALL skip with a message when they are absent. Such a test SHALL NOT be the only test of a behaviour.
+The quick and browser layers SHALL pass using only committed, self-made test material. A test that uses local copyrighted fixtures SHALL skip with a message when they are absent. Such a test SHALL NOT be the only test of a behaviour.
 
 #### Scenario: Fresh checkout without local fixtures
 - **WHEN** the local fixtures folder does not exist
-- **THEN** the quick and mac layers pass, and each skipped test prints why it skipped
+- **THEN** the quick and browser layers pass, and each skipped test prints why it skipped
 
 ### Requirement: Lower layers are deterministic
-The quick and mac layers SHALL NOT depend on wall-clock timing, test order, or leftover state from earlier runs. Behaviour that depends on time SHALL be tested with a controlled clock or scripted events.
+The quick and browser layers SHALL NOT depend on wall-clock timing, test order, or leftover state from earlier runs. Behaviour that depends on time SHALL be tested with a controlled clock or scripted events.
 
 #### Scenario: Repeated runs
-- **WHEN** the mac layer runs ten times in a row with no source changes
+- **WHEN** the browser layer runs ten times in a row with no source changes
 - **THEN** every run gives the same result
