@@ -1012,6 +1012,60 @@ test('ornaments: a mordent on the first note of a chord is played on it, the oth
   assert.deepEqual(s.map((x) => x.midi), [71, 67, 65, 67], 'B4 held, then G4 F4 G4')
 })
 
+/** A quarter-note chord C4-E4 (the mark on the first note, on the top note, or on neither) and a quarter note after it. */
+const markedChord = (notations: string, on: 'first' | 'top' | 'none') =>
+  inKey([
+    x({ step: 'C', octave: 4, ...(on === 'first' ? { notations } : {}) }) +
+      x({ step: 'E', octave: 4, chord: true, ...(on === 'top' ? { notations } : {}) }) +
+      x({ step: 'G', octave: 4 }),
+  ])
+
+test('chord marks: staccato on the top note of a chord shortens the chord as it does on the first note', () => {
+  const top = ev(markedChord(art('<staccato/>'), 'top').events, 0)
+  const first = ev(markedChord(art('<staccato/>'), 'first').events, 0)
+  assert.equal(bt(first.sounding), 1 / 2, 'on the first note: half the value')
+  assert.equal(bt(top.sounding), 1 / 2, 'on the top note: half the value too')
+  assert.equal(top.staccato, true)
+  assert.equal(bt(top.length), 1)
+})
+
+test('chord marks: every articulation on a chord member is played as on the first note (staccatissimo, tenuto, breath, caesura)', () => {
+  const cases: { mark: string; notations: string; sounding: number }[] = [
+    { mark: 'staccato', notations: art('<staccato/>'), sounding: 1 / 2 },
+    { mark: 'staccatissimo', notations: art('<staccatissimo/>'), sounding: 1 / 4 },
+    { mark: 'breath', notations: art('<breath-mark/>'), sounding: 7 / 8 },
+    { mark: 'caesura', notations: art('<caesura/>'), sounding: 3 / 4 },
+  ]
+  for (const c of cases) {
+    const first = ev(markedChord(c.notations, 'first').events, 0)
+    const top = ev(markedChord(c.notations, 'top').events, 0)
+    assert.equal(bt(first.sounding), c.sounding, `${c.mark} on the first note`)
+    assert.equal(bt(top.sounding), c.sounding, `${c.mark} on the top note`)
+    assert.equal(top.staccato, first.staccato, `${c.mark}: the same release`)
+  }
+  // Tenuto on the top note takes away the staccato of the first note, as both marks on one note do.
+  const both = inKey([x({ step: 'C', octave: 4, notations: art('<staccato/>') }) + x({ step: 'E', octave: 4, chord: true, notations: art('<tenuto/>') }) + x({ step: 'G', octave: 4 })])
+  assert.equal(bt(ev(both.events, 0).sounding), 1, 'tenuto on the top note: the chord is held for its whole value')
+  assert.equal(ev(both.events, 0).staccato, false)
+  // A plain chord member does not take away the first note's breath mark or caesura.
+  for (const mark of ['<breath-mark/>', '<caesura/>']) {
+    const kept = markedChord(art(mark), 'first')
+    assert.ok(bt(ev(kept.events, 0).sounding) < 1, `${mark} on the first note still leaves its gap`)
+  }
+  assert.equal(bt(ev(markedChord(art('<staccato/>'), 'none').events, 0).sounding), 1, 'a plain chord sounds its whole value')
+})
+
+test('chord marks: a single tremolo on the top note of a chord repeats the chord, as on the first note', () => {
+  const first = soundsOf(ev(markedChord(orn('<tremolo type="single">3</tremolo>'), 'first').events, 0))
+  const top = soundsOf(ev(markedChord(orn('<tremolo type="single">3</tremolo>'), 'top').events, 0))
+  assert.equal(first.length, 16, 'C4 and E4 in eight thirty-second notes')
+  assert.deepEqual(
+    top.map((k) => [k.midi, bt(k.offset), bt(k.length)]),
+    first.map((k) => [k.midi, bt(k.offset), bt(k.length)]),
+  )
+  assert.equal(ev(markedChord(orn('<tremolo type="single">3</tremolo>'), 'none').events, 0).sounds, undefined)
+})
+
 // ---------------------------------------------------------------------------------------------------
 // Parts and accompaniment (change parts-and-accompaniment, group 4): one timeline from every part.
 // ---------------------------------------------------------------------------------------------------

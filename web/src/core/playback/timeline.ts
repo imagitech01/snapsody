@@ -466,6 +466,8 @@ interface EventMarks {
    * in `pitches`: the head, or a chord member, whose ornament is played while the other notes of the chord are held.
    */
   ornamented?: { note: Note; index: number }
+  /** Its tremolo: the head's, or else the single tremolo of the first chord member that has one (it repeats the whole chord). */
+  tremolo?: Note['tremolo']
   /** The grace notes before it, in order; each is the sounding MIDI notes of one grace note or chord. */
   graces: number[][]
   /** A two-note tremolo: how many of the event's `pitches` belong to the first note (the rest are the second's). */
@@ -612,8 +614,8 @@ function soundsOf(ev: PlaybackEvent, info: EventMarks | undefined, graceEach: Fr
       const at = mul(each, frac(lead.length))
       out.push(sound(main, at, sub(end, at), gain))
     }
-  } else if (head.tremolo && (head.tremolo.kind === 'single' || (head.tremolo.kind === 'start' && split !== undefined))) {
-    const strokes = Math.min(MAX_TREMOLO_STROKES, Math.max(1, Math.round(head.tremolo.strokes)))
+  } else if (info.tremolo && (info.tremolo.kind === 'single' || (info.tremolo.kind === 'start' && split !== undefined))) {
+    const strokes = Math.min(MAX_TREMOLO_STROKES, Math.max(1, Math.round(info.tremolo.strokes)))
     const each = frac(1, 2 ** strokes)
     // One note, or one chord, repeated; or the two notes of a pair in turn over the pair's combined value.
     const sets = split === undefined ? [pitches] : [pitches.slice(0, split), pitches.slice(split)]
@@ -797,11 +799,20 @@ function startVoice(run: VoiceRun, keys: number[], fermatas: Interval[]): void {
         last.noteIds.push(item.id)
         last.accent ||= !!item.accent || !!item.strongAccent
         last.strongAccent ||= !!item.strongAccent
+        // The other marks of any chord note are the chord's, as those of its first note are (one event, one length).
+        const f = flags.get(last)!
+        f.staccato ||= !!item.staccato
+        f.staccatissimo ||= !!item.staccatissimo
+        f.tenuto ||= !!item.tenuto
+        f.breath ||= !!item.breath
+        f.caesura ||= !!item.caesura
         const info = marks.get(last)
         if (info && item.ornament && !info.ornamented) {
           info.ornamented = { note: item, index: last.pitches.length - 1 }
           info.barAlters = new Map(barAlters)
         }
+        // A two-note tremolo is paired on the first notes only; a single tremolo on any note repeats the chord.
+        if (info && item.tremolo?.kind === 'single' && !info.tremolo) info.tremolo = item.tremolo
         barAlters.set(`${item.pitch.step}${item.pitch.octave}`, Math.round(item.pitch.alter ?? 0))
         placedIn(item.id, last)
         continue
@@ -886,6 +897,7 @@ function startVoice(run: VoiceRun, keys: number[], fermatas: Interval[]): void {
           barAlters: item.ornament ? new Map(barAlters) : new Map(),
           graces: pendingGraces,
           ...(item.ornament ? { ornamented: { note: item, index: 0 } } : {}),
+          ...(item.tremolo ? { tremolo: item.tremolo } : {}),
         })
         if (item.tremolo?.kind === 'start') tremoloOpen = ev
         barAlters.set(`${item.pitch!.step}${item.pitch!.octave}`, Math.round(item.pitch!.alter ?? 0))
