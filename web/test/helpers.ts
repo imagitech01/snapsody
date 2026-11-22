@@ -2,6 +2,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { firstVoice, partIndex, voiceView } from '../src/core/score/model.ts'
 import type { Measure, Score, VoiceScore } from '../src/core/score/model.ts'
+import type { Instrument } from '../src/core/instruments/instruments.ts'
+import type { ScoreWarning } from '../src/core/score/warnings.ts'
+import { computeScoreWarnings } from '../src/core/score/warnings.ts'
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url))
 
@@ -75,6 +78,9 @@ export function score(bodies: string[], time?: [number, number]): string {
 
 /** The first voice of the first part of a score as a voice view: the one line the app works on for now (change parts-and-accompaniment). */
 export const firstLine = (score: Score): VoiceScore => voiceView(score, firstVoice(score))
+
+/** The warnings of a score for its first part, played on `instrument`. */
+export const warningsFor = (score: Score, instrument: Instrument): ScoreWarning[] => computeScoreWarnings(score, score.parts[0]?.id ?? '', instrument)
 
 /**
  * Sets (or, with `undefined`, removes) a bar attribute of the first voice's bar `index` where the model keeps it: the clef on the

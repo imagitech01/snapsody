@@ -16,7 +16,7 @@ export interface PreparedScore {
 /**
  * The post-recognition pipeline: parse, infer a missing time signature, repair bar lengths,
  * serialise. It decides nothing about what the user should check: that is computed from the result
- * and the instrument in use (`computeWarnings`). Throws if the input is not partwise MusicXML.
+ * and the instrument in use (`computeScoreWarnings`). Throws if the input is not partwise MusicXML.
  */
 export function prepareRecognisedScore(recognised: string): PreparedScore {
   return prepareScore(parseMusicXml(recognised))

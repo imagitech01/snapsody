@@ -2,16 +2,15 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
-import { appendPages, inForceAtEnd, mergePages, preparePages } from '../src/core/pages/pages.ts'
+import { appendPages, mergePages, preparePages } from '../src/core/pages/pages.ts'
 import type { PartRead } from '../src/core/pages/pages.ts'
 import type { Score, VoiceScore, WedgeItem } from '../src/core/score/model.ts'
 import { allItemLists, isNote, isWedge, notesOf, singleVoiceScore } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
-import { computeWarnings } from '../src/core/score/warnings.ts'
 import { TWO_PAGE_IMAGES, TWO_PAGE_MERGED, TWO_PAGE_READINGS, twoPageMerged } from './fixtures/make-two-page.ts'
 import { eighths, note, quarters, read } from './helpers.ts'
-import { firstLine, setAttr } from './helpers.ts'
+import { firstLine, setAttr, warningsFor } from './helpers.ts'
 
 // Merging the readings of the pages of a piece (practice-app design D6, tasks 6.1 to 6.3).
 
@@ -224,7 +223,7 @@ test('pages: page 2 without a time signature is checked against page 1\'s 3/4 an
   assert.deepEqual(attributesSet(merged), ['1:clef', '1:key', '1:time'])
   assert.deepEqual(firstLine(merged).measures[0]?.time, { beats: 3, beatType: 4 })
   assert.ok(!result.musicxml.includes('time-signature-inferred'))
-  assert.deepEqual(computeWarnings(firstLine(merged), TENOR_SAX), [])
+  assert.deepEqual(warningsFor(merged, TENOR_SAX), [])
   // Prepared on its own, the same page is read as 4/4: two of its three bars are that long, so a time signature is inferred, and flagged.
   const alone = parsed(prepareRecognisedScore(second).musicxml)
   assert.deepEqual(firstLine(alone).measures[0]?.time, { beats: 4, beatType: 4, inferred: true })
@@ -276,7 +275,6 @@ test('pages: the pages added are checked against the time signature in force at 
 
 test('pages: the time signature in force is the last one set, also when it was set in the middle of the piece', () => {
   const existing = page([...threeQuarters(2), quarters(2), quarters(2)], { time: [3, 4], extra: { 2: TIME(2, 4) } })
-  assert.deepEqual(inForceAtEnd(parsed(existing)).time, { beats: 2, beatType: 4 })
   // Page 2's bars are two quarters long: they agree with the 2/4 in force and need nothing; a repeated 2/4 at its top is dropped.
   const result = appendPages(existing, [page([quarters(2)], { time: [2, 4] })])
   assert.deepEqual(attributesSet(parsed(result.musicxml)), ['1:clef', '1:key', '1:time', '3:time'])
@@ -430,7 +428,7 @@ test('fixture: the merged score is the exercise in 14 bars, with its clef, key a
   assert.deepEqual(attributesSet(merged), ['1:clef', '1:key', '1:time'])
   assert.deepEqual(firstLine(merged).measures[0]?.time, { beats: 3, beatType: 4 })
   assert.equal(new Set(ids(merged)).size, EXERCISE.flat().length)
-  assert.deepEqual(computeWarnings(firstLine(merged), TENOR_SAX), [])
+  assert.deepEqual(warningsFor(merged, TENOR_SAX), [])
   // What the pages had besides notes: dynamics, slurs, staccato, triplets.
   assert.deepEqual(firstLine(merged).measures.flatMap((m, i) => m.items.filter((item) => item.kind === 'dynamic').map((item) => `${i + 1}:${item.kind === 'dynamic' ? item.mark : ''}`)), ['1:mf', '12:p'])
   assert.equal(notesOf(firstLine(merged).measures[2]!).filter((n) => n.slurs.length > 0).length, 2)

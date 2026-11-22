@@ -4,7 +4,6 @@ import { isNote, notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
-import { computeWarnings } from '../src/core/score/warnings.ts'
 import {
   PRACTICE_EXERCISE,
   PRACTICE_EXERCISE_RECOGNISED,
@@ -12,7 +11,7 @@ import {
   recognisedVariant,
 } from './fixtures/make-practice-exercise.ts'
 import { read } from './helpers.ts'
-import { firstLine } from './helpers.ts'
+import { firstLine, warningsFor } from './helpers.ts'
 
 // The committed practice-exercise scores the UI tests use (openspec test-pyramid design T6).
 
@@ -40,14 +39,14 @@ test('practice exercise: 19 bars in 3/4, G major, with what the UI tests need, a
   assert.deepEqual(parseMusicXml(xml), score)
   assert.equal(serializeMusicXml(parseMusicXml(xml)), xml)
   // Every bar is full.
-  assert.deepEqual(computeWarnings(firstLine(parseMusicXml(prepareRecognisedScore(read(PRACTICE_EXERCISE)).musicxml)), TENOR_SAX), [])
+  assert.deepEqual(warningsFor(parseMusicXml(prepareRecognisedScore(read(PRACTICE_EXERCISE)).musicxml), TENOR_SAX), [])
 })
 
 test('practice exercise: the recognised variant gets the triplet repair in bar 10 and a range warning in bar 18', () => {
   const prepared = prepareRecognisedScore(read(PRACTICE_EXERCISE_RECOGNISED))
   assert.equal(prepared.bars, 19)
   assert.deepEqual(prepared.repairs.map((r) => r.bar), ['10'])
-  const warnings = computeWarnings(firstLine(parseMusicXml(prepared.musicxml)), TENOR_SAX)
+  const warnings = warningsFor(parseMusicXml(prepared.musicxml), TENOR_SAX)
   assert.deepEqual(warnings.map((f) => [f.kind, f.bar]), [['out-of-range', '18']])
   assert.match(warnings[0]!.message, /A3/)
   assert.ok(!read(PRACTICE_EXERCISE_RECOGNISED).includes('<beam'), 'homr writes no beams')

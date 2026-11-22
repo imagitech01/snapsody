@@ -5,13 +5,12 @@ import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { eq, frac } from '../src/core/score/rational.ts'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { barLength, beatsText, inferTimeSignature, midiName, repairBarLengths } from '../src/core/score/repairs.ts'
-import { computeWarnings } from '../src/core/score/warnings.ts'
 import { eighths, note, quarters, score } from './helpers.ts'
-import { firstLine } from './helpers.ts'
+import { firstLine, warningsFor } from './helpers.ts'
 
 const full34 = quarters(3)
 /** What is left for the user to check in a score, for the tenor saxophone. */
-const warningsOf = (s: ReturnType<typeof parseMusicXml>) => computeWarnings(firstLine(s), TENOR_SAX)
+const warningsOf = (s: ReturnType<typeof parseMusicXml>) => warningsFor(s, TENOR_SAX)
 
 test('bar length: six plain eighths + quarter in 3/4 is repaired to two triplet groups', () => {
   const s = parseMusicXml(score([full34, eighths(6) + note({ step: 'G', type: 'quarter' }), full34], [3, 4]))

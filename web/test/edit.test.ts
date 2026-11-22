@@ -6,7 +6,7 @@ import { firstVoice, isNote, isWedge, noteIndex, notesOf, partMultiRestRuns, sam
 import type { Note, Score, VoiceRef, VoiceScore } from '../src/core/score/model.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import { EditSession } from '../src/core/score/editSession.ts'
-import { computeScoreWarnings, computeWarnings } from '../src/core/score/warnings.ts'
+import { computeScoreWarnings } from '../src/core/score/warnings.ts'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { frac } from '../src/core/score/rational.ts'
 import { startingTempo, tempoSetup } from '../src/core/playback/tempo.ts'
@@ -16,7 +16,7 @@ import type { ElementRef } from '../src/core/score/elements.ts'
 import { buildTimeline } from '../src/core/playback/timeline.ts'
 import { renderScore } from '../src/core/score/render.ts'
 import { COMMITTED_FIXTURE, HOMR_MARKS_FIXTURE, MELODY_PIANO_FIXTURE, read } from './helpers.ts'
-import { firstLine, setAttr } from './helpers.ts'
+import { firstLine, setAttr, warningsFor } from './helpers.ts'
 
 const TICKS: Record<string, number> = { whole: 48, half: 24, quarter: 12, eighth: 6, '16th': 3 }
 interface S { id: string; step?: string; octave?: number; alter?: number; acc?: string; type?: string; rest?: boolean }
@@ -35,7 +35,7 @@ function score(bars: S[][], opts: { fifths?: number; beats?: number; beatType?: 
   return parseMusicXml(`<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name></part-name></score-part></part-list><part id="P1">${ms}</part></score-partwise>`)
 }
 /** The warnings of a score for the tenor saxophone (what the editor shows after every edit). */
-const recheck = (s: Score) => computeWarnings(firstLine(s), TENOR_SAX)
+const recheck = (s: Score) => warningsFor(s, TENOR_SAX)
 const notes = (s: Score): Note[] => firstLine(s).measures.flatMap((m) => m.items.filter(isNote))
 const byId = (s: Score, id: string): Note => notes(s).find((n) => n.id === id)!
 const name = (n: Note): string => `${n.pitch!.step}${n.pitch!.alter === 1 ? '#' : n.pitch!.alter === -1 ? 'b' : ''}${n.pitch!.octave}`
@@ -729,7 +729,7 @@ test('deleteElement: each kind is removed alone, undo brings it back, and the ba
     { kind: 'time', bar: 5 },
   ]
   const xmlBefore = serializeMusicXml(base)
-  const warningsBefore = computeWarnings(firstLine(base), TENOR_SAX)
+  const warningsBefore = warningsFor(base, TENOR_SAX)
   for (const ref of refs) {
     const session = new EditSession(base)
     session.apply((s) => ed.deleteElement(s, ref))
@@ -739,7 +739,7 @@ test('deleteElement: each kind is removed alone, undo brings it back, and the ba
     for (const other of refs) if (other !== ref && !(ref.kind === 'tie' && other.kind === 'tie')) assert.ok(describeElement(firstLine(after), other), `${JSON.stringify(other)} stays when ${JSON.stringify(ref)} goes`)
     assert.equal(firstLine(after).measures.flatMap((m) => m.items.filter(isNote)).length, firstLine(base).measures.flatMap((m) => m.items.filter(isNote)).length, 'no note goes')
     // The bar check runs on the result (a deleted 2/4 change leaves bar 6 too short for 3/4).
-    const warnings = computeWarnings(firstLine(after), TENOR_SAX)
+    const warnings = warningsFor(after, TENOR_SAX)
     if (ref.kind === 'time') assert.ok(warnings.some((w) => w.kind === 'bar-length' && w.bar === '6'), 'bar 6 no longer fits')
     else assert.deepEqual(warnings, warningsBefore)
     assert.ok(session.undo())
@@ -840,9 +840,9 @@ test('deleteTime: a deleted time change makes the bar check flag the bars that n
   // 3/4, then a 2/4 change at bar 3: bars 3-4 hold two beats.
   const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c' }], [{ id: 'd' }, { id: 'e' }, { id: 'f' }], [{ id: 'g' }, { id: 'h' }], [{ id: 'i' }, { id: 'j' }]])
   setAttr(s, 2, 'time', { beats: 2, beatType: 4 })
-  assert.deepEqual(computeWarnings(firstLine(s), TENOR_SAX).filter((w) => w.kind === 'bar-length'), [])
+  assert.deepEqual(warningsFor(s, TENOR_SAX).filter((w) => w.kind === 'bar-length'), [])
   ed.deleteTime(s, 2)
-  assert.deepEqual(computeWarnings(firstLine(s), TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar), ['3', '4'])
+  assert.deepEqual(warningsFor(s, TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar), ['3', '4'])
   assert.throws(() => ed.deleteTime(s, 2), ed.EditError)
   assert.throws(() => ed.deleteTime(s, 0), ed.EditError)
 })

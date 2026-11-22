@@ -1,5 +1,5 @@
-import type { Bar, Clef, KeySignature, Measure, Note, Part, PartBar, Score, TimeSignature } from '../score/model.ts'
-import { allItemLists, firstVoice, voiceView } from '../score/model.ts'
+import type { Bar, Clef, KeySignature, Note, Part, PartBar, Score, TimeSignature } from '../score/model.ts'
+import { allItemLists } from '../score/model.ts'
 import { isDirection, isNote, isWedge } from '../score/model.ts'
 import { dropLooseSlurEnds, parseMusicXml, serializeMusicXml } from '../score/musicxml.ts'
 import { prepareScore, repairVoices } from '../score/prepare.ts'
@@ -45,13 +45,6 @@ export interface PageOptions {
   timeEstimated?: boolean
 }
 
-/** The clef, key and time signature in force: the last ones set at or before a point in a score. */
-export interface InForce {
-  clef?: Clef
-  key?: KeySignature
-  time?: TimeSignature
-}
-
 /** A prepared score, and where each page it was made from sits in it. */
 export interface PreparedPages extends PreparedScore {
   /** One range per page given, in order; bar numbers of the combined score. */
@@ -73,13 +66,6 @@ export interface MergedPages {
   ranges: PageRange[]
   /** What the merge left out (a part only on a later page), in words. */
   warnings: string[]
-}
-
-/** The clef, key and time signature in force after the last bar of `score` (its first part's first voice). */
-export function inForceAtEnd(score: Score): InForce {
-  const inForce: InForce = {}
-  for (const m of voiceView(score, firstVoice(score)).measures) track(m, inForce)
-  return inForce
 }
 
 /**
@@ -410,13 +396,6 @@ function parseAll(rawPages: readonly string[], options: ReadonlyArray<PageOption
     if (options[index]?.timeEstimated && first) delete first.time
     return score
   })
-}
-
-/** Takes the clef, key and time signature a bar sets into `inForce`. */
-function track(m: Measure, inForce: InForce): void {
-  if (m.clef) inForce.clef = m.clef
-  if (m.key) inForce.key = m.key
-  if (m.time) inForce.time = m.time
 }
 
 const DEFAULT_CLEF_LINE: Record<string, number> = { G: 2, F: 4, C: 3 }

@@ -11,27 +11,27 @@ import { eq, frac } from '../src/core/score/rational.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
-import { computeScoreWarnings, computeWarnings } from '../src/core/score/warnings.ts'
+import { computeScoreWarnings } from '../src/core/score/warnings.ts'
 import { HOMR_MARKS_FIXTURE, MELODY_PIANO_FIXTURE, eighths, note, quarters, read, score } from './helpers.ts'
-import { firstLine } from './helpers.ts'
+import { firstLine, warningsFor } from './helpers.ts'
 
 // Warnings are computed from the score and the instrument in use, never stored (design D4).
 
 /** One 3/4 bar: A3, B3, C4 (a written A3 is below the tenor saxophone's range, and fine on a piano). */
 const withA3 = (): Score => parseMusicXml(score([note({ step: 'A', octave: 3, type: 'quarter' }) + note({ step: 'B', octave: 3, type: 'quarter' }) + note({ step: 'C', octave: 4, type: 'quarter' })], [3, 4]))
-const kinds = (s: Score, instrument: Instrument): string[] => computeWarnings(firstLine(s), instrument).map((w) => `${w.kind}@${w.bar ?? '-'}`)
+const kinds = (s: Score, instrument: Instrument): string[] => warningsFor(s, instrument).map((w) => `${w.kind}@${w.bar ?? '-'}`)
 
 test('warnings: a written A3 is flagged for the tenor saxophone and not for the piano', () => {
   const s = withA3()
   const a3 = notesOf(firstLine(s).measures[0]!)[0]!
-  const tenor = computeWarnings(firstLine(s), TENOR_SAX)
+  const tenor = warningsFor(s, TENOR_SAX)
   assert.equal(tenor.length, 1)
   assert.deepEqual(
     { kind: tenor[0]!.kind, bar: tenor[0]!.bar, noteId: tenor[0]!.noteId, pitch: tenor[0]!.pitch, instrument: tenor[0]!.instrument },
     { kind: 'out-of-range', bar: '1', noteId: a3.id, pitch: 'A3', instrument: 'tenor-sax' },
   )
   assert.match(tenor[0]!.message, /Bar 1: A3 is outside the written range of the instrument \(Tenor saxophone, B♭3–F♯6\)/)
-  assert.deepEqual(computeWarnings(firstLine(s), PIANO), [])
+  assert.deepEqual(warningsFor(s, PIANO), [])
   assert.deepEqual(a3.pitch, { step: 'A', octave: 3 }, 'the note keeps its pitch as read')
 })
 
@@ -54,7 +54,7 @@ test('warnings: the range is the written range of the instrument in use', () => 
     note({ type: 'quarter', rest: true }).repeat(4 - pitches.length)
   // E3 D#3 | B5 C6 | G6
   const s = parseMusicXml(score([bar(['E', 3], ['D', 3, 1]), bar(['B', 5], ['C', 6]), bar(['G', 6])], [4, 4]))
-  const outside = (instrument: Instrument): string[] => computeWarnings(firstLine(s), instrument).map((w) => w.pitch!)
+  const outside = (instrument: Instrument): string[] => warningsFor(s, instrument).map((w) => w.pitch!)
   assert.deepEqual(outside(TENOR_SAX), ['E3', 'D♯3', 'G6'])
   assert.deepEqual(outside(ALTO_SAX), ['E3', 'D♯3', 'G6'])
   assert.deepEqual(outside(CLARINET), ['D♯3'])
@@ -70,7 +70,7 @@ test('warnings: computing them never changes the score (the triplet repair is no
   const before = structuredClone(s)
   const xml = serializeMusicXml(s)
   assert.deepEqual(kinds(s, TENOR_SAX), ['bar-length@2'])
-  assert.deepEqual(computeWarnings(firstLine(s), TENOR_SAX), computeWarnings(firstLine(s), TENOR_SAX), 'the same twice')
+  assert.deepEqual(warningsFor(s, TENOR_SAX), warningsFor(s, TENOR_SAX), 'the same twice')
   assert.deepEqual(s, before)
   assert.equal(serializeMusicXml(s), xml)
 })
@@ -81,7 +81,7 @@ test('warnings: the time signature is warned about from the score alone, also af
   assert.deepEqual(prepared.repairs, [])
   const loaded = parseMusicXml(prepared.musicxml)
   assert.deepEqual(kinds(loaded, TENOR_SAX), ['time-signature-inferred@-'])
-  assert.match(computeWarnings(firstLine(loaded), TENOR_SAX)[0]!.message, /3\/4 was inferred/)
+  assert.match(warningsFor(loaded, TENOR_SAX)[0]!.message, /3\/4 was inferred/)
   // Bars that do not agree on one length leave the score without a time signature.
   const missing = parseMusicXml(prepareRecognisedScore(score([quarters(2), quarters(3), quarters(4)])).musicxml)
   assert.deepEqual(kinds(missing, TENOR_SAX), ['time-signature-missing@-'])
@@ -98,7 +98,7 @@ test('warnings: time signature first, then bars and notes in score order', () =>
 })
 
 test('warnings: an empty score has none', () => {
-  assert.deepEqual(computeWarnings({ measures: [] }, TENOR_SAX), [])
+  assert.deepEqual(computeScoreWarnings({ parts: [], bars: [] }, '', TENOR_SAX), [])
 })
 
 test('warnings: the marks homr writes do not trip the bar check or the repairs (change more-marks)', () => {
@@ -110,10 +110,10 @@ test('warnings: the marks homr writes do not trip the bar check or the repairs (
   assert.deepEqual(notesOf(tremoloBar).map((n) => n.tremolo?.kind), ['start', 'stop'])
   assert.ok(eq(barLength(tremoloBar), frac(1)), 'the pair counts for both of its notes')
   assert.ok(notesOf(firstLine(s).measures[0]!).some((n) => n.grace))
-  assert.deepEqual(computeWarnings(firstLine(s), PIANO), [])
+  assert.deepEqual(warningsFor(s, PIANO), [])
   const prepared = prepareRecognisedScore(read(HOMR_MARKS_FIXTURE))
   assert.deepEqual(prepared.repairs, [])
-  assert.deepEqual(computeWarnings(firstLine(parseMusicXml(prepared.musicxml)), PIANO), [])
+  assert.deepEqual(warningsFor(parseMusicXml(prepared.musicxml), PIANO), [])
 })
 
 // ---- Several parts (change parts-and-accompaniment, task 3.4) ----------------------------------------------------

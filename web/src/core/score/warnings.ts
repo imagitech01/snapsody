@@ -9,7 +9,7 @@ import { barLength, beatsText, effectiveTimes, expectedLength, hasNotes, midiNam
  * Warnings: what the user should check in a score (practice-app design D4, specs `score-recognition`
  * "Range check" and `score-editing` "Flags shown for review").
  *
- * They are computed, never stored. `computeWarnings` is a pure function of the score and the
+ * They are computed, never stored. `computeScoreWarnings` is a pure function of the score and the
  * instrument in use, so a warning follows the instrument (a written A3 is flagged for the tenor
  * saxophone and not for the piano) and disappears by itself once the score is fixed. The only thing
  * persisted is the record of the automatic repairs (repairs.ts) and the `inferred` mark on the time
@@ -73,15 +73,6 @@ function placeFields(where?: Where): Partial<ScoreWarning> {
   return { part: where.part, staff: where.staff, voice: where.voice, ...(where.hand ? { hand: where.hand } : {}), ...(where.voiceNumber ? { voiceNumber: where.voiceNumber } : {}) }
 }
 
-/**
- * Every warning of one voice for this instrument: the time signature first (it concerns the whole
- * piece), then the bars and notes in score order, a bar's length before its notes' ranges. Does not
- * touch the score.
- */
-export function computeWarnings(score: VoiceScore, instrument: Instrument): ScoreWarning[] {
-  return [...timeSignatureWarnings(score), ...voiceWarnings(score, instrument).flat()]
-}
-
 /** The bar and range warnings of one voice, by bar (index from 0). A voice without an instrument gets the bar check only. */
 function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, laterVoice = false, whereIn?: (bar: number) => Where): ScoreWarning[][] {
   const times = effectiveTimes(score)
@@ -132,8 +123,8 @@ function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, la
  * (read on the first part's first voice), the bar check on every voice, and the range check only on the voices of
  * the user's part (`yourPart`, a part id), with that part's instrument: the piano's for a two-staff part, any
  * other part the piece's instrument (`instrumentOfPart`). The other parts are not checked for range: a left hand
- * down to C2 is not a misread on a tenor saxophone. Order as `computeWarnings`: by bar, and in a bar by voice. A voice with
- * nothing in a bar is not checked in it. For a one-voice score it is `computeWarnings`.
+ * down to C2 is not a misread on a tenor saxophone. The time signature comes first, then the bars in score order, and in a bar the voices in order, a bar's length
+ * before its notes' ranges. A voice with nothing in a bar is not checked in it. Does not touch the score.
  */
 export function computeScoreWarnings(score: Score, yourPart: string, pieceInstrument: Instrument): ScoreWarning[] {
   const refs = voices(score)

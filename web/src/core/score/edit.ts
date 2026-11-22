@@ -12,7 +12,7 @@ import { add, cmp, eq, frac, sub } from './rational.ts'
  *
  * Nothing in here checks the score afterwards: what the user should check (bar lengths, range, the
  * time signature) is computed from the score and the instrument in use, whenever it is needed
- * (warnings.ts, `computeWarnings`), so it also follows undo and redo. An edit that breaks a bar is
+ * (warnings.ts, `computeScoreWarnings`), so it also follows undo and redo. An edit that breaks a bar is
  * allowed; the bar is flagged, never repaired.
  *
  * Pitch and accidentals: `pitch.alter` is always the SOUNDING alter. `note.accidental` is the printed

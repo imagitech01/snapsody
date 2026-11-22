@@ -4,12 +4,11 @@ import { notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
-import { computeWarnings } from '../src/core/score/warnings.ts'
 import { COMMITTED_FIXTURE, LOCAL_EXERCISE_87, LOCAL_PAGE, eighths, note, quarters, read, score, skipUnless } from './helpers.ts'
-import { firstLine } from './helpers.ts'
+import { firstLine, warningsFor } from './helpers.ts'
 
 /** What the user should check in a prepared score, for the tenor saxophone. */
-const warningsOf = (musicxml: string) => computeWarnings(firstLine(parseMusicXml(musicxml)), TENOR_SAX)
+const warningsOf = (musicxml: string) => warningsFor(parseMusicXml(musicxml), TENOR_SAX)
 
 test('prepare: pipeline repairs and serialises; the warnings are computed from the result', () => {
   const xml = score(
