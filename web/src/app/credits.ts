@@ -84,15 +84,15 @@ export const CREDITS: readonly Credit[] = [
   {
     id: 'verovio',
     name: 'Verovio',
-    version: '6.4.0',
+    version: '6.4.1',
     licence: 'LGPL-3.0',
     source: 'https://github.com/rism-digital/verovio',
     group: 'showing',
-    // Task 4.2: the code compiled into the toolkit, read from its repository at version-6.4.0. The notices are in the licence text.
+    // Task 4.2: the code compiled into the toolkit, read from its repository at version-6.4.0 (unchanged in 6.4.1). The notices are in the licence text.
     notices: [
       'Includes pugixml, jsonxx, miniz-cpp, midifile, Tuning Library, CRC-32, base64 and libmei; their notices are in the licence text.',
     ],
-    covers: ['npm:verovio@6.4.0'],
+    covers: ['npm:verovio@6.4.1'],
   },
   {
     id: 'leipzig',
@@ -195,11 +195,11 @@ export const CREDITS: readonly Credit[] = [
   {
     id: 'preact',
     name: 'Preact',
-    version: '11.1.1',
+    version: '11.2.0',
     licence: 'MIT',
     source: 'https://github.com/preactjs/preact',
     group: 'app',
-    covers: ['npm:preact@11.1.1'],
+    covers: ['npm:preact@11.2.0'],
   },
   {
     id: 'preact-signals',

@@ -171,7 +171,7 @@ test('settings: Credits lists the components, Licence shows homr and the SoundFo
     await heading(page, 'Credits and licences').waitFor()
     const entry = (name: string) => page.getByRole('button', { name: new RegExp(`^${name}\\b`) })
     assert.match(await textOf(entry('homr')), /0\.7\.1 · AGPL-3\.0/)
-    assert.match(await textOf(entry('Verovio')), /6\.4\.0 · LGPL-3\.0/)
+    assert.match(await textOf(entry('Verovio')), /6\.4\.1 · LGPL-3\.0/)
     assert.match(await textOf(entry('MuseScore_General')), /0\.2 · MIT/)
     const mlkit = entry('Google ML Kit Document Scanner')
     assert.match(await textOf(mlkit), /16\.0\.0 · ML Kit Terms of Service · Not open source/)

@@ -21,7 +21,7 @@ homr 0.7.1 - AGPL-3.0
 
 Score rendering
 ---------------
-Verovio 6.4.0 - LGPL-3.0 (GNU Lesser General Public License v3, with the GPL-3.0 text
+Verovio 6.4.1 - LGPL-3.0 (GNU Lesser General Public License v3, with the GPL-3.0 text
   it refers to)
   https://github.com/rism-digital/verovio
   Includes third-party code (pugixml, jsonxx, miniz-cpp, midifile, Tuning
@@ -108,7 +108,7 @@ typing_extensions 4.16.0 - PSF-2.0
 
 User interface
 --------------
-Preact 11.1.1 - MIT
+Preact 11.2.0 - MIT
   https://github.com/preactjs/preact
 Preact Signals 2.11.4 (with signals-core 1.14.5) - MIT
   https://github.com/preactjs/signals

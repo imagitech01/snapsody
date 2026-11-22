@@ -13,9 +13,9 @@
     "sync:android": "npm run build && npm run -s cap -- sync android"
   },
   "devDependencies": {
-    "playwright": "1.64.1",
+    "playwright": "1.65.1",
     "typescript": "7.0.2",
-    "vite": "8.3.5"
+    "vite": "8.3.8"
   },
   "dependencies": {
     "@capacitor-community/keep-awake": "8.0.1",
@@ -25,7 +25,7 @@
     "@capacitor/device": "8.0.3",
     "@capacitor/filesystem": "8.1.5",
     "@preact/signals": "2.11.4",
-    "preact": "11.1.1",
-    "verovio": "6.4.0"
+    "preact": "11.2.0",
+    "verovio": "6.4.1"
   }
 }

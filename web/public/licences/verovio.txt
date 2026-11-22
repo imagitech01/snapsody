@@ -1,4 +1,4 @@
-Source: https://github.com/rism-digital/verovio/tree/version-6.4.0 (tag version-6.4.0, commit cb5fcfa1178238138aa7f51f1e55f6a743eb26cc)
+Source: https://github.com/rism-digital/verovio/tree/version-6.4.1 (tag version-6.4.1, commit fbe8f4695ab0a123cb096e0cf92354b44f7a2fb8)
 Files: COPYING.LESSER (GNU LGPL 3.0), COPYING (GNU GPL 3.0), then the notices of third-party code compiled into the toolkit.
 Verovio is available under the LGPL (README.md of the repository).
 
@@ -855,7 +855,7 @@ Public License instead of this License.  But first, please read
 
 
 ########################################################################
-THIRD-PARTY CODE COMPILED INTO THE VEROVIO TOOLKIT (version 6.4.0)
+THIRD-PARTY CODE COMPILED INTO THE VEROVIO TOOLKIT (version 6.4.1)
 ########################################################################
 
 
