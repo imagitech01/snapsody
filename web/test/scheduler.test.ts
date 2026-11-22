@@ -694,3 +694,62 @@ test('scheduler (parts): a restart in mid-bar strikes a held note of another voi
   assert.ok(bass[1]!.spec.when > 2 && bass[1]!.spec.when < 3, 'at the start of the quarter that was sounding')
   assert.equal(bass[1]!.handle.releases.length, 1, 'and it ends with the bar')
 })
+
+// A left-hand note tied from bar 1 into bar 2 (and on through bar 3 when `bars` is 3) under four quarters a bar, looped on bar 2.
+function heldIntoLoop(bars: 2 | 3) {
+  const quarters = n({ step: 'C', octave: 5 }) + n({ step: 'D', octave: 5 }) + n({ step: 'E', octave: 5 }) + n({ step: 'F', octave: 5 })
+  const tied = (tie: 'start' | 'stop' | 'both'): string => n({ step: 'C', octave: 3, type: 'whole', tie })
+  const bass = bars === 2 ? [tied('start'), tied('stop')] : [tied('start'), tied('both'), tied('stop')]
+  const score = partsOf([
+    { id: 'P1', bars: Array.from({ length: bars }, () => quarters) },
+    { id: 'P2', bars: bass },
+  ])
+  const t = buildTimeline(score, TENOR_SAX)
+  const held = t.events.find((e) => e.voice.part === 'P2' && !e.rest)!
+  return { t, held, loop: loopSpanOf(t, { start: 1, end: 1 })! }
+}
+const bassOf = (r: { output: FakeOutput }): Recorded[] => r.output.notes.filter((x) => x.spec.midi[0] === 34)
+
+test('scheduler (loop): a note held into the loop from before it is struck again on every pass, not only the first', () => {
+  const { t, held, loop } = heldIntoLoop(2)
+  assert.equal(held.start.n, 0, 'one tied event from beat 0')
+  assert.equal(held.length.n / held.length.d, 8, 'through bar 2')
+  const r = partsRig(t)
+  r.scheduler.start(t.bars[1]!.firstEvent, { loop, delay: 0 })
+  r.run(7) // passes of 4 beats at 120 bpm: 2 s each, so passes 0-3
+  const when = bassOf(r).map((x) => x.spec.when)
+  assert.deepEqual(when, [0, 2, 4, 6], 'at the start of every pass, once')
+  for (const x of bassOf(r).slice(0, 3)) assert.equal(x.handle.releases.length, 1, 'each strike ends once')
+})
+
+test('scheduler (loop): a note held past the end of the loop is cut at the loop end on every pass', () => {
+  const { t, held, loop } = heldIntoLoop(3)
+  assert.equal(held.length.n / held.length.d, 12, 'tied through bar 3')
+  const r = partsRig(t)
+  r.scheduler.start(t.bars[1]!.firstEvent, { loop, delay: 0 })
+  r.run(7)
+  const bass = bassOf(r)
+  assert.deepEqual(bass.map((x) => x.spec.when), [0, 2, 4, 6])
+  bass.slice(0, 3).forEach((x, k) => close(endOf(x), 2 * (k + 1), `pass ${k} ends with the loop`))
+})
+
+test('scheduler (loop): started before the loop, the held note sounds from its own start and is struck again on every later pass', () => {
+  const { t, loop } = heldIntoLoop(2)
+  const r = partsRig(t)
+  r.scheduler.start(0, { loop, delay: 0 })
+  r.run(9) // bar 1 (2 s), then passes of bar 2 from 2 s
+  const bass = bassOf(r)
+  assert.deepEqual(bass.map((x) => x.spec.when), [0, 4, 6, 8], 'once from bar 1 through the first pass (not again at the loop start), then at every repeat')
+  close(endOf(bass[0]!), 4, 'the first one lasts through bar 1 and the first pass')
+})
+
+test('scheduler (loop): started in the middle of the loop, the held note is struck there, then at the start of every pass', () => {
+  const { t, loop } = heldIntoLoop(2)
+  const third = t.events.find((e) => e.voice.part === 'P1' && e.barIndex === 1 && e.start.n === 6)!
+  const r = partsRig(t)
+  r.scheduler.start(third.index, { loop, delay: 0 })
+  r.run(6) // beat 6 to the loop end is 1 s, then passes of 2 s
+  const bass = bassOf(r)
+  assert.deepEqual(bass.map((x) => x.spec.when), [0, 1, 3, 5])
+  close(endOf(bass[0]!), 1, 'the first strike ends with the loop')
+})

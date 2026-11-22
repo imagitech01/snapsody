@@ -489,16 +489,17 @@ export class Scheduler {
     const playedIndex = new Set(played.map((e) => e.index))
     const actions: Action[] = []
     // Everything jumps back to the start time together: a note of another voice that is sounding at that time is struck
-    // again there, for what is left of it (a held bass under the note we restart on).
-    if (pass === 0) {
-      for (const ev of events) {
-        if (ev.rest || cmp(ev.start, this.firstBeat) >= 0) continue
-        const off = add(ev.start, ev.sounding)
-        if (cmp(add(ev.start, ev.length), this.firstBeat) <= 0 || cmp(off, this.firstBeat) <= 0) continue
-        const stop = loop && cmp(off, loop.end) > 0 ? loop.end : off
-        actions.push({ beat: this.firstBeat, kind: 'on', event: ev })
-        actions.push({ beat: stop, kind: 'off', event: ev })
-      }
+    // again there, for what is left of it (a held bass under the note we restart on). Every later pass of a loop jumps
+    // back to the loop's start the same way, so a note held into the loop from before it (a tied bass) sounds on every
+    // pass, not only the first; the notes that start in the loop are the pass's own.
+    const entry = pass === 0 ? this.firstBeat : loop!.start
+    for (const ev of events) {
+      if (ev.rest || cmp(ev.start, entry) >= 0) continue
+      const off = add(ev.start, ev.sounding)
+      if (cmp(add(ev.start, ev.length), entry) <= 0 || cmp(off, entry) <= 0) continue
+      const stop = loop && cmp(off, loop.end) > 0 ? loop.end : off
+      actions.push({ beat: add(entry, offset), kind: 'on', event: ev })
+      actions.push({ beat: add(stop, offset), kind: 'off', event: ev })
     }
     if (pass === 0 && this.countInSpec) {
       const { clicks, spacing } = this.countInSpec
