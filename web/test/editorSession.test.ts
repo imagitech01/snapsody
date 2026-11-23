@@ -1034,7 +1034,7 @@ test('bar numbers: short random sessions of the bar actions the session offers, 
           edited(`delete ${i + 1}`, spliced(labels, i, 1))
           counts.deleted++
         } else if (kind === 2 && idsOf(editor, i + 1).length > 1 && editor.canAddBarLineBefore(idsOf(editor, i + 1)[1]!)) {
-          editor.apply((s) => splitBar(s, idsOf(editor, i + 1)[1]!))
+          assert.ok(editor.addBarLineBefore(idsOf(editor, i + 1)[1]!), editor.message.value ?? '')
           edited(`split ${i + 1}`, spliced(labels, i, 0, labels[i]!))
           counts.split++
         } else if (kind === 3) {
