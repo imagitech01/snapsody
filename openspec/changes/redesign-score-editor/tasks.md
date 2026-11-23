@@ -84,7 +84,7 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 ## 12. Integration
 
 - [ ] 12.1 Play a piece by ear after editing it with the new tools: an added *p*, a breath mark, a first and second ending, a deleted bar. Manual, by ear.
-- [ ] 12.2 Run `make test-browser`, then `make test-device` once on the emulator. Verify: both pass.
+- [x] 12.2 Run `make test-browser`, then `make test-device` once on the emulator. Verify: both pass.
 
 ## Workflow follow-up
 
