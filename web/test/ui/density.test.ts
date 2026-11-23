@@ -155,16 +155,23 @@ for (const viewport of VIEWPORTS) {
         await go(page, 'closeSheet', 'tools')
         await page.getByRole('dialog').waitFor({ state: 'detached' })
 
-        // The editor (change redesign-score-editor, task 6.1): its four tabs, and the full score. Task 10.1 adds both views.
+        // The editor (change redesign-score-editor, tasks 6.1 and 10.1): its four tools tabs in the Notes view and in the Grid
+        // view, and the full score.
         await go(page, 'push', { name: 'editor', pieceId: ID.ode })
         await page.locator('.editor-bar-host .score-view[data-rendered="true"]').waitFor()
         await settle(page)
         const tabs = page.getByRole('radiogroup', { name: 'Editing tools' }).getByRole('radio')
         assert.equal(await tabs.count(), 4)
-        for (const [index, name] of ['notes', 'marks', 'bars', 'score settings'].entries()) {
-          await tabs.nth(index).click()
-          await settle(page)
-          await check(page, at(`editor, ${name}`), problems)
+        const views = page.getByRole('radiogroup', { name: 'View' }).getByRole('radio')
+        assert.deepEqual(await views.allTextContents(), ['Notes', 'Grid'])
+        for (const [v, view] of ['notes', 'grid'].entries()) {
+          await views.nth(v).click()
+          await page.locator(view === 'grid' ? '.editor-blocks[data-bar]' : '.editor-bar-host .score-view[data-rendered="true"]').waitFor()
+          for (const [index, name] of ['notes', 'marks', 'bars', 'score'].entries()) {
+            await tabs.nth(index).click()
+            await settle(page)
+            await check(page, at(`editor, ${view} view, ${name} tools`), problems)
+          }
         }
         await page.getByRole('button', { name: 'Full score' }).click()
         await settle(page)

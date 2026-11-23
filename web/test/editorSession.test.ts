@@ -148,28 +148,29 @@ test('edits: a pitch step with undo and redo; the score signal follows, and undo
   assert.equal(editor.canUndo.value, false)
 })
 
-test('edits: the selected bar\'s bar lines follow the selection, every edit, undo and redo (change edit-bar-lines)', async () => {
+test('edits: the current bar\'s bar lines follow the current bar, every edit, undo and redo (change edit-bar-lines)', async () => {
   const { editor } = await setup()
-  assert.equal(editor.selectedBarLines.value, undefined, 'no bar selected')
+  assert.equal(editor.currentBar.value, 1, 'nothing selected, bar 1 current')
+  assert.deepEqual(editor.barLines.value, { start: 'normal', end: 'normal', times: 2 }, 'with nothing selected, the current bar\'s')
   editor.selectBar(2)
-  assert.deepEqual(editor.selectedBarLines.value, { start: 'normal', end: 'normal', times: 2 }, 'a bar without a note')
+  assert.deepEqual(editor.barLines.value, { start: 'normal', end: 'normal', times: 2 }, 'a bar without a note')
   editor.apply((s) => setBarStart(s, 1, 'repeat'))
   editor.apply((s) => setBarEnd(s, 1, 'repeat'))
   editor.apply((s) => setRepeatTimes(s, 1, 3))
-  assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 3 })
+  assert.deepEqual(editor.barLines.value, { start: 'repeat', end: 'repeat', times: 3 })
   editor.undo()
-  assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'repeat', times: 2 })
+  assert.deepEqual(editor.barLines.value, { start: 'repeat', end: 'repeat', times: 2 })
   editor.undo()
-  assert.deepEqual(editor.selectedBarLines.value, { start: 'repeat', end: 'normal', times: 2 })
+  assert.deepEqual(editor.barLines.value, { start: 'repeat', end: 'normal', times: 2 })
   editor.redo()
-  assert.equal(editor.selectedBarLines.value!.end, 'repeat')
+  assert.equal(editor.barLines.value!.end, 'repeat')
   const [g5] = idsOf(editor, 2)
   editor.selectBar(1)
-  assert.equal(editor.selectedBarLines.value!.start, 'normal', 'another bar')
+  assert.equal(editor.barLines.value!.start, 'normal', 'another bar')
   editor.select(g5!)
-  assert.equal(editor.selectedBarLines.value!.start, 'repeat', 'a note in the bar selects it too')
+  assert.equal(editor.barLines.value!.start, 'repeat', 'a note in the bar makes it current too')
   editor.clearSelection()
-  assert.equal(editor.selectedBarLines.value, undefined)
+  assert.deepEqual(editor.barLines.value, { start: 'repeat', end: 'repeat', times: 2 }, 'nothing selected: still the current bar\'s')
 })
 
 test('selection: an element other than a note is selected with its bar, follows edits, goes when deleted, and comes back on undo (change select-and-delete-elements)', async () => {
@@ -238,7 +239,7 @@ test('warnings: counted live for the instrument in use, stepped through in score
   const { editor, settings, i18n } = await setup()
   const kinds = (): string[] => editor.warnings.value.map((w) => `${w.kind}@${w.bar}`)
   assert.deepEqual(kinds(), ['out-of-range@1', 'bar-length@3'])
-  assert.equal(i18n.t('warnings.count', { count: editor.warningCount.value }), '2 things to check')
+  assert.equal(i18n.t('editor.check.next', { count: editor.warningCount.value }), '2 to check · Next')
   assert.equal(editor.instrument.value.id, 'tenor-sax')
 
   // stepping: the A3, then bar 3, then round again

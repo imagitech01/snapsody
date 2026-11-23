@@ -72,9 +72,9 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 
 ## 10. Screen-wide checks and docs
 
-- [ ] 10.1 Update the editor part of `web/test/ui/density.test.ts` for the four tabs and both views. Verify (browser): `make test-browser` passes.
-- [ ] 10.2 Remove what the old screen leaves unused (`NoteTab.tsx`, `MarksTab.tsx`, their styles and texts, the one-line state). Verify (quick): `make test-quick` passes, including `web/test/layers.test.ts` and `web/test/i18n.test.ts`.
-- [ ] 10.3 Replace `docs/screenshots/edit-score.png` with the new editor (Notes view, a bar with a suggestion) at the size of the other screenshots. Verify: the README shows the new picture.
+- [x] 10.1 Update the editor part of `web/test/ui/density.test.ts` for the four tabs and both views. Verify (browser): `make test-browser` passes.
+- [x] 10.2 Remove what the old screen leaves unused (`NoteTab.tsx`, `MarksTab.tsx`, their styles and texts, the one-line state). Verify (quick): `make test-quick` passes, including `web/test/layers.test.ts` and `web/test/i18n.test.ts`.
+- [x] 10.3 Replace `docs/screenshots/edit-score.png` with the new editor (Notes view, a bar with a suggestion) at the size of the other screenshots. Verify: the README shows the new picture.
 
 ## 11. The photo line
 

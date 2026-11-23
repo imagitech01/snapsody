@@ -4,7 +4,7 @@ import { voiceView } from '../../../core/score/model.ts'
 import { Button, Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
 import { SelectField } from './controls.tsx'
-import type { ToolProps } from './NoteTab.tsx'
+import type { ToolProps } from './controls.tsx'
 
 /**
  * The Score tab (frame 06.3, spec `score-editing` "Flags shown for review", design D14): what holds for the

@@ -5,7 +5,7 @@ import type { Note, NoteType } from '../../../core/score/model.ts'
 import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
 import { Chip } from './controls.tsx'
-import type { ToolProps } from './NoteTab.tsx'
+import type { ToolProps } from './controls.tsx'
 
 /**
  * The Notes tray (change redesign-score-editor, task 6.3; spec `score-editing` "Notes tools", "Notes view"): with a note

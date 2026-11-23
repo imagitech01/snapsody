@@ -39,7 +39,7 @@ SEVEN INSTRUMENT SOUNDS
 Tenor sax, alto sax, clarinet, piano, guitar, violin and trumpet, from sampled sounds that ship inside the app. The written notes stay as they are; only the sound is transposed for your instrument.
 
 FIX WHAT THE READER MISSED
-Recognition isn't perfect, so there is a score editor. Change notes, rests, lengths, ties, slurs, articulations, dynamics, key, time signature and tempo, one line of music at a time, and listen to a bar before you save. Snapsody gently points out bars that don't add up and notes it was unsure about.
+Recognition isn't perfect, so there is a score editor. Change notes, rests, lengths, ties, slurs, articulations, dynamics, key, time signature and tempo, one bar at a time, and listen to a bar before you save. Snapsody gently points out bars that don't add up and notes it was unsure about.
 
 YOUR MUSIC, YOUR PHONE
 • Works fully offline: the app has no internet permission.

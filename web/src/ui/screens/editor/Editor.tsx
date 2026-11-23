@@ -18,7 +18,7 @@ import { frameLayout, sameLayout } from './frame.ts'
 import type { FrameLayout } from './frame.ts'
 import { BarsTray } from './BarsTray.tsx'
 import { MarksTray } from './MarksTray.tsx'
-import type { Failure, FailureKey } from './NoteTab.tsx'
+import type { Failure } from './controls.tsx'
 import { NotesTray } from './NotesTray.tsx'
 import { Overview } from './Overview.tsx'
 import { PhotoLarge, PhotoStrip, photoLabel, usePhotoUrl } from './PhotoLine.tsx'
@@ -66,8 +66,8 @@ import { ScoreTab } from './ScoreTab.tsx'
  *
  * Marks (tasks 7.1, 7.2, 7.5): a tap on a note is the session's `tapNote` (it selects, or paints the armed mark, or takes
  * the first or last note of the armed span); with a mark armed, a tap on an element or on nothing does nothing. What only
- * the screen keeps: why the last change of today's Bars and Score tools did not happen, or that a slide ended on no
- * note. Naming a new piece (spec `piece-library` "Default name"): while the session is
+ * the screen keeps: why the last change of the Notes, Score and element trays (which run their edits here) did not
+ * happen, that a slide ended on no note, or that the sound would not play. Naming a new piece (spec `piece-library` "Default name"): while the session is
  * `naming`, the title is tinted with the caption "Name this piece", and its first focus selects the date name, so typing
  * replaces it; nothing focuses it by itself. Leaving: the header's Back and the back button ask the router, whose leave
  * guard (the session's) asks the discard question while there are unsaved edits. "Add pages", in the Score tray, opens the
@@ -87,8 +87,8 @@ const isShown = (item: MeasureItem): item is Note => isNote(item) && !item.hidde
 export function Editor({ session }: { session: EditorSession }) {
   const { router, i18n } = useShell()
   const { t } = i18n
-  /** Why the last change of today's tools did not happen: a fixed text, or one already made from the refusal. */
-  const [message, setMessage] = useState<FailureKey | 'mark.error.slide' | 'grid.error.strip' | { text: string } | null>(null)
+  /** Why the last change of the trays that run their edits here did not happen, that a slide ended on no note, or that the sound would not play. */
+  const [message, setMessage] = useState<Failure | 'practice.error.sound' | 'mark.error.slide' | 'grid.error.strip' | null>(null)
   const [saveError, setSaveError] = useState<'empty-name' | 'conflict' | 'failed' | null>(null)
   const [layout, setLayout] = useState<FrameLayout>({ overview: 'line', photo: 'line', scroll: false })
   const frame = useRef<HTMLDivElement>(null)
@@ -186,7 +186,7 @@ export function Editor({ session }: { session: EditorSession }) {
     return () => observer.disconnect()
   })
 
-  /** Runs an edit of today's tools as one undo step (or as part of the last, `amend`); an edit that cannot be done says why and changes nothing. */
+  /** Runs an edit of the Notes, Score and element trays as one undo step (or as part of the last, `amend`); an edit that cannot be done says why and changes nothing. */
   const run = (edit: (score: Score) => unknown, failure: Failure = 'editor.error.edit', options: { amend?: boolean } = {}): void => {
     try {
       session.apply(edit, options)
@@ -194,7 +194,7 @@ export function Editor({ session }: { session: EditorSession }) {
       setSaveError(null)
     } catch (error) {
       if (!(error instanceof EditError)) throw error
-      setMessage(typeof failure === 'function' ? { text: failure(error) } : failure)
+      setMessage(failure)
     }
   }
 
@@ -333,7 +333,7 @@ export function Editor({ session }: { session: EditorSession }) {
   const beats = session.barBeats.value
 
   // The one row of what the editor has to say (design D13): a refused change, else what the current bar's warning says.
-  const said = message ? (typeof message === 'string' ? t(message) : message.text) : session.message.value
+  const said = message ? t(message) : session.message.value
   // The notice of a span that waits for its last note (design D14): it takes that row, and stays through "Full score". A
   // refusal meanwhile (a last note in another voice) is said in the notice, beside Cancel, until the next action: a
   // second row would push Save & practice off a small screen with a piano bar (design D13).

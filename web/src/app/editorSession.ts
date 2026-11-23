@@ -281,8 +281,6 @@ export class EditorSession {
   readonly selectedNoteName: ReadonlySignal<string>
   /** The selected element other than a note, while it is in the score (change select-and-delete-elements). */
   readonly selectedElement: ReadonlySignal<SelectedElement | undefined>
-  /** How the selected bar starts and ends (change edit-bar-lines), or undefined when no bar is selected. */
-  readonly selectedBarLines: ReadonlySignal<BarLines | undefined>
   /** The title as the user is typing it. */
   readonly title: ReadonlySignal<string>
   /** Unsaved edits, or a title that differs from the name. */
@@ -481,11 +479,6 @@ export class EditorSession {
       const ref = this.chosenElement.value
       const info = ref ? describeElement(this.score.value, ref) : undefined
       return ref && info ? { ref, info } : undefined
-    })
-    this.selectedBarLines = computed(() => {
-      const bar = this.chosen.value?.bar
-      const score = this.score.value
-      return bar !== undefined && bar <= score.bars.length ? barLinesOf(score, bar - 1) : undefined
     })
     this.dirty = computed(() => this.score.value !== this.saved.value || this.typed.value.trim() !== this.saveInfo.value.name)
     // The piece's own instrument when the user chose one in Practice tools, else the default, which it follows (change parts-and-accompaniment, D5).

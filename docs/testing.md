@@ -29,7 +29,7 @@ How the app starts: `main.tsx` picks the platform and calls `ui/mount.tsx`'s `mo
 `app/shell.ts`'s `startShell(platform)` (settings, the library sweep, the translator, the list and the home, the
 router and the back button, in that order) and draws `ui/App.tsx`: the screen on top of the router's stack, the tab bar
 on a start screen, the notice, and the sheets and dialogs. `ui/screens/index.tsx` says which component draws which screen,
-and is the one list to change when a screen is built (practice-app groups 14 and 15 replace the placeholders that are left; practising, group 13, is built).
+and is the one list to change when a screen is added.
 
 - **Direction:** `ui/` uses `app/`, `app/` uses `core/`. `app/` and `core/` import nothing from
   `ui/` or the adapters, and from `platform/` only `port.ts`. `web/test/layers.test.ts` scans the
@@ -78,9 +78,8 @@ cd web && npm run dev
 Vite serves the app with hot reload at <http://localhost:5173/> (the next free port when 5173 is
 taken), with no phone and no emulator. The adapter is `platform/browserDev/`. Two pages:
 
-- `/` is the app: the home, the library, the favorites, the settings (practice-app group 12) and practising a piece
-  (group 13: the practice screen and its loop and tools sheets) are built; adding music and the editor are
-  placeholders with a Back button until groups 14 and 15. Practising plays real sound (the samples are served next to the page). It starts
+- `/` is the app: the home, the library, the favorites, the settings, practising a piece (the practice screen and its
+  loop and tools sheets), adding music and the editor. Practising plays real sound (the samples are served next to the page). It starts
   empty, as a first launch; the files are in the same IndexedDB database as the next page.
 - `/dev/platform.html` is the platform check page (`web/dev/`, never part of the build). It drives
   the browser-dev platform the way the add-music flow will:
@@ -206,8 +205,10 @@ library in headless Chromium, one file at a time.
   first start of a tab). The router starts again at the Practice tab.
 - **Tests today:** `harness.test.ts` (the app's own entry starts and an empty phone gets the invitation, a `.wasm` file is
   served as `application/wasm`, other hosts are refused, the test audio clock follows `page.clock`, and the component gallery,
-  `web/dev/gallery.tsx`), `samples.test.ts` (every bundled sample decodes), and the journeys, one file per main flow, each
-  growing as its screens are built:
+  `web/dev/gallery.tsx`), `samples.test.ts` (every bundled sample decodes), `density.test.ts` (at 360 × 780 and 780 × 360
+  every screen and sheet has no sideways scroll and every control a touch box of at least 44 × 44; for the editor, each
+  of its four tools tabs in the Notes view and in the Grid view, and Full score), and the journeys, one file per main
+  flow, each growing as its screens are built:
   - `practice.test.ts`: the home (task 12.1): continue card, rotation, shortcuts, first launch, refresh on return;
     and practising (task 13): continue, Play and Pause with the real sound, the screen kept awake, the tempo and metronome,
     tap to start from a note, loop with a rest, the count-in (a general setting) and its visible count, scroll away and
@@ -220,10 +221,20 @@ library in headless Chromium, one file at a time.
   - `addMusic.test.ts` (task 14.1): the hint, a scan of two pages stepped through the reading screen to one piece that opens in
     practice, no music on page 2 and scanning again, a page that fails, cancel (the button and Back) creating nothing, the
     scanner not available, pages added to a piece;
-  - `edit.test.ts` (tasks 15.1 to 15.4): the editor, opened by pushing it on the router (the tools sheet's Edit does the same):
-    select, the photo strip (a piece made through the library with staff positions and a drawn picture), preview, the Note, Marks and Score tabs, warnings and their marks, saving (the stored score changes, the raw
-    reading does not), Save & practice back to the practice screen or in its place, the discard question, Add pages, rename and a
-    conflict.
+  - `edit.test.ts` (practice-app tasks 15.1 to 15.4, rebuilt by the change redesign-score-editor): the editor, opened by
+    pushing it on the router (the tools sheet's Edit does the same). It shows one bar at a time: the frame (title, photo
+    line, the overview line, the bar large), going to another bar (the bar row's keys, a tap in the overview, the line
+    arrows, a warning on another line), the overview as bar numbers on a low screen, Full score (a long piece, a piano
+    part); the Notes view (a tap adds a note, the slot of a short bar, a drag changes a pitch, a slide makes a slur) and
+    the Grid view (add, move, lengthen, the loudness strip, a locked triplet); the Notes, Marks, Bars and Score tools
+    (marks painted on notes, slurs and hairpins by their two notes, also into another bar, repeats and their passes,
+    endings, adding, joining and deleting bars, the scissors, key, time and tempo); the suggested repairs of a bar that
+    does not add up; elements (clef, slur, trill) selected and deleted; parts (the piano, a bar line that would cut the
+    other part); the photo line opened large on a drawn picture; preview, warnings, saving (the stored score changes,
+    the raw reading does not), Save & practice back to the practice screen or in its place, the discard question, a
+    new piece's name, Add pages, rename and a conflict. A journey goes to a bar a step or two away with the bar row's
+    keys and to a farther one through Full score, and waits for the score to be drawn for its size and to stay still
+    for 200 ms before it taps a note.
 - **Time:** timers, `Date` and `performance.now()` run on `page.clock`. A test `AudioContext`
   takes its `currentTime` from the same clock, so `page.clock.pauseAt(…)` then `runFor(ms)` moves
   playback and the cursor exactly. Recognition progress comes from the fake reader's scripted
@@ -250,6 +261,13 @@ Measured on the same laptop, 18 Nov 2026, after practice-app group 2: `make test
 At the end of the practice-app change (task 16.1: 76 UI tests), on 18 Nov 2026 with no emulator
 running: `make test-browser` takes 87–95 s warm, against the budget of 3 min (the quick layer about
 3 s of it, the Vite build and the UI tests the rest).
+
+After the editor was rebuilt (change redesign-score-editor, task 10: 114 UI tests, 1001 web unit tests), on 23 Nov 2026
+with no emulator running: `make test-browser` takes 145 s warm in three runs, against the budget of 3 min (the quick
+layer about 4.5 s of it). `edit.test.ts` (40 journeys) is about 73 s of that, measured on its own; it took 129–131 s
+(and the whole layer about 196 s) before its helpers stopped waiting longer than they needed to: one more pause after
+the score was already known to be laid out, a second stillness window before every tap, and a trip through Full score
+to reach the bar next door.
 
 ### Fast loop
 

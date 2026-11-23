@@ -935,35 +935,6 @@
   font-size: var(--fs-11);
   font-weight: var(--fw-medium);
 }
-.editor-row-pitch,
-.editor-row-length {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-.editor-row-length {
-  gap: var(--space-2);
-}
-.editor-row-pitch .stepper {
-  flex: none;
-}
-.editor-row-pitch .editor-select,
-.editor-row-length .editor-select {
-  flex: 1;
-  min-width: 0;
-}
-.editor-row-length .editor-chip {
-  flex: none;
-  width: 4rem;
-  padding: 0 var(--space-1);
-}
-.editor-row-actions {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-2);
-}
 .editor-grid--score .stepper--compact {
   width: 100%;
 }
@@ -971,9 +942,6 @@
   color: var(--ink-muted);
   font-size: var(--fs-10);
   line-height: 1.4;
-}
-.editor-hint--pick {
-  font-size: var(--fs-11);
 }
 .editor-hint--wide {
   grid-column: 1 / -1;
@@ -1053,41 +1021,10 @@
   outline: 2px dashed var(--primary);
   outline-offset: -4px;
 }
-/* Waiting for the notes of a slur, a tie or a hairpin. */
-.editor-chip.is-picking {
-  outline: 2px dashed var(--primary);
-  outline-offset: -3px;
-  color: var(--primary);
-}
 .editor-chip--danger {
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--danger);
   color: var(--danger);
-}
-.editor-chip-dot {
-  flex: none;
-  width: 0.5625rem;
-  height: 0.5625rem;
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
-}
-.editor-chip.is-on .editor-chip-dot {
-  background: currentColor;
-}
-
-.editor-marks {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-3) 0;
-}
-.editor-marks-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
-.editor-marks-grid .editor-chip {
-  font-size: var(--fs-10);
 }
 /* The Marks tray (task 7.1): the marks of a note five across, the marks that join two notes four across, the loudness
    marks six across, then the slurs and hairpins of the bar. Every key is at least 44 x 44. */
@@ -1259,17 +1196,6 @@
   height: var(--tap);
 }
 
-/* The "Bar N" group, the temporary Bars tray (change edit-bar-lines, D2): the Score tab's grid. */
-.editor-barlines {
-  padding: var(--space-1) var(--space-3) 0;
-}
-.editor-barlines-title {
-  grid-column: 1 / -1;
-  margin: 0;
-  font-size: var(--fs-11);
-  font-weight: var(--fw-semibold);
-}
-
 /* Why a change did not happen. */
 .editor-message,
 .editor-save-error {
@@ -1304,7 +1230,3 @@
   border-top: 1px solid var(--line);
 }
 
-/* "Remove bar line" in the Bar N group, under its bar-line controls (change edit-parts, D9). */
-.editor-barline-remove {
-  grid-column: 1 / -1;
-}

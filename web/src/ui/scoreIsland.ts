@@ -118,6 +118,25 @@ const BAR_PAD_PX = 4
 
 const NOT_PLAYING: Position = { beat: 0, event: undefined, events: [], finished: false }
 
+/**
+ * Where a line of the drawing is, top and bottom, by what it draws. Verovio puts empty markers where a section starts
+ * (`g.systemMilestone`) above the first line, which stretch the line's own box up past the top of the drawing; a line
+ * window sized by that box was taller than the line and showed the top of the next line at its foot.
+ */
+function lineBox(system: SVGGElement): { top: number; bottom: number; height: number } {
+  let top = Infinity
+  let bottom = -Infinity
+  for (const part of system.children) {
+    if (part.classList.contains('systemMilestone')) continue
+    const rect = part.getBoundingClientRect()
+    if (rect.width === 0 && rect.height === 0) continue
+    top = Math.min(top, rect.top)
+    bottom = Math.max(bottom, rect.bottom)
+  }
+  if (top > bottom) return system.getBoundingClientRect()
+  return { top, bottom, height: bottom - top }
+}
+
 /** The events that tell the island the user is moving the score (a tap does not: a tap is a seek). */
 const SCROLL_INPUT = ['touchmove', 'wheel', 'keydown'] as const
 
@@ -254,13 +273,19 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
     const system = view.lineElement(bar - 1)
     if (!system) return
     root.style.overflowY = 'hidden'
-    root.style.height = `${Math.ceil(system.getBoundingClientRect().height + BAR_PAD_PX * 2)}px`
+    const line = lineBox(system)
+    const height = line.height + BAR_PAD_PX * 2
+    root.style.height = `${Math.ceil(height)}px`
     const top = root.getBoundingClientRect().top + root.clientTop
-    const dy = system.getBoundingClientRect().top - BAR_PAD_PX - top
+    const dy = line.top - BAR_PAD_PX - top
     if (Math.abs(dy) >= 0.5) {
       programmaticAt = now()
       root.scrollTop += dy
     }
+    // The first line can reach above the top of the drawing (a tempo marking), where no scroll goes, so it stays lower than
+    // asked: the window still ends a little under the line, not on the top of the next one.
+    const under = lineBox(system).bottom + BAR_PAD_PX - top
+    if (under < height) root.style.height = `${Math.ceil(under)}px`
     root.dataset.line = String(view.lines.findIndex((l) => l.firstBar <= bar - 1 && bar - 1 <= l.lastBar))
   }
 

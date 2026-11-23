@@ -4,7 +4,7 @@ import type { ElementInfo } from '../../../core/score/elements.ts'
 import type { Score } from '../../../core/score/model.ts'
 import { useShell } from '../../ShellContext.ts'
 import { Chip, SelectField } from './controls.tsx'
-import type { Failure } from './NoteTab.tsx'
+import type { Failure } from './controls.tsx'
 
 /**
  * The panel for a selected element that is not a note or a bar (change select-and-delete-elements, design

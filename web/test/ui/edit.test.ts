@@ -52,37 +52,44 @@ async function onBar(page: Page, bar: number): Promise<void> {
 }
 
 /**
- * Waits until the large bar and the overview are drawn for the size they have now, and stay so for a moment: each is laid
- * out again a moment after its size changes (the large bar for its width and height, the overview for its width), and
- * the frame itself may change after an edit or a part switch (design D13).
+ * Whether the large bar and the overview are drawn for the size they have now: each is laid out again a moment after its
+ * size changes (the large bar for its width and height, the overview for its width), and the frame itself may change after
+ * an edit or a part switch (design D13).
  */
+const drawnForSize = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.editor .score-view')].every((view) => {
+      const fit = view.closest('.editor-bar-host') !== null
+      const size = fit ? `${Math.floor(view.clientWidth)}x${Math.floor(view.clientHeight)}` : String(Math.floor(view.clientWidth))
+      return view.dataset.size === size
+    }),
+  )
+
+/** Waits until the large bar and the overview are drawn for the size they have now, and still are 200 ms later. */
 async function laidOut(page: Page): Promise<void> {
-  const settled = () =>
-    page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('.editor .score-view')].every((view) => {
-        const fit = view.closest('.editor-bar-host') !== null
-        const size = fit ? `${Math.floor(view.clientWidth)}x${Math.floor(view.clientHeight)}` : String(Math.floor(view.clientWidth))
-        return view.dataset.size === size
-      }),
-    )
-  for (let i = 0, still = 0; i < 50 && still < 2; i++) {
-    still = (await settled()) ? still + 1 : 0
+  for (let i = 0, still = 0; i < 50; i++) {
+    still = (await drawnForSize(page)) ? still + 1 : 0
+    if (still >= 2) return
     await page.waitForTimeout(still > 0 ? 200 : 100)
   }
 }
 
-/** A drawn thing's box once it stops moving (the score is laid out again a moment after its size changes). */
+/**
+ * A drawn thing's box once it stops moving: the score is drawn for its size (`laidOut`) at two looks 200 ms apart, and the
+ * box is the same at both.
+ */
 async function settledBox(page: Page, locator: ReturnType<Page['locator']>): Promise<{ x: number; y: number; width: number; height: number }> {
-  await laidOut(page)
-  let last = await locator.boundingBox()
-  for (let i = 0; i < 20; i++) {
-    await page.waitForTimeout(120)
-    const box = await locator.boundingBox()
+  let last: Awaited<ReturnType<typeof locator.boundingBox>> = null
+  for (let i = 0; i < 50; i++) {
+    const drawnNow = await drawnForSize(page)
+    const box = drawnNow ? await locator.boundingBox() : null
     if (box && last && Math.abs(box.x - last.x) < 0.5 && Math.abs(box.y - last.y) < 0.5 && Math.abs(box.width - last.width) < 0.5) return box
     last = box
+    await page.waitForTimeout(box ? 200 : 100)
   }
-  assert.ok(last, 'drawn')
-  return last
+  const box = await locator.boundingBox()
+  assert.ok(box, 'drawn')
+  return box
 }
 
 /** Waits until the overview (or full score) is laid out for the width it has now: it is laid out again a moment after the width changes. */
@@ -107,9 +114,23 @@ async function pickInFullScore(page: Page, target: string, bar: number): Promise
 
 const fullScoreShown = (page: Page) => page.locator('.editor[data-layout="full"]').count().then((n) => n > 0)
 
-/** Makes bar `bar` (from 1) current, through a tap in it in "Full score", as a user gets to a bar on another line. */
+/**
+ * Makes bar `bar` (from 1) current: a bar or two away with the bar row's Previous bar and Next bar keys, as a user steps
+ * through bars; farther through a tap in it in "Full score", as a user gets to another section. Both go to the bar the same
+ * way (the session's `goToBar`); the journeys of "Full score" itself use `pickInFullScore`.
+ */
 async function goToBar(page: Page, bar: number): Promise<void> {
-  if ((await barRow(page)).startsWith(`Bar ${bar} of `)) return
+  const now = Number(/^Bar (\d+) of /.exec(await barRow(page))?.[1])
+  if (now === bar) return
+  if (!(await fullScoreShown(page)) && Math.abs(bar - now) <= 2) {
+    const key = page.getByRole('button', { name: bar > now ? 'Next bar' : 'Previous bar' })
+    for (let at = now; at !== bar; ) {
+      at += bar > now ? 1 : -1
+      await key.click()
+      await onBar(page, at)
+    }
+    return
+  }
   await pickInFullScore(page, `g.measure >> nth=${bar - 1}`, bar)
 }
 
@@ -381,6 +402,16 @@ test('edit: one bar at a time; it opens on the bar of the first flag, else on ba
     assert.equal(await page.locator('.editor-beats--ok').count(), 1)
     shown = await lineHolds(page, 1)
     assert.deepEqual([shown.line, shown.tinted, shown.visibleBars[0]], [0, 1, 1])
+    // The overview ends a few pixels under the first line, so nothing of the second line shows at its foot (Verovio's empty
+    // markers above the first line, and its tempo marking, which reaches above the drawing, once made it taller).
+    const edges = await page.evaluate(() => {
+      const island = document.querySelector<HTMLElement>('.editor-overview .score-island')!
+      const window = island.getBoundingClientRect()
+      const [first, second] = [...island.querySelectorAll('g.system')].map((line) => [...line.querySelectorAll(':scope > g.measure')].map((bar) => bar.getBoundingClientRect()))
+      return { top: window.top, bottom: window.bottom, firstTop: Math.min(...first!.map((b) => b.top)), firstBottom: Math.max(...first!.map((b) => b.bottom)), secondTop: Math.min(...second!.map((b) => b.top)) }
+    })
+    assert.ok(edges.firstBottom <= edges.bottom && edges.bottom - edges.firstBottom <= 6, `a few pixels under the first line (${JSON.stringify(edges)})`)
+    assert.ok(edges.secondTop >= edges.bottom, `and nothing of the second line (${JSON.stringify(edges)})`)
   })
 
   // A piano bar: the overview and the large bar both have the right hand and the left hand (a piece of the piano alone:

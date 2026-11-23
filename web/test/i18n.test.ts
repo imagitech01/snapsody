@@ -89,8 +89,8 @@ test('plurals: 1 page and 2 pages, 1 pagina and 2 pagina\'s', () => {
   assert.equal(english.t('unit.pages', { count: 0 }), '0 pages')
   assert.equal(english.t('unit.bars', { count: 1 }), '1 bar')
   assert.equal(english.t('unit.bars', { count: 24 }), '24 bars')
-  assert.equal(english.t('warnings.count', { count: 2 }), '2 things to check')
-  assert.equal(english.t('warnings.count', { count: 1 }), '1 thing to check')
+  assert.equal(english.t('favorites.count', { count: 2 }), '2 favorites')
+  assert.equal(english.t('favorites.count', { count: 1 }), '1 favorite')
 })
 
 test('placeholders: filled in, numbers without a thousands separator, a missing one left as written', () => {

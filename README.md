@@ -36,8 +36,9 @@ hear how it goes, play along with it slowly, and loop the hard bars. Snapsody do
 3. **Practise.** It plays the piece with a real instrument sound and follows along in the score.
    You can change the tempo, add a metronome or count-in, and loop a passage with a rest between
    repeats.
-4. **Fix.** Recognition isn't perfect, so there is a score editor. You can change notes, rests,
-   lengths and marks, with the source photo next to the bar you're editing.
+4. **Fix.** Recognition isn't perfect, so there is a score editor. It shows one bar at a time,
+   large, with the line of your page photo above it, and you change notes, rests, lengths and
+   marks with a tap or a drag.
 
 ### Features
 
@@ -47,9 +48,12 @@ hear how it goes, play along with it slowly, and loop the hard bars. Snapsody do
 - **Library:** all your pieces, plus search, favorites ("in your rotation") and delete.
 - **Instruments:** tenor sax, alto sax, clarinet, piano, guitar, violin and trumpet, from sampled
   sounds that ship inside the app. The written notes are never rewritten. Only the sound is transposed for the instrument.
-- **Editor:** pitch, accidentals, lengths (dotted, triplets), rests, ties, slurs, staccato,
-  tenuto, accent, fermata, crescendo and diminuendo, plus key, time signature and tempo. It has
-  undo and redo, and warns gently about bars that don't add up or notes the reader doubted.
+- **Editor:** one bar at a time, as notes on the staff or as blocks on a beat grid. Pitch,
+  accidentals, lengths (dotted, triplets), rests, chords, ties, slurs, staccato, tenuto, accent,
+  fermata and other marks, crescendo and diminuendo, *pp* to *ff*, breath marks; repeats, first
+  and second endings, and adding, splitting, joining and deleting bars; plus key, time signature
+  and tempo. It has undo and redo, warns gently about bars that don't add up or notes the reader
+  doubted, and offers a fix for a bar that doesn't add up.
 - **Language:** English only. There is no language setting.
 - **Private by design:** the app has no internet permission. Your pieces, photos and settings
   stay on the device.

@@ -98,8 +98,8 @@ export type FallbackKey = 'editor.error.edit' | 'mark.error.slur' | 'mark.error.
 
 /**
  * What the editor's message line says for a refused edit (design D1): the reason of a bar-line, Grid or bar refusal in
- * the app's words, naming the hand or the part where a bar line meets a note (as `ui/screens/editor/barLineText.ts`,
- * which the old screen uses until it is replaced), else `fallback`.
+ * the app's words, naming the hand or the part where a bar line meets a note ("A note in the left hand sounds across
+ * that point…"; a one-line piece names no place), else `fallback`.
  */
 export function refusalText(t: I18n['t'], score: Score, error: EditError, fallback: FallbackKey = 'editor.error.edit'): string {
   if (error instanceof GridError) return t(`grid.error.${error.reason}`)
