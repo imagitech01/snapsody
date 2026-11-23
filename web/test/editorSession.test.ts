@@ -10,8 +10,9 @@ import { loadSettings } from '../src/app/settings.ts'
 import { preparePages } from '../src/core/pages/pages.ts'
 import type { AudioBackend } from '../src/core/playback/player.ts'
 import type { NoteOnSpec, TimerApi } from '../src/core/playback/scheduler.ts'
-import { addBar, addChordNote, addSlur, addTie, addWedge, deleteBar, deleteElement, deleteNote, insertNote, joinBars, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
-import { isWedge, notesOf, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
+import { addBar, addChordNote, addSlur, addTie, addWedge, deleteBar, deleteElement, deleteNote, dynamicOf, insertNote, joinBars, noteToRest, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
+import { allItemLists, isWedge, notesOf, placeOfNote, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
+import { frac } from '../src/core/score/rational.ts'
 import type { MeasureItem } from '../src/core/score/model.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
@@ -846,7 +847,7 @@ async function setupSix(lines2: Line[] = [{ firstBar: 4, lastBar: 6 }]) {
     assert.equal(info.bars, editor.score.value.bars.length)
     return [info.bars, info.pages.map((p) => [p.firstBar, p.lastBar, p.staves.map((s) => [s.firstBar, s.lastBar])])]
   }
-  return { editor, library, save }
+  return { editor, library, settings, save }
 }
 
 test('bar numbers: a bar added between the halves of a split bar belongs to it (finding 3)', async () => {
@@ -969,65 +970,96 @@ function seeded(seed: number): (n: number) => number {
   }
 }
 
-test('bar numbers: short random sessions of bars added, deleted, split, joined and undone keep the pages, the lines and practice consistent', async () => {
+test('bar numbers: short random sessions of the bar actions the session offers, with undo and redo, keep the pages, the lines and practice consistent, and no save is refused', async () => {
   const random = seeded(36)
-  const refusals = new Map<string, number>()
   let saves = 0
+  const counts = { added: 0, deleted: 0, split: 0, joined: 0, undone: 0, redone: 0, deleteNotOffered: 0, joinNotOffered: 0, checked: 0 }
   for (let run = 0; run < 300; run++) {
     const { editor, library } = await setupSix([
       { firstBar: 4, lastBar: 5 },
       { firstBar: 6, lastBar: 6 },
     ])
-    // The page and line each bar was read on (what the session will offer follows them), with an undo stack of its own.
-    let labels = [0, 1, 1, 2, 2, 3].map((line) => ({ page: line < 2 ? 1 : 2, line }))
-    const undone: (typeof labels)[] = []
+    // The page and line each bar was read on, and whether it is an added bar. Until an undo or a redo follows a save, what
+    // the session offers must be exactly what they say (task 5.3): Delete where its page keeps a bar that was not added,
+    // Join with next inside a line. After that, the session counts as the library does (design D8), and only the saves say.
+    type Label = { page: number; line: number; added: boolean }
+    let labels: Label[] = [0, 1, 1, 2, 2, 3].map((line) => ({ page: line < 2 ? 1 : 2, line, added: false }))
+    const undone: Label[][] = []
+    let redone: Label[][] = []
     const steps: string[] = []
-    let undoAcrossSave = false
-    let sinceSave = 0
-    const edit = (name: string, change: (s: Score) => unknown, next: typeof labels): void => {
-      try {
-        editor.apply(change)
-      } catch {
-        return
-      }
+    let exact = true
+    let saved = false
+    const edited = (name: string, next: Label[]): void => {
       undone.push(labels)
+      redone = []
       labels = next
       steps.push(name)
-      sinceSave++
     }
-    sessions: for (let save = 0; save < 3; save++) {
-      for (let op = random(5); op >= 0; op--) {
+    for (let save = 0; save < 3; save++) {
+      for (let op = random(6); op >= 0; op--) {
         const n = labels.length
         const i = random(n)
-        const kind = random(5)
+        const kind = random(6)
+        const deletable = n > 1 && labels.some((l, j) => j !== i && l.page === labels[i]!.page && !l.added)
+        const joinable = i + 1 < n && labels[i]!.line === labels[i + 1]!.line
+        if (exact) {
+          assert.equal(editor.canDeleteBarAt(i), deletable, `delete ${i + 1} after ${steps.join(', ')}`)
+          assert.equal(editor.canRemoveBarLineAfter(i), joinable, `join ${i + 1} after ${steps.join(', ')}`)
+          counts.checked++
+        }
         if (kind === 0) {
           const side = random(2) === 0 ? 'before' : 'after'
-          edit(`add ${side} ${i + 1}`, (s) => addBar(s, i, side), spliced(labels, side === 'after' ? i + 1 : i, 0, labels[i]!))
-        } else if (kind === 1 && labels.filter((l) => l.page === labels[i]!.page).length > 1) {
-          edit(`delete ${i + 1}`, (s) => deleteBar(s, i), spliced(labels, i, 1))
-        } else if (kind === 2 && idsOf(editor, i + 1).length > 1) {
-          edit(`split ${i + 1}`, (s) => splitBar(s, idsOf(editor, i + 1)[1]!), spliced(labels, i, 0, labels[i]!))
-        } else if (kind === 3 && i + 1 < n && labels[i]!.line === labels[i + 1]!.line) {
-          edit(`join ${i + 1}`, (s) => joinBars(s, i), spliced(labels, i + 1, 1))
-        } else if (kind === 4 && undone.length > 0 && editor.undo()) {
+          editor.goToBar(i + 1)
+          assert.ok(editor.addBar(side))
+          assert.equal(editor.currentBar.value, side === 'after' ? i + 2 : i + 1, 'the added bar is the current bar')
+          edited(`add ${side} ${i + 1}`, spliced(labels, side === 'after' ? i + 1 : i, 0, { ...labels[i]!, added: true }))
+          counts.added++
+        } else if (kind === 1) {
+          if (!editor.canDeleteBarAt(i)) {
+            counts.deleteNotOffered++
+            continue
+          }
+          editor.goToBar(i + 1)
+          assert.ok(editor.deleteBar(), editor.message.value ?? '')
+          edited(`delete ${i + 1}`, spliced(labels, i, 1))
+          counts.deleted++
+        } else if (kind === 2 && idsOf(editor, i + 1).length > 1 && editor.canAddBarLineBefore(idsOf(editor, i + 1)[1]!)) {
+          editor.apply((s) => splitBar(s, idsOf(editor, i + 1)[1]!))
+          edited(`split ${i + 1}`, spliced(labels, i, 0, labels[i]!))
+          counts.split++
+        } else if (kind === 3) {
+          if (!editor.canRemoveBarLineAfter(i)) {
+            counts.joinNotOffered++
+            continue
+          }
+          editor.goToBar(i + 1)
+          assert.ok(editor.joinNext(), editor.message.value ?? '')
+          edited(`join ${i + 1}`, spliced(labels, i, 2, { ...labels[i]!, added: labels[i]!.added && labels[i + 1]!.added }))
+          counts.joined++
+        } else if (kind === 4 && editor.undo()) {
+          redone.push(labels)
           labels = undone.pop()!
           steps.push('undo')
-          if (sinceSave-- <= 0) undoAcrossSave = true
+          if (saved) exact = false
+          counts.undone++
+        } else if (kind === 5 && editor.redo()) {
+          undone.push(labels)
+          labels = redone.pop()!
+          steps.push('redo')
+          if (saved) exact = false
+          counts.redone++
         }
+        assert.equal(editor.barCount.value, labels.length, steps.join(', '))
+        assert.ok(editor.currentBar.value >= 1 && editor.currentBar.value <= editor.barCount.value, `the current bar is in range: ${steps.join(', ')}`)
       }
       const old = (await library.info('piece-1')).bars
       const start = 1 + random(old)
       const end = start + random(old - start + 1)
       await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 1 + random(old), loop: random(4) === 0 ? null : { start, end } })
       steps.push('save')
-      sinceSave = 0
       const result = await editor.save()
-      if (!result.ok) {
-        const kind = /two pages/.test(String(result.error)) ? 'a join across a page' : /would hold no bars/.test(String(result.error)) ? 'a page left without bars' : String(result.error)
-        refusals.set(kind, (refusals.get(kind) ?? 0) + 1)
-        assert.ok(undoAcrossSave, `refused (${kind}) without an undo across a save: ${steps.join(', ')}`)
-        break sessions
-      }
+      assert.ok(result.ok, `refused: ${String(!result.ok && result.error)} after ${steps.join(', ')}`)
+      saved = true
       saves++
       const info = await library.info('piece-1')
       assert.deepEqual(barNumberProblems(info, await library.readPractice('piece-1')), [], steps.join(', '))
@@ -1035,8 +1067,9 @@ test('bar numbers: short random sessions of bars added, deleted, split, joined a
     }
     editor.close()
   }
-  assert.ok(saves > 500, `${saves} saves`)
-  assert.deepEqual([...refusals.keys()].filter((kind) => kind !== 'a join across a page' && kind !== 'a page left without bars'), [])
+  assert.equal(saves, 900, 'every save went through')
+  // Each kind of action ran, and each guard said no at least once.
+  for (const [name, count] of Object.entries(counts)) assert.ok(count > 0, `${name}: ${count}`)
 })
 
 test('bar lines: "Bar line before" is not offered for the first note of a bar; "Remove bar line" not after the last bar or where a page or a line of the photo ends', async () => {
@@ -1083,4 +1116,548 @@ test('bar lines: a missed bar line in a bar that does not add up is split and sa
     assert.equal((await library.info('piece-1')).bars, 5)
     editor.close()
   }
+})
+
+// ---- One bar at a time: the session of the redesigned editor (change redesign-score-editor, group 5) ---------
+
+/** A piece of the pages [pages] (MusicXML), page k with the lines [lines[k]] in its photo, opened in the editor. */
+async function openPages(pages: string[], lines: Line[][] = []) {
+  const platform = createFakePlatform()
+  const library = createLibrary(platform.files, { newId: () => 'piece-1' })
+  const settings = await loadSettings(platform.files)
+  const router = createRouter('library')
+  const prepared = preparePages(pages)
+  pages.forEach((_, k) => platform.files.seed(`scans/1/page-${k + 1}.jpg`, Uint8Array.of(k + 1)))
+  await library.create({
+    name: 'A piece',
+    musicxml: prepared.musicxml,
+    bars: prepared.bars,
+    repairs: prepared.repairs,
+    pages: pages.map((page, k) => ({ source: `scans/1/page-${k + 1}.jpg`, recognised: page, ...prepared.pages[k]!, staves: (lines[k] ?? []).map((line, j) => ({ box: { ...BOX, y: 0.1 + 0.2 * j }, ...line })) })),
+  })
+  router.push({ name: 'editor', pieceId: 'piece-1' })
+  const editor = await openEditor({ library, settings, router, i18n: createI18n() }, 'piece-1')
+  return { editor, library, settings }
+}
+
+/** Runs [action] (then [check]) and checks that it changed the score as one undo step: one undo gives back the score before it, one redo the score after it. */
+function oneStep(editor: EditorSession, label: string, action: () => unknown, check?: () => void): void {
+  const before = editor.score.value
+  const result = action()
+  assert.ok(result !== false && result !== undefined, `${label}: done (${editor.message.value})`)
+  check?.()
+  const after = editor.score.value
+  assert.notEqual(after, before, `${label}: the score changed`)
+  assert.ok(editor.undo(), label)
+  assert.equal(editor.score.value, before, `${label}: one undo gives back the score before it`)
+  assert.ok(editor.redo(), label)
+  assert.equal(editor.score.value, after, `${label}: and one redo the score after it`)
+}
+
+/** The notes and rests of bar [bar] (from 1) of the first voice, as "C5 quarter", "rest eighth". */
+const barText = (editor: EditorSession, bar: number): string[] =>
+  notesOf(firstLine(editor.score.value).measures[bar - 1]!).map((n) => `${n.rest ? 'rest' : `${n.pitch!.step}${n.pitch!.octave}`} ${n.type ?? (n.measureRest ? 'of the bar' : '?')}${n.dots ? '.' : ''}`)
+
+test('current bar (task 5.1): opens on the first warning\'s bar with nothing selected, else on bar 1; previous, next, a note and a warning move it', async () => {
+  // Bar 3 of 4 is a beat short.
+  const { editor } = await openPages([score([quarters(3, 'C'), quarters(3, 'D'), quarters(2, 'E'), quarters(3, 'F')], [3, 4])])
+  assert.deepEqual([editor.currentBar.value, editor.barCount.value, editor.selection.value], [3, 4, null], 'Bar 3 of 4, nothing selected')
+  assert.deepEqual(editor.barWarnings.value.map((w) => w.kind), ['bar-length'])
+  assert.deepEqual(editor.barBeats.value, { counted: '2', beats: 3, beatType: 4, addsUp: false })
+  assert.ok(editor.goToBar(1))
+  assert.deepEqual([editor.barWarnings.value, editor.barBeats.value?.addsUp], [[], true])
+  assert.ok(editor.nextWarning())
+  assert.equal(editor.currentBar.value, 3, 'stepping to a warning makes its bar current')
+
+  const six = (await setupSix()).editor
+  assert.deepEqual([six.currentBar.value, six.barCount.value, six.selection.value], [1, 6, null], 'nothing to check: Bar 1 of 6')
+  assert.equal(six.previousBar(), false)
+  assert.ok(six.nextBar())
+  assert.equal(six.currentBar.value, 2)
+  assert.ok(six.previousBar())
+  assert.equal(six.currentBar.value, 1)
+  assert.equal(six.goToBar(7), false)
+  assert.ok(six.goToBar(6))
+  assert.equal(six.nextBar(), false)
+  assert.equal(six.currentBar.value, 6)
+  // A note or an element makes its bar current; another bar leaves a selection only in that bar.
+  six.select(idsOf(six, 4)[1]!)
+  assert.equal(six.currentBar.value, 4)
+  six.goToBar(4)
+  assert.equal(six.selection.value?.noteId, idsOf(six, 4)[1], 'the same bar keeps it')
+  six.goToBar(2)
+  assert.deepEqual([six.currentBar.value, six.selection.value], [2, null], 'another bar: no selection, but a current bar')
+  six.selectBar(5)
+  assert.equal(six.currentBar.value, 5)
+  six.clearSelection()
+  assert.equal(six.currentBar.value, 5, 'clearing the selection keeps the bar')
+  // Kept in range when bars go, also by an undo and a redo.
+  six.goToBar(6)
+  six.apply((s) => deleteBar(s, 5))
+  assert.deepEqual([six.currentBar.value, six.barCount.value], [5, 5])
+  six.undo()
+  assert.deepEqual([six.currentBar.value, six.barCount.value], [5, 6])
+  six.goToBar(6)
+  six.redo()
+  assert.deepEqual([six.currentBar.value, six.barCount.value], [5, 5])
+  // A selected note leads it after an edit that moves its bar.
+  six.select(idsOf(six, 3)[0]!)
+  six.apply((s) => addBar(s, 0, 'before'))
+  assert.equal(six.currentBar.value, 4, 'the selected note is in bar 4 now')
+})
+
+test('view and tools (task 5.2): the view lives in the settings, a tap adds what the Notes tools say, and the Marks and Bars tools add no note', async () => {
+  const { editor, settings, library } = await setupSix()
+  assert.equal(editor.view.value, 'notes', 'the first time: Notes')
+  await editor.setView('grid')
+  assert.equal(settings.editorView.value, 'grid')
+  editor.close()
+  // The view is remembered for the next piece (settings.test.ts proves it is kept after a restart).
+  const router = createRouter('library')
+  router.push({ name: 'editor', pieceId: 'piece-1' })
+  const again = await openEditor({ library, settings, router, i18n: createI18n() }, 'piece-1')
+  assert.equal(again.view.value, 'grid')
+
+  // What a tap adds (spec "Choose what a tap adds"): with nothing selected, the length, the dot and note or rest.
+  assert.deepEqual(editor.tapChoice.value, { type: 'quarter', dots: 0, rest: false })
+  editor.chooseLength('eighth')
+  editor.chooseRest(true)
+  editor.toggleDotted()
+  editor.toggleDotted()
+  assert.deepEqual(editor.tapChoice.value, { type: 'eighth', dots: 0, rest: true })
+  editor.goToBar(2)
+  const added = editor.addAtSlot(0, { step: 'B', octave: 4 })
+  assert.ok(added)
+  assert.deepEqual(barText(editor, 2), ['D5 quarter', 'D5 quarter', 'D5 quarter', 'rest eighth'], 'an eighth rest at the slot')
+  assert.equal(editor.selection.value?.noteId, added, 'and it is selected')
+  // With a note selected, the tools change it, and what a tap adds stays (spec "Change the selected note").
+  editor.select(idsOf(editor, 2)[0]!)
+  assert.ok(editor.chooseLength('half'))
+  editor.chooseRest(false)
+  assert.deepEqual(barText(editor, 2)[0], 'D5 half')
+  assert.deepEqual(editor.tapChoice.value, { type: 'eighth', dots: 0, rest: true })
+
+  // The Marks and the Bars tools add no note (spec "No stray note").
+  editor.clearSelection()
+  for (const tab of ['marks', 'bars'] as const) {
+    editor.openTools(tab)
+    const before = editor.score.value
+    assert.equal(editor.canAddByTap.value, false, tab)
+    assert.equal(editor.addAtSlot(0, { step: 'C', octave: 5 }), undefined, tab)
+    assert.equal(editor.addOnStaff(0, { step: 'C', octave: 5 }, idsOf(editor, 2)[1]), undefined, tab)
+    assert.equal(editor.gridAdd(frac(0), { step: 'C', octave: 5 }), undefined, tab)
+    assert.equal(editor.score.value, before, tab)
+  }
+  editor.openTools('notes')
+  assert.equal(editor.canAddByTap.value, true)
+})
+
+test('marks (task 5.2): note first, or mark first and painted on every tapped note, until a second tap or the Notes or Bars tools', async () => {
+  const { editor } = await setupSix()
+  const [c1, c2, c3] = idsOf(editor, 1)
+  const [d1] = idsOf(editor, 2)
+  const staccato = (id: string): boolean => placeOfNote(editor.score.value, id)!.note.staccato === true
+  editor.openTools('marks')
+  // Note first: the marks it has are active, and a mark goes on it.
+  editor.apply((s) => toggleStaccato(s, c1!))
+  editor.select(c1!)
+  assert.ok(editor.activeMarks.value.has('staccato'))
+  assert.ok(editor.tapMark('tenuto'))
+  assert.deepEqual([editor.activeMarks.value.has('tenuto'), editor.armed.value], [true, null])
+  editor.apply((s) => toggleStaccato(s, c1!))
+  // Mark first: painted on every note tapped, which is not selected; still armed after.
+  editor.clearSelection()
+  assert.ok(editor.tapMark('staccato'))
+  assert.equal(editor.armed.value, 'staccato')
+  for (const id of [c1!, c2!, c3!, d1!]) assert.ok(editor.tapNote(id))
+  assert.deepEqual([c1, c2, c3, d1].map((id) => staccato(id!)), [true, true, true, true], 'all four have a staccato')
+  assert.deepEqual([editor.armed.value, editor.selection.value], ['staccato', null])
+  assert.ok(editor.tapNote(c2!))
+  assert.equal(staccato(c2!), false, 'a tapped note that has it loses it')
+  // A second tap on it disarms it.
+  editor.tapMark('staccato')
+  assert.equal(editor.armed.value, null)
+  // The Score tools keep it armed; the Notes and the Bars tools disarm it, and a tap then selects.
+  editor.tapMark('accent')
+  editor.openTools('score')
+  assert.equal(editor.armed.value, 'accent')
+  editor.openTools('bars')
+  assert.equal(editor.armed.value, null)
+  editor.openTools('marks')
+  editor.tapMark('staccato')
+  editor.openTools('notes')
+  assert.equal(editor.armed.value, null)
+  const before = editor.score.value
+  editor.tapNote(c2!)
+  assert.deepEqual([editor.selection.value?.noteId, editor.score.value === before], [c2, true], 'selected, without a staccato')
+  // A rest takes no mark: the message says so, and nothing changes.
+  const rest = editor.apply((s) => noteToRest(s, c3!))
+  editor.openTools('marks')
+  editor.clearSelection()
+  editor.tapMark('accent')
+  const unchanged = editor.score.value
+  assert.equal(editor.tapNote(rest), false)
+  assert.deepEqual([editor.score.value === unchanged, editor.message.value], [true, 'Marks go on notes, not on rests.'])
+})
+
+test('the Grid follows the selected note\'s staff and voice, else the first voice of the first staff, and another can be chosen (task 5.2)', async () => {
+  const { editor } = await setupMelodyPiano({ id: 'P2' })
+  assert.deepEqual(editor.gridVoice.value, RH, 'nothing selected: the right hand')
+  assert.ok(editor.gridVoices.value.some((r) => r.staff === 1 && r.voice === 1), 'the left hand\'s second voice can be chosen')
+  editor.goToBar(3)
+  editor.select(noteAt(editor, LH, 3, 0))
+  assert.deepEqual(editor.gridVoice.value, LH, 'a note of the left hand: the left hand')
+  assert.deepEqual(editor.grid.value!.blocks.map((b) => b.id).includes(noteAt(editor, LH, 3, 0)), true)
+  editor.select(noteAt(editor, LH2, 3, 0))
+  assert.deepEqual(editor.gridVoice.value, LH2)
+  // Choosing another hand shows it, and the selected note of the other voice goes.
+  assert.ok(editor.setGridVoice(RH))
+  assert.deepEqual([editor.gridVoice.value, editor.selection.value], [RH, null])
+  assert.ok(editor.setGridVoice(LH))
+  assert.deepEqual(editor.gridVoice.value, LH, 'chosen, with nothing selected')
+  assert.equal(editor.setGridVoice({ part: 'P1', staff: 0, voice: 0 }), false, 'not a voice of the part being edited')
+  editor.setPart('P1')
+  assert.deepEqual(editor.gridVoice.value, { part: 'P1', staff: 0, voice: 0 })
+  editor.close()
+})
+
+test('actions (task 5.3): adding notes by a tap, with the drag that follows, and the Grid gestures are one undo step each', async () => {
+  const { editor } = await setupSix()
+  // The slot: bar 1 emptied of its last note, then a C5 at the slot.
+  editor.goToBar(1)
+  oneStep(editor, 'delete', () => editor.deleteNote(idsOf(editor, 1)[2]!))
+  assert.deepEqual([editor.currentBar.value, editor.selection.value?.noteId], [1, idsOf(editor, 1)[1]], 'the bar stays, with the note before selected')
+  oneStep(editor, 'slot', () => editor.addAtSlot(0, { step: 'C', octave: 5 }))
+  assert.deepEqual(barText(editor, 1), ['C5 quarter', 'C5 quarter', 'C5 quarter'])
+  // A tap and the drag before the finger lifts: one step. A later drag of the same note is a step of its own.
+  const before = editor.score.value
+  const tapped = editor.addAtSlot(0, { step: 'C', octave: 5 })!
+  assert.ok(editor.dragPitch(tapped, -2))
+  assert.deepEqual(barText(editor, 1).at(-1), 'A4 quarter')
+  editor.undo()
+  assert.equal(editor.score.value, before, 'the tap and its drag are undone together')
+  editor.redo()
+  oneStep(editor, 'a later drag', () => editor.dragPitch(tapped, 1))
+  assert.deepEqual(barText(editor, 1).at(-1), 'B4 quarter')
+  // Between two notes, at the height of the tap, before the note to its right (spec "Add a note between two notes").
+  editor.goToBar(2)
+  const [, right] = idsOf(editor, 2)
+  oneStep(
+    editor,
+    'on the staff',
+    () => editor.addOnStaff(0, { step: 'E', octave: 5 }, right),
+    () => assert.equal(editor.selection.value?.noteId, idsOf(editor, 2)[1], 'the new note is selected'),
+  )
+  assert.deepEqual(barText(editor, 2), ['D5 quarter', 'E5 quarter', 'D5 quarter', 'D5 quarter'])
+
+  // Grid, in bar 3 left with its first note: a note on beat 3, moved, made shorter, a step higher, deleted.
+  editor.goToBar(3)
+  editor.deleteNote(idsOf(editor, 3)[2]!)
+  editor.deleteNote(idsOf(editor, 3)[1]!)
+  editor.chooseLength('quarter')
+  editor.chooseRest(false)
+  editor.clearSelection()
+  let g = ''
+  oneStep(editor, 'grid add', () => (g = editor.gridAdd(frac(1, 2), { step: 'G', octave: 5 })!))
+  assert.deepEqual(barText(editor, 3), ['E5 quarter', 'rest quarter', 'G5 quarter'])
+  const [e] = idsOf(editor, 3)
+  oneStep(editor, 'grid move', () => editor.gridMove(e!, frac(1, 4)))
+  assert.deepEqual(barText(editor, 3), ['rest quarter', 'E5 quarter', 'G5 quarter'])
+  assert.equal(editor.gridResize(g, frac(1, 2)), false, 'past the end of the bar')
+  assert.equal(editor.message.value, 'That goes past the end of the bar.')
+  oneStep(editor, 'grid resize', () => editor.gridResize(g, frac(1, 8)))
+  assert.equal(editor.message.value, null, 'a done action clears the message')
+  oneStep(editor, 'grid pitch', () => editor.dragPitch(g, 1))
+  assert.deepEqual(barText(editor, 3), ['rest quarter', 'E5 quarter', 'A5 eighth', 'rest eighth'])
+  oneStep(editor, 'grid delete', () => editor.deleteNote(g))
+})
+
+test('actions (task 5.3): marks, loudness, endings, bar lines, bars and suggestions are one undo step each, and a refusal says why', async () => {
+  const { editor } = await setupSix()
+  const [c1, c2, c3] = idsOf(editor, 1)
+  editor.openTools('marks')
+  editor.select(c1!)
+  oneStep(editor, 'breath', () => editor.tapMark('breath'))
+  oneStep(editor, 'caesura', () => editor.tapMark('caesura'))
+  oneStep(editor, 'p', () => editor.tapMark('p'))
+  oneStep(editor, 'f for p', () => editor.tapMark('f'))
+  assert.ok(editor.activeMarks.value.has('f') && editor.activeMarks.value.has('breath') && editor.activeMarks.value.has('caesura'))
+  oneStep(editor, 'the active f off', () => editor.tapMark('f'))
+  assert.equal(editor.activeMarks.value.has('f'), false)
+  // The loudness strip: none, p, mf, f, none; an ff steps to none.
+  const strip: (string | undefined)[] = []
+  for (let k = 0; k < 4; k++) {
+    oneStep(editor, `strip ${k}`, () => editor.stepLoudness(c2!))
+    strip.push(dynamicOf(editor.score.value, c2!)?.mark)
+  }
+  assert.deepEqual(strip, ['p', 'mf', 'f', undefined])
+  oneStep(editor, 'ff', () => editor.setLoudness(c2!, 'ff'))
+  oneStep(editor, 'strip under ff', () => editor.stepLoudness(c2!))
+  assert.equal(dynamicOf(editor.score.value, c2!), undefined)
+  // Slides along the strip: forward a crescendo, back a diminuendo; a slide in Notes, a slur.
+  oneStep(editor, 'strip forward', () => editor.stripSlide(c1!, c2!))
+  const [d1, d2] = idsOf(editor, 2)
+  oneStep(editor, 'strip back', () => editor.stripSlide(d2!, d1!))
+  assert.deepEqual(allItemLists(editor.score.value).flat().filter(isWedge).map((w) => [w.type, w.start, w.stop]), [['crescendo', c1, c2], ['diminuendo', d1, d2]])
+  oneStep(editor, 'slide', () => editor.slide(c3!, c1!))
+  assert.deepEqual(editor.spans.value.map((x) => [x.kind, x.fromId, x.toId]), [['slur', c1, c3], ['crescendo', c1, c2]])
+  oneStep(editor, 'remove from the list', () => editor.removeSpan(editor.spans.value[0]!))
+
+  // Bars: endings with their end-repeat, the end bar line, add, delete, the same as the bar before, join.
+  editor.goToBar(4)
+  oneStep(editor, '1st time only', () => editor.toggleEnding(1))
+  assert.deepEqual([editor.barEnding.value, editor.barLines.value?.end], ['1', 'repeat'], 'the end-repeat comes along in the same step')
+  editor.goToBar(5)
+  oneStep(editor, '2nd time only', () => editor.toggleEnding(2))
+  editor.goToBar(2)
+  assert.equal(editor.toggleEnding(2), false)
+  assert.equal(editor.message.value, 'A second-time bar comes directly after a first-time bar.')
+  editor.goToBar(5)
+  oneStep(editor, '2nd time only off', () => editor.toggleEnding(2))
+  editor.goToBar(4)
+  oneStep(editor, 'played 3 times', () => editor.setRepeatTimes(3))
+  assert.equal(editor.barLines.value?.times, 3)
+  oneStep(editor, 'the ending removed', () => editor.removeEnding())
+  assert.equal(editor.barEnding.value, null)
+  editor.goToBar(6)
+  oneStep(editor, 'end bar line', () => editor.setBarEnd('final'))
+  assert.equal(editor.barLines.value?.end, 'final')
+  oneStep(editor, 'start repeat', () => editor.setBarStart('repeat'))
+  editor.goToBar(2)
+  editor.select(idsOf(editor, 2)[0]!)
+  oneStep(editor, 'bar after', () => editor.addBar('after'))
+  assert.deepEqual([editor.currentBar.value, editor.barCount.value, editor.selection.value, barText(editor, 3)], [3, 7, null, ['rest of the bar']], 'the new bar is current, with a whole-bar rest')
+  oneStep(editor, 'same as bar before', () => editor.copyBarBefore())
+  assert.deepEqual(barText(editor, 3), barText(editor, 2))
+  oneStep(editor, 'delete bar', () => editor.deleteBar())
+  assert.deepEqual([editor.currentBar.value, editor.barCount.value], [3, 6])
+  editor.goToBar(2)
+  oneStep(editor, 'join with next', () => editor.joinNext())
+  assert.equal(barText(editor, 2).length, 6)
+  // A suggestion: bar 2 cut down to two quarters in 3/4 is short of a quarter rest.
+  for (const k of [5, 4, 3]) editor.deleteNote(idsOf(editor, 2)[k]!)
+  editor.apply((s) => splitBar(s, idsOf(editor, 2)[2]!))
+  editor.goToBar(2)
+  assert.deepEqual(editor.barBeats.value, { counted: '2', beats: 3, beatType: 4, addsUp: false })
+  const suggestion = editor.suggestions.value.find((x) => x.kind === 'addRest')!
+  oneStep(editor, 'a suggestion', () => editor.applySuggestion(suggestion))
+  assert.deepEqual([editor.barBeats.value?.addsUp, editor.suggestions.value], [true, []])
+})
+
+test('not offered (task 5.3): Delete bar for the only bar of the piece or of a page, and "Same as bar before" for the first bar', async () => {
+  // Page 1 holds bars 1 to 3, page 2 bar 4 only.
+  const { editor } = await openPages([score([quarters(3, 'C'), quarters(3, 'D'), quarters(3, 'E')], [3, 4]), score([quarters(3, 'F')])])
+  editor.goToBar(4)
+  assert.equal(editor.canDeleteBar.value, false, 'the only bar of page 2')
+  const before = editor.score.value
+  assert.equal(editor.deleteBar(), false)
+  assert.deepEqual([editor.score.value === before, editor.message.value], [true, 'This is the last bar read on its page, so it cannot be deleted.'])
+  editor.goToBar(3)
+  assert.equal(editor.canDeleteBar.value, true)
+  // A bar added on page 2 does not make its own bar deletable: the page would hold only an added bar.
+  editor.goToBar(4)
+  editor.addBar('after')
+  assert.deepEqual([editor.canDeleteBar.value, editor.canDeleteBarAt(3)], [true, false], 'the added bar can go, the bar of the page cannot')
+  // "Same as bar before": not for the first bar.
+  editor.goToBar(1)
+  assert.equal(editor.canCopyBarBefore.value, false)
+  assert.equal(editor.copyBarBefore(), false)
+  assert.equal(editor.message.value, 'The first bar has no bar before it to copy.')
+  editor.goToBar(2)
+  assert.equal(editor.canCopyBarBefore.value, true)
+
+  const one = (await openPages([score([quarters(3, 'C')], [3, 4])])).editor
+  assert.deepEqual([one.canDeleteBar.value, one.deleteBar(), one.message.value], [false, false, 'This is the only bar of the piece, so it cannot be deleted.'])
+})
+
+test('not offered (task 5.3): Join with next at the end of a line or page, also after bars were deleted or brought back by an undo across a save', async () => {
+  // Page 1: lines 1 and 2–3; page 2: lines 4–5 and 6.
+  const lines: Line[] = [
+    { firstBar: 4, lastBar: 5 },
+    { firstBar: 6, lastBar: 6 },
+  ]
+  let six = await setupSix(lines)
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((i) => six.editor.canRemoveBarLineAfter(i)), [false, true, false, true, false, false])
+  // The bar that ended line 4–5 deleted in the session: bar 4 and the old bar 6 are on two lines.
+  six.editor.goToBar(5)
+  assert.ok(six.editor.deleteBar())
+  assert.deepEqual([0, 1, 2, 3, 4].map((i) => six.editor.canRemoveBarLineAfter(i)), [false, true, false, false, false])
+  six.editor.goToBar(4)
+  assert.deepEqual([six.editor.canJoinNext.value, six.editor.joinNext(), six.editor.message.value], [false, false, 'This bar ends a line of the printed page, so its bar line stays.'])
+  // An added bar is on the line of the bar it was added after: its bar line to the next line stays.
+  six.editor.goToBar(3)
+  six.editor.addBar('after')
+  assert.deepEqual([1, 2, 3].map((i) => six.editor.canRemoveBarLineAfter(i)), [true, true, false], '2–3, 3–added; not added–4')
+
+  // The first bar of page 2 deleted, saved, and brought back by an undo: a save counts it on page 1 (design D8), so it
+  // joins bar 3 and not bar 5, and the page 2 that is left keeps a bar.
+  six = await setupSix()
+  six.editor.goToBar(4)
+  assert.ok(six.editor.deleteBar())
+  assert.equal((await six.editor.save()).ok, true)
+  six.editor.undo()
+  assert.deepEqual([2, 3].map((i) => six.editor.canRemoveBarLineAfter(i)), [true, false])
+  assert.deepEqual([3, 4, 5].map((i) => six.editor.canDeleteBarAt(i)), [true, true, true])
+  six.editor.goToBar(5)
+  assert.ok(six.editor.deleteBar())
+  assert.deepEqual([3, 4].map((i) => six.editor.canDeleteBarAt(i)), [true, false], 'the last bar of page 2 is not offered')
+  six.editor.goToBar(3)
+  assert.ok(six.editor.joinNext())
+  assert.deepEqual(await six.save(), [4, [[1, 3, [[1, 1], [2, 3]]], [4, 4, [[4, 4]]]]])
+})
+
+test('not offered (task 5.3): an undo after a save cannot leave a page without bars, as a page always keeps a bar that was not added', async () => {
+  const { editor, save } = await setupSix()
+  editor.goToBar(1)
+  assert.ok(editor.addBar('after'))
+  // Page 1 is bars 1, added, 2 and 3: bars 1 and 2 can go, then bar 3 is the last one of page 1 that was not added.
+  for (const bar of [1, 2]) {
+    editor.goToBar(bar)
+    assert.ok(editor.deleteBar(), `delete ${bar}`)
+  }
+  assert.deepEqual([editor.currentBar.value, editor.canDeleteBarAt(1), editor.canDeleteBarAt(0)], [2, false, true])
+  await save()
+  while (editor.undo());
+  // Saved, not refused. The bars the undo brought back belong to bar 3's line (design D8, known limit): line 1 had only the added bar.
+  assert.deepEqual(await save(), [6, [[1, 3, [[1, 3]]], [4, 6, [[4, 6]]]]])
+  // Why: with bar 3 deleted as well (not offered, so done here by hand), page 1 is the added bar alone, and after the
+  // undo nothing that belongs to page 1 is left: that save is refused.
+  const raw = await setupSix()
+  raw.editor.apply((s) => addBar(s, 0, 'after'))
+  for (const index of [0, 1, 1]) raw.editor.apply((s) => deleteBar(s, index))
+  await raw.save()
+  while (raw.editor.undo());
+  const refused = await raw.editor.save()
+  assert.match(String(!refused.ok && refused.error), /page 1 would hold no bars/)
+})
+
+test('suggestions (task 5.3): "Join with the next bar" is offered with the session\'s join rule, so not across a page', async () => {
+  // Bar 2 holds two beats and bar 3 one: together they add up.
+  const onePage = (await openPages([score([quarters(3, 'C'), quarters(2, 'D'), quarters(1, 'E'), quarters(3, 'F')], [3, 4])])).editor
+  onePage.goToBar(2)
+  assert.ok(onePage.suggestions.value.some((x) => x.kind === 'join'))
+  const twoPages = (await openPages([score([quarters(3, 'C'), quarters(2, 'D')], [3, 4]), score([quarters(1, 'E'), quarters(3, 'F')])])).editor
+  twoPages.goToBar(2)
+  assert.ok(twoPages.suggestions.value.length > 0)
+  assert.equal(twoPages.suggestions.value.some((x) => x.kind === 'join'), false, 'no join across the page')
+})
+
+test('a mark that waits for its last note (task 5.5): over four bars, through the full score, Cancel, and the last note first', async () => {
+  // A slur over four bars: the notice stays in bars 2 to 5, then the slur runs from bar 2 to bar 5.
+  let { editor } = await setupSix()
+  editor.openTools('marks')
+  editor.tapMark('slur')
+  editor.goToBar(2)
+  editor.tapNote(idsOf(editor, 2)[0]!)
+  for (let bar = 2; bar <= 5; bar++) {
+    assert.deepEqual(editor.pending.value, { kind: 'slur', from: idsOf(editor, 2)[0], bar: 2 }, `in bar ${bar}`)
+    assert.equal(editor.currentBar.value, bar)
+    if (bar < 5) editor.nextBar()
+  }
+  assert.ok(editor.tapNote(idsOf(editor, 5)[2]!))
+  assert.equal(editor.pending.value, null)
+  assert.equal(editor.armed.value, 'slur', 'still armed for the next one')
+  editor.goToBar(3)
+  assert.deepEqual(editor.spans.value.map((x) => [x.kind, x.first + 1, x.last + 1, x.fromId, x.toId]), [['slur', 2, 5, idsOf(editor, 2)[0], idsOf(editor, 5)[2]]])
+  // Its key for the last bar goes there, with the last note selected.
+  assert.ok(editor.goToSpanEnd(editor.spans.value[0]!, 'last'))
+  assert.deepEqual([editor.currentBar.value, editor.selection.value?.noteId], [5, idsOf(editor, 5)[2]])
+
+  // Through the full score: picked bar 6, the slur still waits, and a note of bar 6 ends it.
+  ;({ editor } = await setupSix())
+  editor.openTools('marks')
+  editor.tapMark('slur')
+  editor.goToBar(2)
+  editor.tapNote(idsOf(editor, 2)[1]!)
+  editor.openFullScore()
+  assert.equal(editor.fullScore.value, true)
+  editor.closeFullScore(6)
+  assert.deepEqual([editor.fullScore.value, editor.currentBar.value, editor.pending.value?.bar], [false, 6, 2])
+  editor.openFullScore()
+  editor.closeFullScore()
+  assert.deepEqual([editor.currentBar.value, editor.pending.value?.bar], [6, 2], 'back without a bar keeps both')
+  assert.ok(editor.tapNote(idsOf(editor, 6)[0]!))
+  assert.deepEqual(editor.spans.value.map((x) => [x.kind, x.first + 1, x.last + 1]), [['slur', 2, 6]])
+
+  // Cancel: nothing added, the notice gone, Cresc. no longer armed.
+  ;({ editor } = await setupSix())
+  editor.openTools('marks')
+  editor.tapMark('crescendo')
+  editor.tapNote(idsOf(editor, 1)[0]!)
+  const before = editor.score.value
+  editor.cancelPending()
+  assert.deepEqual([editor.pending.value, editor.armed.value, editor.score.value === before], [null, null, true])
+  // A second tap on the armed mark, and the Notes or Bars tools, end it too; the Score tools do not.
+  for (const end of [() => editor.tapMark('crescendo'), () => editor.openTools('notes'), () => editor.openTools('bars')]) {
+    editor.openTools('marks')
+    editor.tapMark('crescendo')
+    editor.tapNote(idsOf(editor, 1)[0]!)
+    editor.openTools('score')
+    editor.openTools('marks')
+    assert.ok(editor.pending.value)
+    end()
+    assert.deepEqual([editor.pending.value, editor.armed.value], [null, null])
+  }
+
+  // The last note before the first: from the last note of bar 4 to the first of bar 5.
+  ;({ editor } = await setupSix())
+  editor.openTools('marks')
+  editor.tapMark('slur')
+  editor.goToBar(5)
+  editor.tapNote(idsOf(editor, 5)[0]!)
+  editor.previousBar()
+  assert.ok(editor.tapNote(idsOf(editor, 4)[2]!))
+  assert.deepEqual(editor.spans.value.map((x) => [x.kind, x.fromId, x.toId]), [['slur', idsOf(editor, 4)[2], idsOf(editor, 5)[0]]])
+})
+
+test('a mark that waits for its last note (task 5.5): a selected note is its first; stepping to a warning keeps it; its note deleted ends it', async () => {
+  const { editor } = await openPages([score([quarters(3, 'C'), quarters(3, 'D'), quarters(2, 'E'), quarters(3, 'F')], [3, 4])])
+  editor.goToBar(1)
+  editor.select(idsOf(editor, 1)[0]!)
+  editor.openTools('marks')
+  editor.tapMark('tie')
+  assert.deepEqual(editor.pending.value, { kind: 'tie', from: idsOf(editor, 1)[0], bar: 1 })
+  editor.nextWarning()
+  assert.deepEqual([editor.currentBar.value, editor.pending.value?.bar], [3, 1])
+  editor.apply((s) => deleteNote(s, idsOf(editor, 1)[0]!))
+  assert.deepEqual([editor.pending.value, editor.armed.value], [null, 'tie'], 'it waits for nothing, and Tie stays armed')
+})
+
+test('save (task 5.4): after "add a bar, delete another" through the session, the pages and the loop follow; a second save maps from the first', async () => {
+  const { editor, library, save } = await setupSix()
+  const calls = spyOnWrites(library)
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 5, loop: { start: 4, end: 6 } })
+  // A bar added after bar 3, the end of page 1 ("An added bar and its page"), and the old bar 5 deleted ("A loop over a deleted bar").
+  editor.goToBar(3)
+  assert.ok(editor.addBar('after'))
+  editor.goToBar(6)
+  assert.ok(editor.deleteBar())
+  assert.deepEqual(await save(), [6, [[1, 4, [[1, 1], [2, 4]]], [5, 6, [[5, 6]]]]], 'the added bar is on page 1')
+  assert.deepEqual(calls[0]![3], { bars: [{ first: 1, last: 1 }, { first: 2, last: 2 }, { first: 3, last: 3 }, { first: 5, last: 5 }, null, { first: 6, last: 6 }], added: [{ bar: 4, of: 3 }] })
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 6, loop: { start: 5, end: 6 } }, 'the loop keeps the music that is left; the position moves to the bar that follows')
+  // One more bar deleted, the old bar 4, now bar 5: the map goes from the six bars as saved, not from the six bars as loaded.
+  editor.goToBar(5)
+  assert.ok(editor.deleteBar())
+  assert.deepEqual(await save(), [5, [[1, 4, [[1, 1], [2, 4]]], [5, 5, [[5, 5]]]]])
+  assert.deepEqual(calls[1]![3], { bars: [{ first: 1, last: 1 }, { first: 2, last: 2 }, { first: 3, last: 3 }, { first: 4, last: 4 }, null, { first: 5, last: 5 }], added: [] })
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 5, loop: { start: 5, end: 5 } })
+})
+
+test('actions (task 5.3): a tap on the lower staff of a piano bar adds to the left hand, in the voice of the selected note when it is there', async () => {
+  const { editor } = await setupMelodyPiano({ id: 'P2' })
+  const items = (ref: { part: string; staff: number; voice: number }, bar: number) => voiceView(editor.score.value, ref).measures[bar - 1]!.items.filter((i) => 'id' in i).map((i) => (i as { id: string }).id)
+  editor.goToBar(1)
+  const right = items(RH, 1)
+  const left = items(LH, 1)
+  let added = ''
+  oneStep(editor, 'left hand', () => (added = editor.addOnStaff(1, { step: 'E', octave: 3 })!))
+  assert.deepEqual([items(RH, 1), items(LH, 1)], [right, [...left, added]], 'at the end of the left hand; the right hand is unchanged')
+  assert.deepEqual(placeOfNote(editor.score.value, added)!.note.pitch, { step: 'E', octave: 3 })
+  // With a note of the left hand's second voice selected, the new note goes to that voice, before the note to its right.
+  editor.goToBar(3)
+  const second = items(LH2, 3)
+  editor.select(noteAt(editor, LH2, 3, 0))
+  oneStep(editor, 'second voice', () => (added = editor.addOnStaff(1, { step: 'D', octave: 3 }, noteAt(editor, LH2, 3, 0))!))
+  assert.deepEqual(items(LH2, 3), [second[0], added, second[1]], 'after the hidden rest that the voice starts with, before its C2')
+  editor.close()
 })

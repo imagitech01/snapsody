@@ -541,24 +541,7 @@ export class Library {
       const bad = (message: string): never => {
         throw new LibraryError('invalid', message, id)
       }
-      const holders = checkBarMap(barMap, info.bars, bad)
-      const pageOf = (old: number): number | undefined => info.pages.find((page) => page.firstBar <= old && old <= page.lastBar)?.n
-      holders.forEach((olds, b) => {
-        if (new Set(olds.map(pageOf)).size > 1) bad(`bar ${b + 1} would hold bars of two pages`)
-      })
-      const owners = barOwners(barMap, holders)
-      const bars = owners.length
-      const pages: PageInfo[] = info.pages.map((page) => {
-        const range = ownedRange(owners, page) ?? bad(`page ${page.n} would hold no bars`)
-        const staves = page.staves.flatMap((staff) => {
-          const own = ownedRange(owners, staff)
-          const firstBar = Math.max(own?.firstBar ?? Infinity, range.firstBar)
-          const lastBar = Math.min(own?.lastBar ?? -Infinity, range.lastBar)
-          return firstBar <= lastBar ? [{ ...staff, firstBar, lastBar }] : []
-        })
-        return { ...page, ...range, staves }
-      })
-      checkPages(pages, bars, bad)
+      const { owners, bars, pages } = mapPieceBars(info, barMap, bad)
       const next: PieceInfo = { ...info, score: nextScore(info.score), bars, pages }
       const practice = await this.readPracticeText(id)
       const mapped = practice === undefined ? undefined : mapPractice(practice, barMap, owners)
@@ -897,6 +880,52 @@ function checkPages(pages: PageInfo[], bars: number, bad: Bad): void {
     next = page.lastBar + 1
   }
   if (next !== bars + 1) bad(`the pages end at bar ${next - 1}, not at the last bar ${bars}`)
+}
+
+/**
+ * What a save with a bar map makes of a piece's bars (change edit-parts D10, change redesign-score-editor D8): the old bar
+ * each new bar belongs to (`owners`, by index, from 1), the number of bars, and the pages with the lines of their photos
+ * over the new bars. Calls [bad] for what `writeScore` refuses: a map that does not fit the piece (`checkBarMap`), a new
+ * bar that holds bars of two pages, a page left without bars, and pages that do not cover the piece.
+ */
+function mapPieceBars(info: PieceInfo, barMap: BarMap, bad: Bad): { owners: number[]; bars: number; pages: PageInfo[] } {
+  const holders = checkBarMap(barMap, info.bars, bad)
+  const pageOf = (old: number): number | undefined => info.pages.find((page) => page.firstBar <= old && old <= page.lastBar)?.n
+  holders.forEach((olds, b) => {
+    if (new Set(olds.map(pageOf)).size > 1) bad(`bar ${b + 1} would hold bars of two pages`)
+  })
+  const owners = barOwners(barMap, holders)
+  const bars = owners.length
+  const pages: PageInfo[] = info.pages.map((page) => {
+    const range = ownedRange(owners, page) ?? bad(`page ${page.n} would hold no bars`)
+    const staves = page.staves.flatMap((staff) => {
+      const own = ownedRange(owners, staff)
+      const firstBar = Math.max(own?.firstBar ?? Infinity, range.firstBar)
+      const lastBar = Math.min(own?.lastBar ?? -Infinity, range.lastBar)
+      return firstBar <= lastBar ? [{ ...staff, firstBar, lastBar }] : []
+    })
+    return { ...page, ...range, staves }
+  })
+  checkPages(pages, bars, bad)
+  return { owners, bars, pages }
+}
+
+/**
+ * The bars of a piece after a save with [barMap], as `writeScore` would write them (see `mapPieceBars`), or why it would
+ * refuse the save: what the editor checks before it offers a change of bars (change redesign-score-editor, task 5.3),
+ * so that a save never fails over one. `owners` gives, for each new bar (by index), the old bar (from 1) it belongs to:
+ * the page and the line of the photo it is in. Does not read or write anything.
+ */
+export function barsAfterSave(info: PieceInfo, barMap: BarMap): { ok: true; owners: number[]; pages: PageInfo[] } | { ok: false; reason: string } {
+  try {
+    const { owners, pages } = mapPieceBars(info, barMap, (message) => {
+      throw new LibraryError('invalid', message, info.id)
+    })
+    return { ok: true, owners, pages }
+  } catch (error) {
+    if (error instanceof LibraryError) return { ok: false, reason: error.message }
+    throw error
+  }
 }
 
 /**

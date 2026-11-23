@@ -2403,3 +2403,31 @@ test('grid: other voices and parts are left alone; a later voice is not filled u
   assert.deepEqual(gridBar(hand, 0, right), ['C5:half', 'rest:half'])
   assert.equal(otherVoices(hand, right), otherVoices(before, right))
 })
+
+// ---- the slurs, ties and hairpins of a bar (change redesign-score-editor, D14, task 5.5) ---------
+
+test('spans of a bar: a slur that starts in, ends in and passes through a bar, a tie and a hairpin, with what removes them', () => {
+  // Five bars of 3/4: a slur from the last note of bar 1 to the first of bar 5, a tie from bar 2 into bar 3, a crescendo in bar 4.
+  const s = score([
+    [{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }],
+    [{ id: 'b1' }, { id: 'b2' }, { id: 'b3' }],
+    [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }],
+    [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }],
+    [{ id: 'e1' }, { id: 'e2' }, { id: 'e3' }],
+  ])
+  ed.addSlur(s, 'a3', 'e1')
+  ed.addTie(s, 'b3', 'c1')
+  ed.addWedge(s, 'crescendo', 'd1', 'd3')
+  const brief = (bar: number) => ed.spansOfBar(s, 'P1', bar).map((x) => [x.kind, x.first, x.last, x.fromId, x.toId, x.startsHere, x.endsHere])
+  assert.deepEqual(brief(0), [['slur', 0, 4, 'a3', 'e1', true, false]], 'starts in bar 1')
+  assert.deepEqual(brief(4), [['slur', 0, 4, 'a3', 'e1', false, true]], 'ends in bar 5')
+  assert.deepEqual(brief(2), [['slur', 0, 4, 'a3', 'e1', false, false], ['tie', 1, 2, 'b3', 'c1', false, true]], 'the slur passes through bar 3, where the tie ends')
+  assert.deepEqual(brief(3), [['slur', 0, 4, 'a3', 'e1', false, false], ['crescendo', 3, 3, 'd1', 'd3', true, true]], 'a hairpin wholly in the bar')
+  assert.deepEqual(ed.spansOfBar(s, 'P1', 3).map((x) => x.ref), [{ kind: 'slur', noteId: 'a3', number: 1 }, { kind: 'wedge', startId: 'd1' }])
+  assert.deepEqual(ed.spansOfBar(s, 'P1', 0)[0]!.voice, { part: 'P1', staff: 0, voice: 0 })
+  assert.deepEqual(ed.spansOfBar(s, 'P2', 0), [], 'another part has none')
+  // Removing the slur through its reference removes both of its ends.
+  ed.deleteElement(s, ed.spansOfBar(s, 'P1', 2)[0]!.ref)
+  assert.deepEqual([byId(s, 'a3').slurs, byId(s, 'e1').slurs], [[], []])
+  assert.deepEqual(brief(2), [['tie', 1, 2, 'b3', 'c1', false, true]])
+})

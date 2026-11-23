@@ -648,6 +648,72 @@ export function removeWedge(target: Score | VoiceScore, id: string): void {
   found.measure.items.splice(found.measure.items.indexOf(found.item), 1)
 }
 
+// ---------------------------------------------------------------- the slurs, ties and hairpins of a bar (change redesign-score-editor, D14)
+
+/** A slur, tie or hairpin as the editor lists it for a bar (spec "Slurs and hairpins of the bar"). */
+export interface BarSpan {
+  kind: 'slur' | 'tie' | 'crescendo' | 'diminuendo'
+  /** The bars (from 0) of its first and its last note. */
+  first: number
+  last: number
+  /** Its first and last note: where the editor goes to show either end. */
+  fromId: string
+  toId: string
+  /** The voice of its first note. */
+  voice: VoiceRef
+  /** What `deleteElement` removes it with: a slur or tie with both its ends. */
+  ref: ElementRef
+  /** Whether it begins, and whether it ends, in the bar it was listed for. */
+  startsHere: boolean
+  endsHere: boolean
+}
+
+/**
+ * Every slur, tie, crescendo and diminuendo of the part `part` that begins, ends or passes in bar `bar` (from 0), also
+ * those wholly inside it (design D14, spec "Slurs and hairpins of the bar"): in the order of their first note in time,
+ * then slurs, ties and hairpins. A slur runs from a note with its start to the next note of the voice with a stop of the
+ * same number (as `deleteElement` removes it); a tie from a note to its partner in the next chord; a hairpin from its
+ * start note to its stop note, in any voice of its staff. A slur or tie with no other end is not listed. Pure.
+ */
+export function spansOfBar(score: Score, part: string, bar: number): BarSpan[] {
+  const found: BarSpan[] = []
+  const place = (id: string) => placeOfNote(score, id)
+  for (const ref of voices(score).filter((r) => r.part === part)) {
+    const view = voiceView(score, ref)
+    const notes = allNotes(view)
+    notes.forEach((l, i) => {
+      for (const s of l.note.slurs) {
+        if (s.type !== 'start') continue
+        const end = notes.slice(i + 1).find((o) => o.note.slurs.some((t) => t.type === 'stop' && t.number === s.number))
+        if (end) found.push(span('slur', l, end, ref, { kind: 'slur', noteId: l.note.id, number: s.number }))
+      }
+      if (l.note.tieStart) {
+        const partner = tiePartner(view, l.note.id, 1)
+        const end = partner && notes.find((o) => o.note === partner)
+        if (end) found.push(span('tie', l, end, ref, { kind: 'tie', noteId: l.note.id }))
+      }
+    })
+  }
+  for (const items of allItemLists(score)) {
+    for (const item of items) {
+      if (!isWedge(item)) continue
+      const a = place(item.start)
+      const b = place(item.stop)
+      if (!a || !b || a.ref.part !== part) continue
+      found.push({ kind: item.type, first: a.barIndex, last: b.barIndex, fromId: item.start, toId: item.stop, voice: a.ref, ref: { kind: 'wedge', startId: item.start }, startsHere: false, endsHere: false })
+    }
+  }
+  const order = ['slur', 'tie', 'crescendo', 'diminuendo']
+  return found
+    .filter((s) => s.first <= bar && bar <= s.last)
+    .map((s) => ({ ...s, startsHere: s.first === bar, endsHere: s.last === bar }))
+    .sort((x, y) => compareInTime(score, x.fromId, y.fromId) || order.indexOf(x.kind) - order.indexOf(y.kind))
+}
+
+function span(kind: 'slur' | 'tie', from: Located, to: Located, voice: VoiceRef, ref: ElementRef): BarSpan {
+  return { kind, first: from.barIndex, last: to.barIndex, fromId: from.note.id, toId: to.note.id, voice, ref, startsHere: false, endsHere: false }
+}
+
 // ---------------------------------------------------------------- loudness marks (change redesign-score-editor, D5)
 
 /** The loudness marks the editor sets on a note (spec "Loudness marks"). */
