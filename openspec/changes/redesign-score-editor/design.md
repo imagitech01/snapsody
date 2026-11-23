@@ -53,11 +53,29 @@ The current bar is `EditorSession` state (a signal), not screen state, because w
 
 **Full score** replaces everything between the header and Save & practice with the whole score of the part, drawn by the existing score island, scrolled to the current bar. A tap anywhere in a bar picks that bar and goes back to the bar view; a Back key goes back without picking. It selects no note and changes no session state except the current bar, so a selection, an armed mark and a waiting span survive it (D14). The user asked to keep it for getting to another section of a long piece.
 
+**Decided while applying (2026-11-23), for the frame:**
+
+- The "Full score" key sits at the end of the title row, not after Redo. At 360 px the check chip, Preview, Undo, Redo and "Full score" do not fit one row with 44 px touch targets.
+- The check chip keeps a "Previous thing to check" key before it, as today's editor has. Both step from the current bar when nothing is selected.
+- The line "You can return to edit this score at any time." under Save & practice is gone, for room (D13).
+- With no refusal to show, the message line shows the current bar's warning text.
+- A tap on a bar line opens the Bars tools, where the bar-line controls now are.
+- When even the bar-number row leaves the large bar less than 170 px (a phone held sideways), the screen scrolls as a whole. D13 only covers the upright phone.
+
 *Alternative considered:* the whole sheet as the start screen, as today. Rejected: the editor then has two modes with different tools, which is part of what felt clunky.
 
 ### D2. Notes is drawn by Verovio; a drag is drawn by an overlay
 
 The large bar is rendered by Verovio from a one-bar excerpt of the part being edited, at a scale that fills the width. Taps are mapped with `mapElements`, as today. This gives chords, two staves, voices, triplets, grace notes, clefs and marks without new drawing code, and they look exactly as in practice.
+
+**Decided while applying (2026-11-23), for the Notes surface:**
+
+- The selected note's name and length, with Shorter and Longer, are the first row of the Notes tray (two − / + steppers), not a bubble under the bar: a row of its own would cut into the 170 px of the large bar (D13). Pitch down and up stay as keys beside the drag, and a Natural key is added.
+- A tap on an empty place of the bar also deselects a note, so the tools return to "what a tap adds".
+- The pitch drag works with the Notes tools open. A drag starts after 8 px, and counts as a pitch drag when it is mostly up or down.
+- A tap's pitch is read with the clef in force at the start of the bar; a clef change inside the bar is not followed.
+- A bar inside a longer "1st time only" or "2nd time only" stretch shows its bracket in the large bar, left open at the end when the stretch goes on (display only).
+- The sound of the first step of a drag can be lost in a browser that only allows sound after a tap; on the phone the app is not held to that.
 
 `barExcerpt` was made for the audio preview: it keeps the clef, key and time in force, but drops the bar lines, the endings and the hairpins that reach outside the bar. The large bar needs a second variant, `barForEditing`, that keeps the bar's own bar lines and endings (so a bar line can be tapped and a bracket is seen) and drops, like the preview, what reaches outside the bar: hairpins, and the slur and tie flags of notes whose partner is in another bar. Those are not lost from view: the Marks tray lists every slur, tie and hairpin that touches the bar, with a remove control (spec "Slurs and hairpins of the bar"), as the mock does, and the overview draws them.
 

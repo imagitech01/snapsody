@@ -39,18 +39,20 @@ export interface ChipProps {
   pressed?: boolean
   /** The chip waits for the notes to be chosen (slur, tie, crescendo, diminuendo). */
   picking?: boolean
+  /** The name of a chip whose face is a sign ("♯", a note value) or shorter than its name ("Delete" for "Delete note"). */
+  label?: string
   disabled?: boolean
   onPress: () => void
   children: ComponentChildren
 }
 
-export function Chip({ tone = 'plain', pressed, picking, disabled, onPress, children }: ChipProps) {
+export function Chip({ tone = 'plain', pressed, picking, label, disabled, onPress, children }: ChipProps) {
   const classes = ['editor-chip']
   if (tone === 'danger') classes.push('editor-chip--danger')
   if (pressed) classes.push('is-on')
   if (picking) classes.push('is-picking')
   return (
-    <button type="button" class={classes.join(' ')} aria-pressed={pressed === undefined ? undefined : pressed} disabled={disabled} onClick={onPress}>
+    <button type="button" class={classes.join(' ')} aria-label={label} aria-pressed={pressed === undefined ? undefined : pressed} disabled={disabled} onClick={onPress}>
       {children}
     </button>
   )

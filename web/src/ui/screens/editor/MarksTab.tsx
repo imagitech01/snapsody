@@ -1,8 +1,7 @@
 import { barLineText } from './barLineText.ts'
-import { MAX_REPEAT_TIMES, joinBars, MIN_REPEAT_TIMES, barLinesOf, chordOf, removeWedge, setBarEnd, setBarStart, setRepeatTimes, toggleAccent, toggleArpeggio, toggleFermata, toggleOrnament, toggleSlur, toggleStaccatissimo, toggleStaccato, toggleStrongAccent, toggleTenuto, toggleTie, toggleTremolo, wedgeAt } from '../../../core/score/edit.ts'
+import { MAX_REPEAT_TIMES, joinBars, MIN_REPEAT_TIMES, barLinesOf, chordOf, removeWedge, setBarEnd, setBarStart, setRepeatTimes, splitBar, toggleAccent, toggleArpeggio, toggleFermata, toggleOrnament, toggleSlur, toggleStaccatissimo, toggleStaccato, toggleStrongAccent, toggleTenuto, toggleTie, toggleTremolo, wedgeAt } from '../../../core/score/edit.ts'
 import type { BarEnd, BarStart } from '../../../core/score/edit.ts'
 import type { Score, VoiceScore } from '../../../core/score/model.ts'
-import { voiceView } from '../../../core/score/model.ts'
 import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
 import { Chip, SelectField } from './controls.tsx'
@@ -19,10 +18,12 @@ import type { ToolProps } from './NoteTab.tsx'
  * taps on the score (`Editor.tsx`), and tapping the chip of a mark that the selected note already has
  * removes it.
  *
- * Under the marks, the "Bar N" group sets how the selected bar starts and ends (change edit-bar-lines, design
- * D2): a start-repeat, a double bar line or an end-repeat, and for an end-repeat how many times the section is
- * played, with a held button as one undo step. It acts on the selected bar, with or without a note, and is
- * disabled when no bar is selected. Frame 06.2 has no such group (a recorded deviation).
+ * The "Bar N" group sets how the current bar starts and ends (change edit-bar-lines, design D2): a start-repeat, a
+ * double bar line or an end-repeat, and for an end-repeat how many times the section is played, with a held button as
+ * one undo step; "Remove bar line" joins it with the next bar, and "Bar line before" splits it before the selected note.
+ *
+ * Both are temporary trays of the editor's frame (change redesign-score-editor, task 6.1): the marks are the Marks tray
+ * and the group is the Bars tray, until the new Marks and Bars trays replace them (tasks 7.1 and 9.1).
  */
 
 /** The marks that join two notes. */
@@ -106,7 +107,6 @@ export function MarksTab({ session, run, pick, onPick }: MarksTabProps) {
         {pick ? (pick.first === null ? t('mark.pickFirst') : t('mark.pickLast')) : t('mark.hint.pair')}
       </p>
       <p class="editor-hint">{t('mark.hint.remove')}</p>
-      <BarLineGroup session={session} run={run} />
     </div>
   )
 }
@@ -114,12 +114,13 @@ export function MarksTab({ session, run, pick, onPick }: MarksTabProps) {
 const STARTS: readonly BarStart[] = ['normal', 'repeat']
 const ENDS: readonly BarEnd[] = ['normal', 'double', 'repeat']
 
-function BarLineGroup({ session, run }: ToolProps) {
+export function BarLineGroup({ session, run }: ToolProps) {
   const { t } = useShell().i18n
-  const bar = session.selection.value?.bar
-  const lines = session.selectedBarLines.value
-  const off = bar === undefined || lines === undefined
-  const index = (bar ?? 1) - 1
+  const bar = session.currentBar.value
+  const lines = session.barLines.value
+  const off = lines === undefined
+  const index = bar - 1
+  const id = session.selectedNote.value?.id
 
   /** One step more or fewer passes; the steps of a held button (`repeated`) are one undo step with the first. */
   const step = (direction: 1 | -1, repeated: boolean): void => {
@@ -131,7 +132,7 @@ function BarLineGroup({ session, run }: ToolProps) {
 
   return (
     <section class="editor-grid editor-grid--score editor-barlines" aria-label={t('barline.group')}>
-      <h3 class="editor-barlines-title">{off ? t('barline.group') : t('bar.label', { bar })}</h3>
+      <h3 class="editor-barlines-title">{t('bar.label', { bar })}</h3>
       <span class="editor-field-label">{t('barline.start')}</span>
       <SelectField
         label={t('barline.start')}
@@ -152,6 +153,12 @@ function BarLineGroup({ session, run }: ToolProps) {
       {!off && session.canRemoveBarLineAfter(index) ? (
         <div class="editor-barline-remove">
           <Chip onPress={() => run((s) => joinBars(s, index), (error) => barLineText(t, session.score.peek(), error))}>{t('barline.remove')}</Chip>
+        </div>
+      ) : null}
+      {/* Not offered for the first note of a bar, which would leave an empty bar (change edit-parts, D9). */}
+      {id && session.canAddBarLineBefore(id) ? (
+        <div class="editor-barline-remove">
+          <Chip onPress={() => run((s) => splitBar(s, id), (error) => barLineText(t, session.score.peek(), error))}>{t('note.barLine')}</Chip>
         </div>
       ) : null}
       {lines?.end === 'repeat' && (

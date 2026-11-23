@@ -1,46 +1,61 @@
 import { computed, signal } from '@preact/signals'
-import { useMemo, useRef, useState } from 'preact/hooks'
-import type { EditorSession } from '../../../app/editorSession.ts'
+import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import type { EditorSession, ToolsTab } from '../../../app/editorSession.ts'
+import type { EditorView } from '../../../app/settings.ts'
 import { EditError, addSlur, addTie, addWedge, compareInTime } from '../../../core/score/edit.ts'
 import type { ElementRef } from '../../../core/score/elements.ts'
-import { lineOfBar } from '../../../core/score/lines.ts'
 import type { LineBars } from '../../../core/score/lines.ts'
 import { isNote, placeOfNote, sameVoice } from '../../../core/score/model.ts'
-import type { MeasureItem, Note, Score, VoiceRef, VoiceScore } from '../../../core/score/model.ts'
+import type { MeasureItem, Note, Score } from '../../../core/score/model.ts'
 import { voiceView, voices } from '../../../core/score/model.ts'
-import { Button, Icon, IconButton, SegmentedControl } from '../../components/index.ts'
-import { ScoreIsland } from '../../ScoreIsland.tsx'
+import { Button, IconButton, SegmentedControl } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
+import { BarSurface } from './BarSurface.tsx'
 import { ElementPanel } from './ElementPanel.tsx'
-import { MarksTab } from './MarksTab.tsx'
+import { frameLayout } from './frame.ts'
+import type { FrameLayout } from './frame.ts'
+import { BarLineGroup, MarksTab } from './MarksTab.tsx'
 import type { PickState, PickKind } from './MarksTab.tsx'
-import { NoteTab } from './NoteTab.tsx'
 import type { Failure, FailureKey } from './NoteTab.tsx'
+import { NotesTray } from './NotesTray.tsx'
+import { Overview } from './Overview.tsx'
 import { ScoreTab } from './ScoreTab.tsx'
 
 /**
- * The editor of a piece (frames 06.1 to 06.3, spec `score-editing`, design D12 and D14; change
- * simplify-editor-and-name-new-pieces): the title, the score with what is selected and flagged on it, the
- * three tabs of tools (Note, Marks, Score) with Preview bar, Undo and Redo in their head, and Save &
- * practice. What it does is `EditorSession`'s (`app/editorSession.ts`); this draws it and keeps what only
- * the screen knows: the tab, the notes a slur, tie or hairpin is waiting for, and "Full score".
+ * The editor of a piece: one bar at a time (change redesign-score-editor, design D1, D13 and D14; spec `score-editing` "One
+ * bar at a time", "Go to another bar", "Full score"). What it does is `EditorSession`'s (`app/editorSession.ts`): the
+ * current bar, the tools tab, the view, "Full score" and the message are session state, and this draws them. From top to
+ * bottom:
  *
- * One line while editing (spec "One line while editing", design D1 and D2): with nothing selected the score is
- * the whole sheet; once something is selected, the island shows only the line that holds its bar, and the
- * strip under it steps from line to line (selecting the first bar of the other line) or shows the full score
- * again. "Full score" keeps the selection; the next tap that selects ends it. A line is what Verovio lays out
- * for the width, so the island reports the lines after every layout.
+ * 1. The header: Back, the title (with "Name this piece" for a new piece) and the "Full score" key; under it the check chip
+ *    ("2 to check · Next", with a key for the one before), Preview bar, Undo and Redo.
+ * 2. The part switch, where the piece has more than one part (change edit-parts, D1).
+ * 3. The overview: the line of music that holds the current bar, or its bar numbers when the screen is too low (`Overview`).
+ * 4. The bar row: previous, "Bar 3 of 12" with the beats chip ("3½ of 4 beats", green when it adds up), next, and the
+ *    Notes | Grid switch.
+ * 5. One row for what the editor has to say: a refused change, else what the bar's warning says.
+ * 6. The large bar (`BarSurface`: a tap selects a note or an element or adds a note, a drag changes a pitch); Grid is
+ *    drawn in a later step, so it shows a placeholder for now.
+ * 7. The tools: the tabs Notes · Marks · Bars · Score and the tray of the open one, with the selection and the selected
+ *    element (`ElementPanel`) at its top. Notes is the Notes tray (`NotesTray`); Marks and Bars are still today's tools
+ *    (`MarksTab` split in two) until their new trays replace them (tasks 7.1 and 9.1).
+ * 8. Save & practice.
  *
- * Naming a new piece (spec `piece-library` "Default name", design D5): while the session is `naming`, the title is
- * tinted with the caption "Name this piece", and its first focus selects the date name, so typing replaces it.
- * Nothing focuses it by itself: the keyboard would cover the score.
+ * Design D13: the screen does not scroll; every row but the large bar has its own height, the tray three rows of keys
+ * (it scrolls inside itself), and the large bar gets what is left, at least 170 px. When that does not fit, the overview
+ * becomes bar numbers (`frameLayout`, measured after every layout). A screen too low for even that (a phone on its side)
+ * scrolls as a whole.
  *
- * Leaving: the back button, the header's Back and Cancel all ask the router, whose leave guard (the
- * session's) asks the discard question while there are unsaved edits. "Add pages", at the foot of the Score
- * tab, opens the add-music screen over this one, which removes this screen, so it asks to save first.
+ * "Full score" (design D1) shows the whole part in place of everything between the header and Save & practice; a tap in a
+ * bar picks it, "Back to bar N" and the back button go back without picking (the session's leave guard closes it first).
+ *
+ * What only the screen keeps, for today's Marks tools: the slur, tie or hairpin whose two notes are being tapped, and why
+ * the last of their changes did not happen. Naming a new piece (spec `piece-library` "Default name"): while the session is
+ * `naming`, the title is tinted with the caption "Name this piece", and its first focus selects the date name, so typing
+ * replaces it; nothing focuses it by itself. Leaving: the header's Back and the back button ask the router, whose leave
+ * guard (the session's) asks the discard question while there are unsaved edits. "Add pages", in the Score tray, opens the
+ * add-music screen over this one, which removes this screen, so it asks to save first.
  */
-
-type Tab = 'note' | 'marks' | 'score'
 
 /** What failed to save, as the text the user reads. */
 const SAVE_ERROR = {
@@ -57,27 +72,23 @@ const PICK_ERROR: Readonly<Record<PickKind, FailureKey>> = {
   diminuendo: 'mark.error.wedge',
 }
 
-const noHeard = (): undefined => undefined
-
 /** A note or rest that is drawn: a hidden rest (a `<forward>`) is not there to select or count. */
 const isShown = (item: MeasureItem): item is Note => isNote(item) && !item.hidden
-
-const lineOf = (score: Score, ref: VoiceRef): VoiceScore => voiceView(score, ref)
-
 
 export function Editor({ session }: { session: EditorSession }) {
   const { router, i18n } = useShell()
   const { t } = i18n
-  const [tab, setTab] = useState<Tab>('note')
   const [pick, setPick] = useState<PickState | null>(null)
-  /** Why the last change did not happen: a fixed text, or one already made from the refusal. */
+  /** Why the last change of today's tools did not happen: a fixed text, or one already made from the refusal. */
   const [message, setMessage] = useState<FailureKey | { text: string } | null>(null)
   const [saveError, setSaveError] = useState<'empty-name' | 'conflict' | 'failed' | null>(null)
+  const [layout, setLayout] = useState<FrameLayout>({ overview: 'line', scroll: false })
+  const frame = useRef<HTMLDivElement>(null)
   /** The title has not had its first focus yet; and that focus selected the date name, which the press's own mouseup must not undo. */
   const firstFocus = useRef(true)
   const keepSelection = useRef(false)
 
-  // What the score island follows. One set per session: new signal objects would mount the island again.
+  // What the overview's island follows. One set per session: new signal objects would mount the island again.
   const island = useMemo(() => {
     const flagged = computed(() => session.warnings.value.flatMap((w) => (w.noteId ? [w.noteId] : [])))
     // A bar that does not add up is marked on the notes of the voice it is about, in the part shown.
@@ -88,18 +99,13 @@ export function Editor({ session }: { session: EditorSession }) {
         .filter((w) => !w.noteId && w.bar !== undefined && (w.part ?? part) === part)
         .flatMap((w) => {
           const refs = w.staff !== undefined && w.voice !== undefined ? [{ part, staff: w.staff, voice: w.voice }] : voices(score).filter((r) => r.part === part)
-          return refs.flatMap((ref) => lineOf(score, ref).measures.filter((m) => m.number === w.bar).flatMap((m) => m.items.filter(isShown).map((n) => n.id)))
+          return refs.flatMap((ref) => voiceView(score, ref).measures.filter((m) => m.number === w.bar).flatMap((m) => m.items.filter(isShown).map((n) => n.id)))
         })
     })
-    const fullScore = signal(false)
     return {
-      fullScore,
-      /** The lines of the drawing, as the island last laid them out. */
-      lines: signal<readonly LineBars[]>([]),
-      /** The line to show: the selection's, unless "Full score" is on or nothing is selected. */
-      line: computed(() => (fullScore.value ? null : (session.selection.value?.bar ?? null))),
-      // The bar of the selection is tinted; 0 is no bar, and shows none.
-      bar: computed(() => session.selection.value?.bar ?? 0),
+      bar: session.currentBar,
+      /** The line of the current bar, or the whole part for "Full score". */
+      line: computed(() => (session.fullScore.value ? null : session.currentBar.value)),
       following: signal(false),
       shownBar: signal<number | null>(null),
       playing: signal(false),
@@ -107,26 +113,52 @@ export function Editor({ session }: { session: EditorSession }) {
         const id = session.selection.value?.noteId
         return id ? [id] : []
       }),
-      selectedElement: computed(() => session.selectedElement.value?.ref),
       flagged,
       flaggedBars,
+      /** The lines of the drawing, as the island last laid them out. */
+      lines: signal<readonly LineBars[]>([]),
     }
   }, [session])
 
   const score = session.score.value
-  const selection = session.selection.value
-  const note = session.selectedNote.value
+  const current = session.currentBar.value
+  const barCount = session.barCount.value
+  const tools = session.tools.value
+  const full = session.fullScore.value
+  const view = session.view.value
   const warningCount = session.warningCount.value
-  const currentWarning = session.currentWarning.value
 
-  /** Scrolls the score to a bar, and selects it. */
-  const goToBar = (bar: number): void => {
-    if (!session.selectBar(bar)) return
-    island.shownBar.value = bar
-    setMessage(null)
-  }
+  // Design D13, measured after every render and whenever a part of the frame changes size.
+  useLayoutEffect(() => {
+    const root = frame.current
+    if (!root) return
+    const measure = (): void => {
+      if (session.fullScore.peek()) return
+      const overview = root.querySelector<HTMLElement>('.editor-overview')
+      const row = overview?.querySelector<HTMLElement>('.editor-overview-row')
+      const line = overview?.querySelector<HTMLElement>('.score-island')
+      const surface = root.querySelector<HTMLElement>('.editor-surface')
+      if (!overview || !row || !line || !surface) return
+      const chrome = overview.offsetHeight - row.offsetHeight
+      const rowMin = row.querySelector<HTMLElement>('.icon-button')?.offsetHeight ?? 0
+      const next = frameLayout({
+        screen: root.clientHeight,
+        fixed: root.scrollHeight - overview.offsetHeight - surface.offsetHeight,
+        line: Math.max(line.offsetHeight, rowMin) + chrome,
+        numbers: rowMin + chrome,
+      })
+      setLayout((now) => (now.overview === next.overview && now.scroll === next.scroll ? now : next))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(root)
+    for (const child of root.children) observer.observe(child)
+    const line = root.querySelector('.editor-overview .score-island')
+    if (line) observer.observe(line)
+    return () => observer.disconnect()
+  })
 
-  /** Runs an edit as one undo step (or as part of the last, `amend`); an edit that cannot be done says why and changes nothing. */
+  /** Runs an edit of today's tools as one undo step (or as part of the last, `amend`); an edit that cannot be done says why and changes nothing. */
   const run = (edit: (score: Score) => unknown, failure: Failure = 'editor.error.edit', options: { amend?: boolean } = {}): void => {
     try {
       session.apply(edit, options)
@@ -138,9 +170,19 @@ export function Editor({ session }: { session: EditorSession }) {
     }
   }
 
-  const tapNote = (id: string): void => {
+  const quiet = (): void => {
     setMessage(null)
-    island.fullScore.value = false
+    session.clearMessage()
+  }
+
+  /** Makes a bar current (the overview, the line arrows, previous and next); the notes a mark waits for are kept. */
+  const goTo = (bar: number): void => {
+    quiet()
+    session.goToBar(bar)
+  }
+
+  const tapNote = (id: string): void => {
+    quiet()
     session.select(id)
     if (!pick) return
     if (pick.first === null) {
@@ -166,68 +208,49 @@ export function Editor({ session }: { session: EditorSession }) {
   }
 
   /**
-   * A tap on the score that found an element, or (undefined) nothing: an element is selected and shown in
-   * its panel; a bar line selects its bar and shows the bar-line controls on the Marks tab; an empty tap
-   * puts away the element, keeping its bar. While the notes of a slur, tie or hairpin are being chosen,
-   * only notes count.
+   * A tap in the large bar that found an element, or (undefined) nothing: an element is selected and shown in its panel; a
+   * bar line makes its bar current and opens the Bars tools (spec "Remove a bar line", "From the bar line itself"); an empty
+   * tap puts away the element or the note, keeping the bar, so that the Notes tools set what a tap adds again (spec "Notes
+   * tools"). While the notes of a slur, tie or hairpin are being chosen, only notes count.
    */
   const tapElement = (ref: ElementRef | undefined): void => {
     if (pick) return
-    setMessage(null)
+    quiet()
     if (!ref) {
-      const element = session.selectedElement.peek()
-      if (element) session.selectBar(element.info.bar + 1)
+      if (session.selectedElement.peek() || session.selectedNote.peek()) session.selectBar(session.currentBar.peek())
       return
     }
     if (!session.selectElement(ref)) return
-    island.fullScore.value = false
-    if (ref.kind === 'barline') setTab('marks')
+    if (ref.kind === 'barline') session.openTools('bars')
   }
 
   const startPick = (kind: PickKind | null): void => {
-    setMessage(null)
+    quiet()
     setPick(kind ? { kind, first: null } : null)
   }
 
   /** The part switch (change edit-parts, D1): another part is drawn, and the selection and a mark being chosen go. */
   const switchPart = (id: string): void => {
     setPick(null)
-    setMessage(null)
-    island.fullScore.value = false
+    quiet()
     session.setPart(id)
   }
 
-  const chooseTab = (next: Tab): void => {
-    setTab(next)
+  const chooseTab = (next: ToolsTab): void => {
+    session.openTools(next)
     setPick(null)
     setMessage(null)
   }
 
   const warn = (direction: 'next' | 'previous'): void => {
-    setMessage(null)
+    quiet()
     const warning = direction === 'next' ? session.nextWarning() : session.previousWarning()
     if (!warning) return
-    island.fullScore.value = false
-    // A warning about the time signature is about the whole piece: show the tab where it is changed.
+    // A warning about the time signature is about the whole piece: show the tools where it is changed.
     if (warning.kind === 'time-signature-inferred' || warning.kind === 'time-signature-missing') {
       chooseTab('score')
-      goToBar(1)
-      return
+      session.goToBar(1)
     }
-    const bar = session.selection.peek()?.bar
-    if (bar !== undefined) island.shownBar.value = bar
-  }
-
-  /** Selects the first bar of the line before or after the selected one; the notes a mark waits for are kept. */
-  const stepLine = (direction: 1 | -1): void => {
-    const bar = session.selection.peek()?.bar
-    if (bar === undefined) return
-    const lines = island.lines.peek()
-    const next = lines[lineOfBar(lines, bar - 1) + direction]
-    if (!next) return
-    setMessage(null)
-    island.fullScore.value = false
-    session.selectBar(next.firstBar + 1)
   }
 
   const preview = async (): Promise<void> => {
@@ -235,7 +258,7 @@ export function Editor({ session }: { session: EditorSession }) {
       session.stopPreview()
       return
     }
-    setMessage(null)
+    quiet()
     try {
       await session.previewBar()
     } catch {
@@ -273,29 +296,32 @@ export function Editor({ session }: { session: EditorSession }) {
 
   // "Bar 3 · Note 4": the place of the note among the bar's notes and rests.
   // "Bar 5 · Left hand · Chord, note 2 of 3", or "Bar 2 · Note 3" in a one-line piece (change edit-parts, D2).
+  const selection = session.selection.value
+  const note = session.selectedNote.value
   const label = session.selectionLabel.value
-  const heading = tab === 'score' ? t('score.whole') : selection && note && label ? label : t('editor.selection.none')
+  const heading = tools === 'score' ? t('score.whole') : selection && note && label ? label : t('editor.selection.none')
   const previewing = session.previewing.value
   const naming = session.naming.value
-  const lines = island.lines.value
-  const fullScore = island.fullScore.value
-  const lineIndex = selection ? lineOfBar(lines, selection.bar - 1) : -1
-  const shown = lineIndex >= 0 && !fullScore ? lines[lineIndex] : undefined
+  const beats = session.barBeats.value
+
+  // The one row of what the editor has to say (design D13): a refused change, else what the current bar's warning says.
+  const said = message ? (typeof message === 'string' ? t(message) : message.text) : session.message.value
+  const barWarnings = session.barWarnings.value
+  const focused = session.currentWarning.value
+  const warning = focused && barWarnings.includes(focused) ? focused : barWarnings[0]
+
+  const classes = ['screen', 'editor']
+  if (full) classes.push('editor--full')
+  if (layout.scroll && !full) classes.push('editor--scroll')
 
   return (
-    <div class="screen editor" data-screen="editor" data-piece-id={session.pieceId}>
-      <div class="editor-scroll">
-        <header class="editor-header">
-          <div class="editor-topbar">
-            <IconButton label={t('common.back')} icon="back" look="plain" size={44} onPress={() => void router.back()} />
-            <p class="t-eyebrow">{t('editor.eyebrow')}</p>
-            <Button variant="link" size="small" onPress={() => void router.back()}>
-              {t('editor.cancel')}
-            </Button>
-          </div>
-          <h1 class="t-title">{t('editor.title')}</h1>
+    <div ref={frame} class={classes.join(' ')} data-screen="editor" data-piece-id={session.pieceId} data-layout={full ? 'full' : layout.scroll ? 'scroll' : layout.overview}>
+      <header class="editor-header">
+        <h1 class="visually-hidden">{t('editor.title')}</h1>
+        <div class="editor-titlebar">
+          <IconButton label={t('common.back')} icon="back" look="plain" onPress={() => void router.back()} />
           <label class={naming ? 'editor-title-field editor-title-field--naming' : 'editor-title-field'}>
-            <span class="editor-caption">{naming ? t('editor.nameThis') : t('editor.nameLabel')}</span>
+            <span class={naming ? 'editor-caption' : 'editor-caption visually-hidden'}>{naming ? t('editor.nameThis') : t('editor.nameLabel')}</span>
             <input
               class="editor-title-input"
               type="text"
@@ -321,142 +347,121 @@ export function Editor({ session }: { session: EditorSession }) {
               }}
             />
           </label>
-        </header>
-
-        <div class="editor-main">
-          <section class="editor-score-card" aria-label={t('editor.scoreLabel')}>
-            {score.parts.length > 1 ? (
-              <SegmentedControl
-                label={t('editor.part')}
-                value={session.part.value}
-                options={score.parts.map((p, n) => ({ value: p.id, label: p.name || t('editor.part.number', { n: n + 1 }) }))}
-                onChange={switchPart}
-              />
-            ) : null}
-            {warningCount > 0 ? (
-              <div class="editor-warnings" role="group" aria-label={t('editor.warnings')}>
-                <div class="editor-warnings-row">
-                  <span class="editor-warnings-count">
-                    <span class="editor-warnings-dot" aria-hidden="true" />
-                    {t('warnings.count', { count: warningCount })}
-                  </span>
-                  <button type="button" class="editor-text-button" onClick={() => warn('previous')}>
-                    {t('warnings.previous')}
-                  </button>
-                  <button type="button" class="editor-text-button" onClick={() => warn('next')}>
-                    {t('warnings.next')}
-                  </button>
-                </div>
-                {currentWarning ? (
-                  <p class="editor-warnings-text" role="status">
-                    {i18n.warning(currentWarning)}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div class={shown ? 'editor-score editor-score--line' : 'editor-score'}>
-              <ScoreIsland
-                label={t('editor.scoreLabel')}
-                multiRests="expand"
-                part={session.drawn}
-                score={score}
-                bar={island.bar}
-                following={island.following}
-                shownBar={island.shownBar}
-                playing={island.playing}
-                selected={island.selected}
-                flagged={island.flagged}
-                flaggedBars={island.flaggedBars}
-                heard={noHeard}
-                onScrollAway={(bar) => {
-                  island.shownBar.value = bar
-                }}
-                onTapNote={(id) => tapNote(id)}
-                onTapElement={tapElement}
-                selectedElement={island.selectedElement}
-                line={island.line}
-                onLines={(found) => {
-                  island.lines.value = found
-                }}
-              />
+          <button
+            type="button"
+            class="editor-text-button editor-full-key"
+            aria-pressed={full}
+            onClick={() => {
+              quiet()
+              if (full) session.closeFullScore()
+              else session.openFullScore()
+            }}
+          >
+            {t('editor.fullScore')}
+          </button>
+        </div>
+        <div class="editor-toolbar">
+          {warningCount > 0 ? (
+            <div class="editor-check" role="group" aria-label={t('editor.warnings')}>
+              <IconButton label={t('editor.check.previous')} icon="back" look="plain" onPress={() => warn('previous')} />
+              <button type="button" class="editor-check-chip" onClick={() => warn('next')}>
+                <span class="editor-check-pill">
+                  <span class="editor-check-dot" aria-hidden="true" />
+                  {t('editor.check.next', { count: warningCount })}
+                </span>
+              </button>
             </div>
+          ) : null}
+          <span class="editor-toolbar-gap" />
+          {/* While it plays, it stops (spec "Preview a bar"). */}
+          <IconButton label={previewing ? t('editor.preview.stop') : t('editor.preview', { bar: current })} icon={previewing ? 'pause' : 'play'} look="plain" onPress={() => void preview()} />
+          <IconButton label={t('editor.undo')} icon="undo" look="plain" disabled={!session.canUndo.value} onPress={() => session.undo()} />
+          <IconButton label={t('editor.redo')} icon="redo" look="plain" disabled={!session.canRedo.value} onPress={() => session.redo()} />
+        </div>
+      </header>
 
-            {shown ? (
-              <div class="editor-line" role="group" aria-label={t('editor.line.group')}>
-                <IconButton label={t('editor.line.previous')} icon="back" size={44} disabled={lineIndex <= 0} onPress={() => stepLine(-1)} />
-                <p class="editor-line-label">
-                  {t('editor.line', { line: lineIndex + 1, lines: lines.length })}
-                  {' · '}
-                  {shown.firstBar === shown.lastBar ? t('bar.label', { bar: shown.firstBar + 1 }) : t('bar.range', { from: shown.firstBar + 1, to: shown.lastBar + 1 })}
-                </p>
-                <IconButton label={t('editor.line.next')} icon="chevron-right" size={44} disabled={lineIndex >= lines.length - 1} onPress={() => stepLine(1)} />
-                <button
-                  type="button"
-                  class="editor-text-button"
-                  onClick={() => {
-                    island.fullScore.value = true
-                  }}
-                >
-                  {t('editor.fullScore')}
-                </button>
-              </div>
-            ) : selection && fullScore ? (
-              <div class="editor-line" role="group" aria-label={t('editor.line.group')}>
-                <p class="editor-line-hint">{t('editor.line.hint')}</p>
-                <button
-                  type="button"
-                  class="editor-text-button"
-                  onClick={() => {
-                    island.fullScore.value = false
-                  }}
-                >
-                  {t('editor.line.back', { bar: selection.bar })}
-                </button>
-              </div>
+      {score.parts.length > 1 && !full ? (
+        <div class="editor-parts">
+          <SegmentedControl
+            label={t('editor.part')}
+            value={session.part.value}
+            options={score.parts.map((p, n) => ({ value: p.id, label: p.name || t('editor.part.number', { n: n + 1 }) }))}
+            onChange={switchPart}
+          />
+        </div>
+      ) : null}
+
+      <Overview session={session} mode={layout.overview} island={island} onGoTo={goTo} onCloseFull={(bar) => session.closeFullScore(bar)} />
+
+      {full ? null : (
+        <>
+          <div class="editor-barrow">
+            <IconButton label={t('editor.bar.previous')} icon="back" disabled={current <= 1} onPress={() => goTo(current - 1)} />
+            <div class="editor-barrow-where">
+              <p class="editor-bar-position">{t('bar.position', { bar: current, bars: barCount })}</p>
+              {beats ? (
+                <span class={beats.addsUp ? 'editor-beats editor-beats--ok' : 'editor-beats editor-beats--off'}>
+                  {t('editor.bar.beats', { counted: beats.counted, count: beats.beats })}
+                </span>
+              ) : null}
+            </div>
+            <IconButton label={t('editor.bar.next')} icon="chevron-right" disabled={current >= barCount} onPress={() => goTo(current + 1)} />
+            <span class="editor-toolbar-gap" />
+            <SegmentedControl<EditorView>
+              label={t('editor.view')}
+              value={view}
+              options={[
+                { value: 'notes', label: t('editor.view.notes') },
+                { value: 'grid', label: t('editor.view.grid') },
+              ]}
+              onChange={(next) => void session.setView(next)}
+            />
+          </div>
+
+          <div class="editor-say">
+            {said ? (
+              <p class="editor-message" role="status">
+                {said}
+              </p>
+            ) : warning ? (
+              <p class="editor-warnings-text" role="status">
+                {i18n.warning(warning)}
+              </p>
             ) : null}
-          </section>
+          </div>
+
+          <div class="editor-surface" role="region" aria-label={t('editor.bar.large', { bar: current })}>
+            {view === 'grid' ? (
+              <p class="editor-grid-soon">{t('editor.grid.soon')}</p>
+            ) : (
+              <BarSurface session={session} flagged={island.flagged.value} flaggedBars={island.flaggedBars.value} onTapNote={tapNote} onTapElement={tapElement} onQuiet={quiet} />
+            )}
+          </div>
 
           <section class="editor-tools" aria-label={t('editor.tabs')}>
-            <ElementPanel session={session} run={run} />
-            <SegmentedControl
+            <SegmentedControl<ToolsTab>
               look="track"
               label={t('editor.tabs')}
-              value={tab}
+              value={tools}
               options={[
-                { value: 'note', label: t('editor.tab.note') },
+                { value: 'notes', label: t('editor.tab.notes') },
                 { value: 'marks', label: t('editor.tab.marks') },
+                { value: 'bars', label: t('editor.tab.bars') },
                 { value: 'score', label: t('editor.tab.score') },
               ]}
               onChange={chooseTab}
             />
-            <div class="editor-tools-head">
+            <div class="editor-tray">
               <p class="editor-selection">{heading}</p>
-              <div class="editor-tools-actions">
-                {/* Off while nothing is selected; while it plays, it stops (spec "Preview a bar"). */}
-                <button type="button" class="editor-text-button editor-preview" disabled={!selection && !previewing} onClick={() => void preview()}>
-                  <Icon name={previewing ? 'pause' : 'play'} size={12} />
-                  <span>{previewing ? t('editor.preview.stop') : selection ? t('editor.preview', { bar: selection.bar }) : t('editor.preview.none')}</span>
-                </button>
-                <button type="button" class="editor-text-button" disabled={!session.canUndo.value} onClick={() => session.undo()}>
-                  {t('editor.undo')}
-                </button>
-                <button type="button" class="editor-text-button" disabled={!session.canRedo.value} onClick={() => session.redo()}>
-                  {t('editor.redo')}
-                </button>
-              </div>
+              <ElementPanel session={session} run={run} />
+              {tools === 'notes' ? <NotesTray session={session} run={run} onQuiet={quiet} /> : null}
+              {tools === 'marks' ? <MarksTab session={session} run={run} pick={pick} onPick={startPick} /> : null}
+              {tools === 'bars' ? <BarLineGroup session={session} run={run} /> : null}
+              {tools === 'score' ? <ScoreTab session={session} run={run} onAddPages={() => void addPages()} /> : null}
             </div>
-            {tab === 'note' ? <NoteTab session={session} run={run} /> : null}
-            {tab === 'marks' ? <MarksTab session={session} run={run} pick={pick} onPick={startPick} /> : null}
-            {tab === 'score' ? <ScoreTab session={session} run={run} onAddPages={() => void addPages()} /> : null}
-            {message ? (
-              <p class="editor-message" role="status">
-                {typeof message === 'string' ? t(message) : message.text}
-              </p>
-            ) : null}
           </section>
-        </div>
-      </div>
+        </>
+      )}
 
       <footer class="editor-actions">
         {saveError ? (
@@ -467,7 +472,6 @@ export function Editor({ session }: { session: EditorSession }) {
         <Button block disabled={session.saving.value} onPress={() => void savePieceAndPractice()}>
           {t('editor.save')}
         </Button>
-        <p class="t-caption editor-save-hint">{t('editor.saveHint')}</p>
       </footer>
     </div>
   )

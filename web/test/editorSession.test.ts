@@ -11,7 +11,8 @@ import { preparePages } from '../src/core/pages/pages.ts'
 import type { AudioBackend } from '../src/core/playback/player.ts'
 import type { NoteOnSpec, TimerApi } from '../src/core/playback/scheduler.ts'
 import { addBar, addChordNote, addSlur, addTie, addWedge, deleteBar, deleteElement, deleteNote, dynamicOf, insertNote, joinBars, noteToRest, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
-import { allItemLists, isWedge, notesOf, placeOfNote, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
+import { allItemLists, isNote, isWedge, notesOf, placeOfNote, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
+import { concertMidi, midiOf } from '../src/core/playback/timeline.ts'
 import { frac } from '../src/core/score/rational.ts'
 import type { MeasureItem } from '../src/core/score/model.ts'
 import type { Score } from '../src/core/score/model.ts'
@@ -311,9 +312,13 @@ test('leaving: back with nothing to lose leaves at once; with edits it asks, sta
   assert.equal(router.screen.value.name, 'library')
   assert.equal((await s.library.load('piece-1')).info.score, 'score-1.musicxml', 'nothing was saved')
 
-  // a clean editor leaves without asking
+  // a clean editor leaves without asking; with "Full score" shown, back first closes it (change redesign-score-editor, D1)
   router.push({ name: 'editor', pieceId: 'piece-1' })
   const clean = await openEditor(s.deps, 'piece-1')
+  clean.openFullScore()
+  clean.goToBar(2)
+  router.back()
+  assert.deepEqual([router.screen.value.name, clean.fullScore.value, clean.currentBar.value, router.overlays.value.length], ['editor', false, 2, 0], 'back closes the full score and keeps the bar')
   router.back()
   assert.equal(router.overlays.value.length, 0)
   assert.equal(router.screen.value.name, 'library')
@@ -456,10 +461,13 @@ test('save: a disk that is full keeps the edits, and the next save goes through'
 
 // ---- preview -------------------------------------------------------------------------------
 
-test('preview: only the selected bar plays, with the correction, at the practice tempo and with the instrument in use', async () => {
+test('preview: only the current bar plays, with the correction, at the practice tempo and with the instrument in use', async () => {
   const { editor, played } = await setup({ practiceTempo: 66 })
-  assert.equal(editor.barPreview(), undefined, 'nothing selected, nothing to preview')
-  await editor.previewBar()
+  // There is always a current bar (change redesign-score-editor, D1): with nothing selected, that bar is previewed.
+  assert.equal(editor.selection.value, null)
+  assert.equal(editor.barPreview()?.bar, editor.currentBar.value, 'nothing selected: the current bar')
+  editor.goToBar(2)
+  assert.equal(editor.barPreview()?.bar, 2)
   assert.equal(played.length, 0)
 
   const [e5] = idsOf(editor, 3)
@@ -1164,10 +1172,21 @@ test('current bar (task 5.1): opens on the first warning\'s bar with nothing sel
   assert.deepEqual([editor.currentBar.value, editor.barCount.value, editor.selection.value], [3, 4, null], 'Bar 3 of 4, nothing selected')
   assert.deepEqual(editor.barWarnings.value.map((w) => w.kind), ['bar-length'])
   assert.deepEqual(editor.barBeats.value, { counted: '2', beats: 3, beatType: 4, addsUp: false })
+  assert.deepEqual([...editor.flaggedBars.value], [3], 'the bars to flag in the overview')
   assert.ok(editor.goToBar(1))
   assert.deepEqual([editor.barWarnings.value, editor.barBeats.value?.addsUp], [[], true])
   assert.ok(editor.nextWarning())
   assert.equal(editor.currentBar.value, 3, 'stepping to a warning makes its bar current')
+
+  // Stepping goes on from the current bar (change redesign-score-editor, task 6.1; spec "Warning on another line"): bars 3 and 5 are short.
+  const two = (await openPages([score([quarters(3, 'C'), quarters(3, 'D'), quarters(2, 'E'), quarters(3, 'F'), quarters(2, 'G')], [3, 4])])).editor
+  assert.equal(two.currentBar.value, 3)
+  assert.ok(two.goToBar(4))
+  assert.equal(two.nextWarning()?.bar, '5', 'from bar 4 with nothing selected: the warning of bar 5, not the first one')
+  assert.equal(two.currentBar.value, 5)
+  assert.equal(two.previousWarning()?.bar, '3')
+  assert.ok(two.goToBar(1))
+  assert.equal(two.previousWarning()?.bar, '5', 'from bar 1 back: round to the last one')
 
   const six = (await setupSix()).editor
   assert.deepEqual([six.currentBar.value, six.barCount.value, six.selection.value], [1, 6, null], 'nothing to check: Bar 1 of 6')
@@ -1298,6 +1317,111 @@ test('marks (task 5.2): note first, or mark first and painted on every tapped no
   const unchanged = editor.score.value
   assert.equal(editor.tapNote(rest), false)
   assert.deepEqual([editor.score.value === unchanged, editor.message.value], [true, 'Marks go on notes, not on rests.'])
+})
+
+// ---- the Notes surface and tray (change redesign-score-editor, tasks 6.2 and 6.3) -----------------------------
+
+test('slots (task 6.2): a short first voice has one after its last note, a whole-bar rest one over the bar, a full bar none', async () => {
+  const { editor } = await setup()
+  // Bar 3 is E5 E5 in 3/4: a beat short.
+  editor.goToBar(3)
+  assert.deepEqual(editor.slots.value, [{ staff: 0, after: idsOf(editor, 3)[1] }])
+  editor.goToBar(1)
+  assert.deepEqual(editor.slots.value, [], 'a full bar has no slot')
+  // Emptied, it holds a whole-bar rest, and the slot takes the whole bar.
+  for (const id of idsOf(editor, 1)) editor.deleteNote(id)
+  const [rest] = idsOf(editor, 1)
+  assert.deepEqual(editor.slots.value, [{ staff: 0, after: null, rest }])
+  // The slot follows the note added there.
+  const added = editor.addAtSlot(0, { step: 'G', octave: 4 })!
+  assert.deepEqual(editor.slots.value, [{ staff: 0, after: added }])
+  editor.close()
+})
+
+test('slots (task 6.2): each staff of a piano bar has its own, and a short second voice has none', async () => {
+  const { editor } = await setupMelodyPiano({ id: 'P2' })
+  editor.goToBar(3)
+  assert.deepEqual(editor.slots.value, [], 'both hands add up')
+  editor.deleteNote(noteAt(editor, LH, 3, 0))
+  assert.deepEqual(editor.slots.value.map((s) => s.staff), [1], 'only the left hand is short')
+  // A second voice that is short (its last note deleted) shows none, and leaves the first voice's slot as it is.
+  const before = editor.slots.value
+  const second = notesOf(voiceView(editor.score.value, LH2).measures[2]!).filter((n) => !n.hidden)
+  editor.deleteNote(second.at(-1)!.id)
+  assert.deepEqual(editor.slots.value, before)
+  editor.close()
+})
+
+test('Shorter and Longer (task 6.2): the next length, keeping the dot, as one undo step; none past whole and sixteenth', async () => {
+  const { editor } = await setup()
+  const [c5] = idsOf(editor, 1).slice(1)
+  editor.select(c5!)
+  oneStep(editor, 'shorter', () => editor.changeLength(-1), () => assert.equal(barText(editor, 1)[1], 'C5 eighth'))
+  editor.toggleDotted()
+  assert.ok(editor.changeLength(1))
+  assert.equal(barText(editor, 1)[1], 'C5 quarter.', 'a dotted eighth made longer is a dotted quarter')
+  assert.ok(editor.changeLength(1))
+  assert.ok(editor.changeLength(1))
+  assert.equal(barText(editor, 1)[1], 'C5 whole.')
+  const at = editor.score.value
+  assert.equal(editor.changeLength(1), false, 'nothing is longer than a whole note here')
+  assert.equal(editor.score.value, at)
+  editor.clearSelection()
+  assert.equal(editor.changeLength(-1), false, 'nothing selected')
+  editor.close()
+})
+
+test('the pitch drag (task 6.2): the name it shows is the pitch the release stores, with the key; the score is not changed until then', async () => {
+  const { editor } = await setup()
+  editor.apply((s) => setKey(s, editor.part.value, -1)) // F major: B is B flat
+  const [, c5] = idsOf(editor, 1)
+  const before = editor.score.value
+  assert.deepEqual(editor.pitchAfterSteps(c5!, -1), { step: 'B', alter: -1, octave: 4 })
+  assert.deepEqual(editor.pitchAfterSteps(c5!, 2), { step: 'E', octave: 5 })
+  assert.deepEqual(editor.pitchAfterSteps(c5!, 0), { step: 'C', octave: 5 })
+  assert.equal(editor.score.value, before, 'only tried on a copy')
+  assert.equal(editor.pitchAfterSteps('nothing', 1), undefined)
+  editor.select(c5!)
+  assert.ok(editor.dragPitch(c5!, -1))
+  assert.deepEqual(firstLine(editor.score.value).measures[0]!.items.filter(isNote).find((n) => n.id === c5)!.pitch, { step: 'B', alter: -1, octave: 4 })
+  editor.close()
+})
+
+test('the sound of a note (task 6.2): one note with the instrument in use, from the audio the preview uses too', async () => {
+  const { editor, played, deps } = await setup()
+  let made = 0
+  const make = deps.backend!
+  deps.backend = (instrument) => {
+    made++
+    return make(instrument)
+  }
+  await editor.soundPitch({ step: 'D', octave: 5 })
+  assert.equal(played.length, 1)
+  assert.deepEqual(played[0]!.midi, [concertMidi(midiOf({ step: 'D', octave: 5 }), editor.instrument.value)], 'D5 as the tenor saxophone sounds it')
+  await editor.soundPitch({ step: 'E', octave: 5 })
+  editor.goToBar(2)
+  await editor.previewBar()
+  editor.stopPreview()
+  assert.equal(made, 1, 'one audio for the sounds and the preview')
+  editor.close()
+  // Without audio, nothing sounds and nothing fails.
+  const { editor: silent } = await setup()
+  ;(silent as unknown as { deps: EditorDeps }).deps.backend = undefined
+  await silent.soundPitch({ step: 'C', octave: 5 })
+  silent.close()
+})
+
+test('bar for editing (task 6.2): a bar inside a longer ending gets a bracket of its own; the score keeps its bar lines', () => {
+  const s = parseMusicXml(score([quarters(4, 'C'), quarters(4, 'D'), quarters(4, 'E'), quarters(4, 'F')]))
+  setAttr(s, 1, 'leftBarline', { ending: { number: '1', type: 'start' } })
+  setAttr(s, 3, 'rightBarline', { repeat: 'backward', ending: { number: '1', type: 'stop' } })
+  const before = structuredClone(s)
+  const bar = (index: number) => firstLine(barForEditing(s, index)).measures[0]!
+  assert.deepEqual([bar(1).leftBarline, bar(1).rightBarline], [{ ending: { number: '1', type: 'start' } }, { ending: { number: '1', type: 'discontinue' } }], 'the first bar: open at its end')
+  assert.deepEqual([bar(2).leftBarline, bar(2).rightBarline], [{ ending: { number: '1', type: 'start' } }, { ending: { number: '1', type: 'discontinue' } }], 'a bar in the middle')
+  assert.deepEqual([bar(3).leftBarline, bar(3).rightBarline], [{ ending: { number: '1', type: 'start' } }, { repeat: 'backward', ending: { number: '1', type: 'stop' } }], 'the last bar keeps its own end')
+  assert.deepEqual([bar(0).leftBarline, bar(0).rightBarline], [undefined, undefined], 'a bar in no ending')
+  assert.deepEqual(s, before, 'the score is unchanged')
 })
 
 test('the Grid follows the selected note\'s staff and voice, else the first voice of the first staff, and another can be chosen (task 5.2)', async () => {

@@ -21,9 +21,25 @@ export interface RenderOptions {
   multiRests?: MultiRests;
   /** The parts to draw, by id (`SerializeOptions.parts`): practice draws your part only, a two-staff part as a grand staff (change parts-and-accompaniment, D7). The first part when absent (the editor). */
   parts?: string[];
+  /**
+   * Lay the score out as one bar large in a box `width` x `height` (the editor's large bar, change redesign-score-editor
+   * D2): the page is cropped to the music, and when the music alone is narrower than the box, it is laid out again
+   * stretched to the box's proportions, so that it fills the width at the height it has. The SVG has a view box only,
+   * so the page sizes it.
+   */
+  fit?: { height: number };
 }
 
 export const DEFAULT_SCALE = 40;
+
+/** The widest page a fitted bar is laid out on, in Verovio's units at scale 100. */
+const FIT_PAGE_WIDTH = 4000;
+
+/** The width and height of an SVG page's view box, or zeros. */
+function viewBox(svg: string): [number, number] {
+  const m = /viewBox="[\d.-]+ [\d.-]+ ([\d.]+) ([\d.]+)"/.exec(svg);
+  return m ? [Number(m[1]), Number(m[2])] : [0, 0];
+}
 
 let toolkit: Promise<VerovioToolkit> | undefined;
 
@@ -42,13 +58,15 @@ export function loadToolkit(): Promise<VerovioToolkit> {
 /** Engraves [score] as one or more SVG pages (one page for any normal exercise). */
 export async function renderScore(score: Score, options: RenderOptions): Promise<string[]> {
   const tk = await loadToolkit();
-  const scale = options.scale ?? DEFAULT_SCALE;
-  const pageWidth = Math.max(300, Math.round((options.width * 100) / scale));
+  const scale = options.fit ? 100 : (options.scale ?? DEFAULT_SCALE);
+  const pageWidth = options.fit ? FIT_PAGE_WIDTH : Math.max(300, Math.round((options.width * 100) / scale));
   tk.setOptions({
     scale,
     pageWidth,
     pageHeight: 60000,
     adjustPageHeight: true,
+    adjustPageWidth: options.fit !== undefined,
+    minLastJustification: 0.8,
     breaks: "auto",
     header: "none",
     footer: "none",
@@ -70,6 +88,16 @@ export async function renderScore(score: Score, options: RenderOptions): Promise
     for (const [id, marks] of beamScore(voiceView(score, ref))) beams.set(id, marks);
   }
   if (!tk.loadData(serializeMusicXml(first, { beams, drawingIds: true, multiRests: options.multiRests ?? "collapse", parts: drawn }))) throw new Error("Verovio could not read the score");
+  if (options.fit) {
+    // The music at its own width first; narrower than the box, it is stretched to the box's proportions (the last, only
+    // line justified to the page width).
+    const [w, h] = viewBox(tk.renderToSVG(1));
+    const box = options.width / Math.max(1, options.fit.height);
+    if (w > 0 && h > 0 && w / h < box) {
+      tk.setOptions({ pageWidth: Math.min(FIT_PAGE_WIDTH, Math.round(h * box)), adjustPageWidth: false, minLastJustification: 0 });
+      tk.redoLayout();
+    }
+  }
   const pages: string[] = [];
   for (let page = 1; page <= tk.getPageCount(); page++) pages.push(tk.renderToSVG(page));
   return pages;

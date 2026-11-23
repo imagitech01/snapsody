@@ -155,17 +155,20 @@ for (const viewport of VIEWPORTS) {
         await go(page, 'closeSheet', 'tools')
         await page.getByRole('dialog').waitFor({ state: 'detached' })
 
-        // The editor: its three tabs.
+        // The editor (change redesign-score-editor, task 6.1): its four tabs, and the full score. Task 10.1 adds both views.
         await go(page, 'push', { name: 'editor', pieceId: ID.ode })
-        await page.locator('.score-view[data-rendered="true"]').waitFor()
+        await page.locator('.editor-bar-host .score-view[data-rendered="true"]').waitFor()
         await settle(page)
-        const tabs = page.locator('.editor-tools [role="radio"]')
-        assert.equal(await tabs.count(), 3)
-        for (const [index, name] of ['notes', 'marks', 'score settings'].entries()) {
+        const tabs = page.getByRole('radiogroup', { name: 'Editing tools' }).getByRole('radio')
+        assert.equal(await tabs.count(), 4)
+        for (const [index, name] of ['notes', 'marks', 'bars', 'score settings'].entries()) {
           await tabs.nth(index).click()
           await settle(page)
           await check(page, at(`editor, ${name}`), problems)
         }
+        await page.getByRole('button', { name: 'Full score' }).click()
+        await settle(page)
+        await check(page, at('editor, full score'), problems)
       })
 
       // A phone with no music yet: the invitation, the empty library, and the hint before the scanner.

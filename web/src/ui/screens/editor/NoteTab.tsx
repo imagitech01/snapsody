@@ -1,7 +1,6 @@
 import type { EditorSession } from '../../../app/editorSession.ts'
-import { DURATION_TYPES, addChordNote, deleteNote, insertNote, moveToOtherStaff, noteToRest, restToNote, setAccidental, setDuration, splitBar, stepPitch } from '../../../core/score/edit.ts'
+import { DURATION_TYPES, addChordNote, deleteNote, insertNote, moveToOtherStaff, noteToRest, restToNote, setAccidental, setDuration, stepPitch } from '../../../core/score/edit.ts'
 import type { AccidentalChoice, EditError } from '../../../core/score/edit.ts'
-import { barLineText } from './barLineText.ts'
 import type { NoteType, Score } from '../../../core/score/model.ts'
 import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
@@ -13,6 +12,9 @@ import { Chip, SelectField } from './controls.tsx'
  * Everything acts on the selected note; with none selected the controls are there but off. In a chord, pitch and
  * accidental are the selected note's, length and rest the whole chord's (change edit-parts, D3). "+ Chord note" adds
  * a note a third above the chord, and in a part with two staves "To other hand" moves the note or chord there (D4).
+ *
+ * A temporary tray of the editor's frame (change redesign-score-editor, task 6.1): the Notes tray, until the new one
+ * replaces it (task 6.3). "Bar line before" is in the Bars tray (`BarLineGroup`).
  */
 export interface ToolProps {
   session: EditorSession
@@ -129,10 +131,6 @@ export function NoteTab({ session, run }: ToolProps) {
         </Chip>
       </div>
       <div class="editor-row-actions">
-        {/* Not offered for the first note of a bar, which would leave an empty bar (change edit-parts, D9). */}
-        {id && session.canAddBarLineBefore(id) ? (
-          <Chip onPress={() => run((s) => splitBar(s, id), (error) => barLineText(t, session.score.peek(), error))}>{t('note.barLine')}</Chip>
-        ) : null}
         <Chip disabled={off || rest} onPress={() => id && run((s) => addChordNote(s, id))}>
           {t('note.chordNote')}
         </Chip>

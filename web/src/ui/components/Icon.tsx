@@ -28,6 +28,8 @@ export type IconName =
   | 'check'
   | 'clock'
   | 'ring'
+  | 'undo'
+  | 'redo'
 
 const STROKE = 1.8
 
@@ -107,6 +109,9 @@ const SHAPES: Record<IconName, JSX.Element> = {
     </>
   ),
   ring: <circle cx="12" cy="12" r="4" />,
+  // Not in the frames: Undo and Redo in the editor's header (change redesign-score-editor, D1), a hooked arrow back and on.
+  undo: <path d="M9 5L5 9L9 13M5 9H14A5 5 0 0 1 14 19H10" />,
+  redo: <path d="M15 5L19 9L15 13M19 9H10A5 5 0 0 0 10 19H14" />,
 }
 
 export interface IconProps {

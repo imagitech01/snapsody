@@ -86,6 +86,13 @@ export interface ScoreIslandOptions {
   multiRests?: MultiRests
   /** After every layout: the lines of the drawing, with the bars (from 0) each holds. */
   onLines?: (lines: readonly LineBars[]) => void
+  /** Verovio's scale in percent: the editor's overview is drawn smaller than the practice screen's score. */
+  scale?: number
+  /**
+   * Opt-in (the editor's overview and full score, change redesign-score-editor D1): a tap anywhere in a bar calls this with
+   * the bar, from 1, and selects no note or element.
+   */
+  onTapBar?: (bar: number) => void
 }
 
 export interface ScoreIslandHandle {
@@ -259,6 +266,8 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
 
   const view: ScoreView = createScoreView(host, score, {
     ...(options.multiRests ? { multiRests: options.multiRests } : {}),
+    ...(options.scale !== undefined ? { scale: options.scale } : {}),
+    ...(options.onTapBar ? { onTapBar: (barIndex: number) => options.onTapBar?.(barIndex + 1) } : {}),
     ...(options.part?.peek() ? { part: options.part.peek()! } : {}),
     onTap: (info) => options.onTapNote(info.note.id, info),
     ...(options.onTapElement ? { onTapElement: (ref: ElementRef | undefined) => options.onTapElement?.(ref) } : {}),

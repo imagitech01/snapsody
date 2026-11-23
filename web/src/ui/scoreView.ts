@@ -8,6 +8,8 @@ import { linesOf } from "../core/score/lines.ts";
 import { noteName } from "../core/score/noteNames.ts";
 import type { NoteNameStyle } from "../core/score/noteNames.ts";
 import type { LineBars } from "../core/score/lines.ts";
+import { barAtPoint } from "./barHit.ts";
+import type { LineBox } from "./barHit.ts";
 
 /**
  * The rendered score in the page (tasks 9.1 and 9.2): one column of SVG, re-laid out when the width
@@ -61,6 +63,11 @@ export interface ScoreView {
   mark(kind: MarkKind, noteIds: string[]): void;
   /** Called for every tap that resolves to a note. */
   onTap: ((info: NoteInfo) => void) | undefined;
+  /**
+   * Opt-in bar taps (the editor's overview and full score; change redesign-score-editor, D1): when set, a tap anywhere in
+   * a bar calls this with the bar (from 0), and nothing else: no note and no element is looked for.
+   */
+  onTapBar: ((barIndex: number) => void) | undefined;
   /**
    * Opt-in element hit-testing (the editor; change select-and-delete-elements, design D2). When set, a tap
    * first looks for the element drawn under the finger (a clef, a dynamic, a slur, an articulation, a bar
@@ -134,11 +141,24 @@ export interface DrawnPart {
 export const FADED_STAFF = "staff-faded";
 
 /** The hooks a caller can give before the first layout, so it does not miss that one. */
-export type ScoreViewHooks = Partial<Pick<ScoreView, "onTap" | "onTapElement" | "onBeforeRender" | "onRender">> & {
+export type ScoreViewHooks = Partial<Pick<ScoreView, "onTap" | "onTapElement" | "onTapBar" | "onBeforeRender" | "onRender">> & {
   /** The part to draw (practice: your part): a part id, and for a two-staff part possibly the hand you play, the other staff is faded. Absent: the first part. */
   part?: DrawnPart;
   /** A multi-measure rest that still holds: one symbol (`collapse`, the default: practice) or bar by bar (`expand`: the editor). */
   multiRests?: MultiRests;
+  /** Verovio's scale in percent (`renderScore`); the default is the practice screen's. */
+  scale?: number;
+  /**
+   * One bar, large (the editor's large bar, change redesign-score-editor D2): laid out to fill the view's width at the
+   * height it has (`renderScore`'s `fit`), and laid out again when either changes.
+   */
+  fit?: boolean;
+  /**
+   * The caller handles the touches itself (the editor's large bar, change redesign-score-editor D2: a tap there can also
+   * add a note, and a drag changes a pitch): the drawn elements are mapped for `elementAtPoint` as with `onTapElement`,
+   * and a click does nothing here.
+   */
+  ownTaps?: boolean;
 };
 
 /** Mounts the score in [container] and starts the first layout; `view.rendered` settles when it is drawn. */
@@ -170,8 +190,9 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
   let index: NoteIndex = indexOf();
   /** Which drawn measure draws each bar (design D5); every bar looked up by its position goes through it. */
   let bars: DrawnBars = drawnBars(line, multiRests);
-  let renderedWidth = 0;
-  let pendingWidth = 0;
+  /** The size the drawing was laid out for (its width, and with `fit` its height too), and the one being laid out. */
+  let renderedWidth = "";
+  let pendingWidth = "";
   let generation = 0;
   let highlighted: SVGGElement[] = [];
   /** What each drawn element is, rebuilt after every render: Verovio's own ids change each time. */
@@ -247,28 +268,37 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
 
   const render = async (force = false) => {
     const width = Math.floor(element.clientWidth);
-    if (width <= 0) return;
-    if (!force && (width === renderedWidth || width === pendingWidth)) return;
-    pendingWidth = width;
+    const height = Math.floor(element.clientHeight);
+    if (width <= 0 || (hooks.fit && height <= 0)) return;
+    const size = hooks.fit ? `${width}x${height}` : String(width);
+    if (!force && (size === renderedWidth || size === pendingWidth)) return;
+    pendingWidth = size;
     const mine = ++generation;
     const started = performance.now();
-    const pages = await renderScore(score, { width, multiRests, ...(part ? { parts: [drawnVoices()[0]!.part] } : {}) });
+    const pages = await renderScore(score, {
+      width,
+      multiRests,
+      ...(hooks.scale !== undefined ? { scale: hooks.scale } : {}),
+      ...(hooks.fit ? { fit: { height } } : {}),
+      ...(part ? { parts: [drawnVoices()[0]!.part] } : {}),
+    });
     if (mine !== generation) return;
     const ms = Math.round(performance.now() - started);
     view.onBeforeRender?.();
     element.innerHTML = pages.join("");
-    renderedWidth = width;
-    pendingWidth = 0;
+    renderedWidth = size;
+    pendingWidth = "";
     lastRender = { ms, pages: pages.length, width };
     highlighted = [];
     applyMarks();
     // The elements of every staff and voice of the drawn part (change edit-parts): a left-hand clef is the left hand's.
-    elementMap = view.onTapElement ? mapElements<Element>(element, DOM_TREE, { score, part: lineRef().part }, bars) : new Map();
+    elementMap = view.onTapElement || hooks.ownTaps ? mapElements<Element>(element, DOM_TREE, { score, part: lineRef().part }, bars) : new Map();
     lines = linesOf<Element>(element, DOM_TREE, bars);
     measureNodes = [...element.querySelectorAll<SVGGElement>("g.measure")];
     fadeOtherHand();
     applyElementMark();
     element.dataset.rendered = "true";
+    element.dataset.size = size; // the size laid out for: a test can wait until a new size is drawn
     const missing = unmappedNotes(pages.join(""), index, bars);
     element.dataset.unmapped = String(missing.length);
     if (missing.length > 0) console.warn(`score view: ${missing.length} model notes have no rendered element`, missing);
@@ -388,6 +418,7 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     },
     onTap: hooks.onTap,
     onTapElement: hooks.onTapElement,
+    onTapBar: hooks.onTapBar,
     elementAtPoint,
     markElement(ref) {
       markedElement = ref;
@@ -417,7 +448,32 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     },
   };
 
+  /** The drawn lines and their bars, as they are on the screen now. */
+  const lineBoxes = (): LineBox[] => {
+    const systems = new Map<Element, LineBox & { bars: { bar: number; left: number; right: number }[] }>();
+    measureNodes.forEach((node, index) => {
+      const bar = bars.barsOf[index]?.first;
+      const system = node.closest("g.system");
+      if (bar === undefined || !system) return;
+      let line = systems.get(system);
+      if (!line) {
+        const r = system.getBoundingClientRect();
+        line = { top: r.top, bottom: r.bottom, bars: [] };
+        systems.set(system, line);
+      }
+      const r = node.getBoundingClientRect();
+      line.bars.push({ bar, left: r.left, right: r.right });
+    });
+    return [...systems.values()];
+  };
+
   element.addEventListener("click", (event) => {
+    if (hooks.ownTaps) return;
+    if (view.onTapBar) {
+      const bar = barAtPoint(lineBoxes(), event.clientX, event.clientY);
+      if (bar !== undefined) view.onTapBar(bar);
+      return;
+    }
     if (view.onTapElement) {
       const ref = elementAtPoint(event.clientX, event.clientY);
       if (ref) {
@@ -433,7 +489,7 @@ export function createScoreView(container: HTMLElement, initial: Score, hooks: S
     if (info) view.onTap?.(info);
   });
 
-  // Re-lay out when the width changes (rotation, window resize), not for height changes.
+  // Re-lay out when the width changes (rotation, window resize), not for height changes (but for both with `fit`).
   let resizeTimer: number | undefined;
   const observer = new ResizeObserver(() => {
     window.clearTimeout(resizeTimer);

@@ -4,12 +4,14 @@ import { instrumentById, instrumentOrDefault } from '../core/instruments/instrum
 import type { Instrument } from '../core/instruments/instruments.ts'
 import { Player } from '../core/playback/player.ts'
 import type { AudioBackend } from '../core/playback/player.ts'
-import type { TimerApi } from '../core/playback/scheduler.ts'
+import { PLAYBACK_TUNING } from '../core/playback/scheduler.ts'
+import type { TimerApi, VoiceHandle } from '../core/playback/scheduler.ts'
 import { startingTempo, tempoSetup } from '../core/playback/tempo.ts'
-import { buildTimeline } from '../core/playback/timeline.ts'
+import { DYNAMIC_GAIN, buildTimeline, concertMidi, midiOf } from '../core/playback/timeline.ts'
 import type { TimelineOptions } from '../core/playback/timeline.ts'
 import type { Quarters } from '../core/playback/tempo.ts'
 import {
+  DURATION_TYPES,
   EditError,
   addBar,
   addSlur,
@@ -51,7 +53,7 @@ import { endingLabels } from '../core/score/endings.ts'
 import { gridOf } from '../core/score/grid.ts'
 import type { GridDescription } from '../core/score/grid.ts'
 import { isNote, isWedge, sameVoice, voices } from '../core/score/model.ts'
-import type { Clef, KeySignature, MeasureItem, Note, NoteType, Score, Step, TimeSignature, VoiceRef, VoiceScore } from '../core/score/model.ts'
+import type { Clef, KeySignature, MeasureItem, Note, NoteType, Pitch, Score, Step, TimeSignature, VoiceRef, VoiceScore } from '../core/score/model.ts'
 import { allItemLists, firstVoice, partIndex, placeOfNote, singleVoiceScore, voiceView } from '../core/score/model.ts'
 import { noteName } from '../core/score/noteNames.ts'
 import { barLength, beatsText, effectiveTimes, expectedLength, midiNumber } from '../core/score/repairs.ts'
@@ -326,6 +328,8 @@ export class EditorSession {
   readonly barBeats: ReadonlySignal<BarBeats | undefined>
   /** The warnings about the current bar, in score order. */
   readonly barWarnings: ReadonlySignal<readonly ScoreWarning[]>
+  /** The bars (from 1) that a warning is about, for the flags of the overview's bar numbers. */
+  readonly flaggedBars: ReadonlySignal<ReadonlySet<number>>
   /** The suggested repairs of the current bar (design D6), for the first voice of the part being edited that has any. */
   readonly suggestions: ReadonlySignal<readonly Suggestion[]>
   /** The slurs, ties and hairpins of the part being edited that begin, end or pass in the current bar. */
@@ -340,6 +344,11 @@ export class EditorSession {
   readonly canCopyBarBefore: ReadonlySignal<boolean>
   /** Whether "Join with next" is offered for the current bar (`canRemoveBarLineAfter`). */
   readonly canJoinNext: ReadonlySignal<boolean>
+  /**
+   * Where Notes shows the slot for the next note in the current bar (design D2, spec "A bar always takes a note"): for
+   * each staff of the part being edited whose first voice adds up to less than the bar, or holds only a whole-bar rest.
+   */
+  readonly slots: ReadonlySignal<readonly BarSlot[]>
 
   private readonly deps: EditorDeps
   private readonly session: EditSession
@@ -387,6 +396,12 @@ export class EditorSession {
   private steps = 0
   /** The note the last step added by a tap, while no other step came after it: a pitch drag of it is part of that step. */
   private added: { id: string; step: number } | null = null
+  /** The audio of the note sounds and the bar preview, made on the first of them (inside a touch) and shared by both. */
+  private audio: Promise<AudioBackend> | undefined
+  /** The note a pitch drag sounds last, cut off when the next one starts. */
+  private sounding: VoiceHandle | undefined
+  /** The last pitch `pitchAfterSteps` worked out, so a drag that stays on a step does not work it out again. */
+  private stepped: { score: Score; id: string; steps: number; pitch: Pitch | undefined } | undefined
 
   constructor(deps: EditorDeps, info: PieceInfo, score: Score, practiceTempo: number | null, options: OpenOptions = {}, chosen: ChosenInPractice = {}) {
     this.deps = deps
@@ -516,6 +531,10 @@ export class EditorSession {
       const bar = this.current.value - 1
       return this.warnings.value.filter((w) => this.keyOf(w)[0] === bar)
     })
+    this.flaggedBars = computed(() => {
+      this.score.value
+      return new Set(this.warnings.value.map((w) => this.keyOf(w)[0] + 1).filter((bar) => bar >= 1))
+    })
     this.barBeats = computed(() => {
       const score = this.score.value
       const bar = this.current.value - 1
@@ -555,6 +574,7 @@ export class EditorSession {
     this.canDeleteBar = computed(() => this.canDeleteBarAt(this.current.value - 1))
     this.canCopyBarBefore = computed(() => this.current.value > 1 && this.current.value <= this.score.value.bars.length)
     this.canJoinNext = computed(() => this.canRemoveBarLineAfter(this.current.value - 1))
+    this.slots = computed(() => slotsOf(this.score.value, this.editing.value, this.current.value - 1))
   }
 
   // ---- Selection -----------------------------------------------------------------------------
@@ -871,6 +891,67 @@ export class EditorSession {
     )
   }
 
+  /**
+   * The pitch the note `id` would have after a pitch drag of `steps` staff steps (design D2): the same steps `dragPitch`
+   * makes on release, tried on a copy, so the key and the bar's accidentals give the name the drag shows and the sound it
+   * plays. Undefined for a rest or a note that is not there.
+   */
+  pitchAfterSteps(id: string, steps: number): Pitch | undefined {
+    const score = this.session.score
+    const memo = this.stepped
+    if (memo && memo.score === score && memo.id === id && memo.steps === steps) return memo.pitch
+    let pitch: Pitch | undefined
+    const own = findNote(score, id)?.note
+    if (own?.pitch && steps === 0) {
+      pitch = own.pitch
+    } else if (own?.pitch && Number.isInteger(steps)) {
+      const copy = structuredClone(score)
+      try {
+        for (let k = 0; k < Math.abs(steps); k++) stepPitch(copy, id, steps > 0 ? 1 : -1)
+        pitch = findNote(copy, id)?.note.pitch
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error
+      }
+    }
+    this.stepped = { score, id, steps, pitch: pitch ? { ...pitch } : undefined }
+    return pitch ? { ...pitch } : undefined
+  }
+
+  /**
+   * Sounds one written pitch with the instrument in use, as the bar preview sounds it (design D2: each step of a pitch
+   * drag, and a note added by a tap). The note before it is cut off. Call it from a touch: the audio is made on the first
+   * sound and shared with the preview. Never rejects; does nothing without a `backend`.
+   */
+  async soundPitch(pitch: Pitch): Promise<void> {
+    try {
+      const audio = await this.audioBackend()
+      if (!audio) return
+      const instrument = this.instrument.peek()
+      await audio.useSound?.(instrument.sound)
+      const when = audio.currentTime + 0.01
+      this.sounding?.release(when, PLAYBACK_TUNING.releaseFade)
+      const handle = audio.output.noteOn({ when, midi: [concertMidi(midiOf(pitch), instrument)], gain: DYNAMIC_GAIN.mf!, attack: true, fade: PLAYBACK_TUNING.attackFade, sound: instrument.sound })
+      handle.release(when + NOTE_SOUND_SECONDS, PLAYBACK_TUNING.releaseFade)
+      this.sounding = handle
+    } catch {
+      // A sound that cannot play leaves the edit as it is.
+    }
+  }
+
+  /**
+   * Shorter or Longer (spec "Notes view"): the selected note or rest gets the next shorter (`-1`) or longer (`1`) of
+   * the lengths whole to sixteenth, keeping its dot and its triplet, as one undo step. False when refused or when
+   * there is no shorter or longer one.
+   */
+  changeLength(dir: 1 | -1): boolean {
+    const note = this.selectedNote.peek()
+    const at = note?.type ? DURATION_TYPES.indexOf(note.type) : -1
+    const next = at < 0 ? undefined : DURATION_TYPES[at - dir]
+    if (!note || !next) return false
+    const { id, dots, timeMod } = note
+    return this.tryApply((s) => setDuration(s, id, { type: next, dots, triplet: !!timeMod }))
+  }
+
   // ---- Grid gestures (task 5.3, design D3, D4) -----------------------------------------------
 
   /**
@@ -1118,7 +1199,7 @@ export class EditorSession {
 
   // ---- Warnings ------------------------------------------------------------------------------
 
-  /** Goes to the next warning after the current one (or after the selection), wrapping round, and selects what it is about. */
+  /** Goes to the next warning after the current one (or after the selection, or the start of the current bar), wrapping round, and selects what it is about. */
   nextWarning(): ScoreWarning | undefined {
     return this.stepWarning(1)
   }
@@ -1137,10 +1218,10 @@ export class EditorSession {
 
   // ---- Preview -------------------------------------------------------------------------------
 
-  /** What "Preview bar N" plays for the selected bar, or undefined when no bar is selected. */
+  /** What "Preview bar N" plays: the current bar (design D1), or undefined when the score has no bars. */
   barPreview(): BarPreview | undefined {
-    const bar = this.chosen.value?.bar
-    if (bar === undefined) return undefined
+    const bar = this.current.value
+    if (!this.isBar(bar)) return undefined
     const score = this.session.score
     // The tempo as practice works it out: from the first part's first voice, where the piece's marking is read.
     const setup = tempoSetup(lineOf(score, firstVoice(score)))
@@ -1157,7 +1238,7 @@ export class EditorSession {
     }
   }
 
-  /** The notes the preview of the selected bar sounds (D8): the bar's events as practice builds them, your line's only while it is on. */
+  /** The notes the preview of the current bar sounds (D8): the bar's events as practice builds them, your line's only while it is on. */
   previewNotes(): string[] {
     const preview = this.barPreview()
     if (!preview) return []
@@ -1166,9 +1247,9 @@ export class EditorSession {
   }
 
   /**
-   * Plays the selected bar on its own, with the edits made so far (spec "Preview a bar"). Call it
-   * from the tap: the audio is created on the first preview. Does nothing without a selected bar or
-   * without a `backend`. A preview that is playing starts again.
+   * Plays the current bar on its own, with the edits made so far (spec "Preview a bar"). Call it
+   * from the tap: the audio is created on the first preview. Does nothing without a `backend`. A
+   * preview that is playing starts again.
    */
   async previewBar(): Promise<void> {
     const preview = this.barPreview()
@@ -1178,7 +1259,7 @@ export class EditorSession {
       this.player = new Player({
         instrument: preview.instrument,
         loadScore: () => this.barPreview()?.score ?? singleVoiceScore([]),
-        backend,
+        backend: async () => (await this.audioBackend())!,
         ...(preview.part ? { part: preview.part } : {}),
         silent: preview.silent,
         ownLine: preview.ownLine,
@@ -1302,10 +1383,14 @@ export class EditorSession {
   }
 
   /**
-   * What back (and the editor's Cancel) asks before leaving: nothing when there is nothing to lose,
-   * else the discard question; true lets the user leave.
+   * What back (and the editor's own Back) asks before leaving: with "Full score" shown, it closes that and stays (design
+   * D1); else nothing when there is nothing to lose, else the discard question; true lets the user leave.
    */
   confirmLeave(): boolean | Promise<boolean> {
+    if (this.full.peek()) {
+      this.closeFullScore()
+      return false
+    }
     if (!this.dirty.value) return true
     const router = this.deps.router
     if (!router) return false
@@ -1435,6 +1520,20 @@ export class EditorSession {
     return id
   }
 
+  /** The shared audio of the note sounds and the preview, made on first use; undefined without a `backend`. A failed one is made again next time. */
+  private audioBackend(): Promise<AudioBackend | undefined> {
+    const make = this.deps.backend
+    if (!make) return Promise.resolve(undefined)
+    if (!this.audio) {
+      const made = make(this.instrument.peek())
+      this.audio = made
+      made.catch(() => {
+        if (this.audio === made) this.audio = undefined
+      })
+    }
+    return this.audio
+  }
+
   /** Turns a mark of a note on or off on the note `id`, as one undo step. */
   private markNote(kind: Exclude<MarkKind, SpanMark>, id: string): boolean {
     const place = findNote(this.session.score, id)
@@ -1476,17 +1575,18 @@ export class EditorSession {
     }
     const keyed = warnings.map((warning, index) => ({ warning, index, key: this.keyOf(warning) }))
     const focused = this.currentWarning.value
+    const focusedEntry = focused ? keyed.find((k) => k.warning === focused) : undefined
+    const bar = this.current.value - 1
     let at: { key: Key; index: number } | undefined
-    if (focused) {
-      const entry = keyed.find((k) => k.warning === focused)!
-      at = { key: entry.key, index: entry.index }
+    // From the warning stepped to last while its bar is still the current one (or it is about the whole piece); else from
+    // the selection, else from the start of the current bar (spec "Flags shown for review", "Warning on another line").
+    if (focusedEntry && (focusedEntry.key[0] === bar || focusedEntry.key[0] < 0)) {
+      at = { key: focusedEntry.key, index: focusedEntry.index }
     } else {
       const selected = this.chosen.value
-      if (selected) {
-        const place = selected.noteId ? findNote(this.session.score, selected.noteId) : undefined
-        // A selected note counts as just before itself, so its own warning is the next one.
-        at = { key: place ? [place.barIndex, place.order - 0.5] : [selected.bar - 1, -1.5], index: dir > 0 ? -1 : warnings.length }
-      }
+      const place = selected?.noteId ? findNote(this.session.score, selected.noteId) : undefined
+      // A selected note counts as just before itself, so its own warning is the next one.
+      at = { key: place ? [place.barIndex, place.order - 0.5] : [(selected?.bar ?? bar + 1) - 1, -1.5], index: dir > 0 ? -1 : warnings.length }
     }
     const after = (k: (typeof keyed)[number]): boolean => !at || compareKeys(k.key, at.key) > 0 || (compareKeys(k.key, at.key) === 0 && k.index > at.index)
     const before = (k: (typeof keyed)[number]): boolean => !!at && (compareKeys(k.key, at.key) < 0 || (compareKeys(k.key, at.key) === 0 && k.index < at.index))
@@ -1523,6 +1623,47 @@ function noteFrom(score: Score, where: VoiceRef, bar: number, right: string): st
   return k >= 0 ? (items[k] as Note).id : undefined
 }
 
+/** How long a note sounded by `soundPitch` rings, in seconds. */
+const NOTE_SOUND_SECONDS = 0.45
+
+/** Where Notes shows the slot for the next note on a staff (design D2). */
+export interface BarSlot {
+  /** The staff, from 0. */
+  staff: number
+  /** The last note or rest of the staff's first voice, which the slot follows; null when the voice holds only a whole-bar rest (or nothing), and the slot takes the whole bar. */
+  after: string | null
+  /** The whole-bar rest a tap in the slot replaces, when there is one. */
+  rest?: string
+}
+
+/**
+ * The slots of bar `bar` (from 0) of the part `part` (design D2, spec "A bar always takes a note"): one for each staff
+ * whose first voice adds up to less than the bar, after its last note or rest, and one for each staff whose first
+ * voice holds only a whole-bar rest, over the whole bar. A later voice that is short has none.
+ */
+export function slotsOf(score: Score, part: string, bar: number): BarSlot[] {
+  const pi = partIndex(score, part)
+  if (pi < 0 || !score.bars[bar]) return []
+  const staves = score.parts[pi]!.staves
+  const slots: BarSlot[] = []
+  for (let staff = 0; staff < staves; staff++) {
+    const view = voiceView(score, { part, staff, voice: 0 })
+    const measure = view.measures[bar]
+    if (!measure) continue
+    const full = barLengthAt(view, bar)
+    const shown = shownNotes(measure.items).filter((n) => !n.grace)
+    const [only] = shown
+    if (!only) {
+      slots.push({ staff, after: null })
+    } else if (shown.length === 1 && only.rest && (only.measureRest || eq(only.duration, full))) {
+      slots.push({ staff, after: null, rest: only.id })
+    } else if (cmp(barLength(measure), full) < 0) {
+      slots.push({ staff, after: shown.at(-1)!.id })
+    }
+  }
+  return slots
+}
+
 /** The notes and rests of a voice's bar that are drawn and stand on their own: no hidden rests, no chord notes after the first. */
 const shownNotes = (items: readonly MeasureItem[]): Note[] => items.filter((i): i is Note => isNote(i) && !i.hidden && !i.chord)
 
@@ -1555,7 +1696,8 @@ export function barExcerpt(score: Score, index: number): Score {
 /**
  * The bar at [index] as a score of its own, for the large bar of the editor (change redesign-score-editor, D2): as
  * `barExcerpt`, but with the bar's own bar lines and endings, so that a bar line can be tapped and an ending's
- * bracket is seen (Verovio 6.4 draws it only when the ending starts and ends in this bar); and without what reaches outside the bar, which cannot be drawn from one bar: hairpins, and the
+ * bracket is seen (Verovio 6.4 draws it only when the ending starts and ends in this bar, so a bar inside a longer ending
+ * is given a start and an open end of its own); and without what reaches outside the bar, which cannot be drawn from one bar: hairpins, and the
  * slur and tie ends of notes whose other end is in another bar. The score is not changed; a bar that is not there
  * gives a score without bars.
  */
@@ -1575,6 +1717,15 @@ function excerptOf(score: Score, index: number, forEditing: boolean): Score {
   if (!forEditing) {
     delete bar.leftBarline
     delete bar.rightBarline
+  } else {
+    // A bar inside a longer ending: Verovio draws the bracket of a one-bar score only from a start to a stop in it, so the
+    // drawn bar gets both (display only). Where the ending goes on after this bar, its end is open (`discontinue`).
+    const label = endingLabels(score.bars)[index]
+    if (label !== null && label !== undefined) {
+      if (bar.leftBarline?.ending?.type !== 'start') bar.leftBarline = { ...bar.leftBarline, ending: { number: label, type: 'start' } }
+      const end = bar.rightBarline?.ending?.type
+      if (end !== 'stop' && end !== 'discontinue') bar.rightBarline = { ...bar.rightBarline, ending: { number: label, type: 'discontinue' } }
+    }
   }
   delete bar.newSystem
   bar.number = '1'

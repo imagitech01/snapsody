@@ -7,7 +7,7 @@ import { isNote, isWedge } from '../../src/core/score/model.ts'
 import type { Score } from '../../src/core/score/model.ts'
 import { withApp } from './app.ts'
 import type { App } from './app.ts'
-import { noteIdsByBar, tab, tapNote, textOf } from './journey.ts'
+import { noteIdsByBar, tab, textOf } from './journey.ts'
 import { BUILD_DIR } from './paths.ts'
 import { ID } from './pieces.ts'
 import { barsScore, elementsScore } from './scores.ts'
@@ -18,16 +18,119 @@ import { MELODY_PIANO_FIXTURE, firstLine } from '../helpers.ts'
 // simplify-editor-and-name-new-pieces). The seeded piece is "Ode to Joy": three pages (bars 1-4, 5-8, 9-12), twelve
 // bars of C5 D5 E5 F5 in 4/4 at 60 BPM. A copy of it is made through the library where a journey saves the piece.
 //
-// Nothing opens the editor from a screen yet (the tools sheet of the practice screen is task 13.2), so the
-// journeys push the editor on the router, as the tools sheet does.
+// The journeys push the editor on the router, as the tools sheet of the practice screen does.
+//
+// The editor shows one bar at a time (change redesign-score-editor, group 6): the large bar is a score of its own (`BIG`),
+// and the overview above it is the score island of the whole part, clipped to the line of the current bar, which becomes
+// the full score on "Full score" (`OVERVIEW`). Both draw the notes with their ids, so a journey looks in one of them: notes
+// are tapped in the large bar (`tapNote` goes to their bar first), and what the whole part holds is counted in the
+// overview, which keeps every bar in its drawing.
 
 const ODE = noteIdsByBar(barsScore(12, 60))
 
-/** Opens the editor on a piece the way the tools sheet will, over what is on the stack. */
+/** The large bar, and the overview (and full score). */
+const BIG = '.editor-bar-host .score-view'
+const OVERVIEW = '.editor-overview .score-view'
+
+/** Opens the editor on a piece the way the tools sheet does, over what is on the stack. */
 async function openEditor(page: Page, pieceId: string): Promise<void> {
   await page.evaluate((id) => window.__test!.shell.router.push({ name: 'editor', pieceId: id }), pieceId)
   await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
-  await page.locator('.score-view[data-rendered="true"]').waitFor()
+  await page.locator(`${BIG}[data-rendered="true"]`).waitFor()
+  await page.locator(`${OVERVIEW}[data-rendered="true"]`).waitFor()
+}
+
+/** "Bar 3 of 12": the bar the editor shows large, from the bar row. */
+const barRow = (page: Page) => textOf(page.locator('.editor-bar-position'))
+
+/** Waits until the editor shows bar `bar` large, drawn (the large bar says which bar it has drawn last). */
+async function onBar(page: Page, bar: number): Promise<void> {
+  await page.locator('.editor-bar-position').filter({ hasText: new RegExp(`^Bar ${bar} of `) }).waitFor()
+  await page.locator(`.editor-bar-host[data-bar="${bar}"] .score-view[data-rendered="true"]`).waitFor()
+}
+
+/**
+ * Waits until the large bar and the overview are drawn for the size they have now, and stay so for a moment: each is laid
+ * out again a moment after its size changes (the large bar for its width and height, the overview for its width), and
+ * the frame itself may change after an edit or a part switch (design D13).
+ */
+async function laidOut(page: Page): Promise<void> {
+  const settled = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.editor .score-view')].every((view) => {
+        const fit = view.closest('.editor-bar-host') !== null
+        const size = fit ? `${Math.floor(view.clientWidth)}x${Math.floor(view.clientHeight)}` : String(Math.floor(view.clientWidth))
+        return view.dataset.size === size
+      }),
+    )
+  for (let i = 0, still = 0; i < 50 && still < 2; i++) {
+    still = (await settled()) ? still + 1 : 0
+    await page.waitForTimeout(still > 0 ? 200 : 100)
+  }
+}
+
+/** A drawn thing's box once it stops moving (the score is laid out again a moment after its size changes). */
+async function settledBox(page: Page, locator: ReturnType<Page['locator']>): Promise<{ x: number; y: number; width: number; height: number }> {
+  await laidOut(page)
+  let last = await locator.boundingBox()
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(120)
+    const box = await locator.boundingBox()
+    if (box && last && Math.abs(box.x - last.x) < 0.5 && Math.abs(box.y - last.y) < 0.5 && Math.abs(box.width - last.width) < 0.5) return box
+    last = box
+  }
+  assert.ok(last, 'drawn')
+  return last
+}
+
+/** Waits until the overview (or full score) is laid out for the width it has now: it is laid out again a moment after the width changes. */
+const overviewLaidOut = (page: Page) =>
+  page.waitForFunction((css) => {
+    const view = document.querySelector<HTMLElement>(css)
+    return view !== null && view.dataset.size === String(Math.floor(view.clientWidth))
+  }, OVERVIEW)
+
+/** Opens "Full score", taps `target` in it (a drawn bar, or something drawn in one), and waits for the bar view of that bar. */
+async function pickInFullScore(page: Page, target: string, bar: number): Promise<void> {
+  if (!(await fullScoreShown(page))) await page.getByRole('button', { name: 'Full score' }).click()
+  await page.locator('.editor[data-layout="full"]').waitFor()
+  await overviewLaidOut(page)
+  const there = page.locator(`${OVERVIEW} ${target}`).first()
+  await there.scrollIntoViewIfNeeded()
+  const box = await settledBox(page, there)
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
+  await page.locator('.editor:not([data-layout="full"])').waitFor()
+  await onBar(page, bar)
+}
+
+const fullScoreShown = (page: Page) => page.locator('.editor[data-layout="full"]').count().then((n) => n > 0)
+
+/** Makes bar `bar` (from 1) current, through a tap in it in "Full score", as a user gets to a bar on another line. */
+async function goToBar(page: Page, bar: number): Promise<void> {
+  if ((await barRow(page)).startsWith(`Bar ${bar} of `)) return
+  await pickInFullScore(page, `g.measure >> nth=${bar - 1}`, bar)
+}
+
+/** The bar (from 1) of a note, from the overview's drawing (every bar is a `g.measure`, in order). */
+const barOfNote = (page: Page, id: string) =>
+  page.evaluate(([css, noteId]) => {
+    const measures = [...document.querySelectorAll(`${css} g.measure`)]
+    return measures.findIndex((m) => m.querySelector(`g.note[id="${CSS.escape(noteId!)}"], g.rest[id="${CSS.escape(noteId!)}"]`) !== null) + 1
+  }, [OVERVIEW, id] as const)
+
+/** Taps the note `id` in the large bar, going to its bar first when it is not the current one. */
+async function tapNote(page: Page, id: string): Promise<void> {
+  await page.locator(`${BIG}[data-rendered="true"]`).waitFor()
+  await page.locator(`${OVERVIEW}[data-rendered="true"]`).waitFor()
+  const note = page.locator(`${BIG} g.note[id="${id}"], ${BIG} g.rest[id="${id}"]`)
+  if ((await note.count()) === 0) {
+    const bar = await barOfNote(page, id)
+    assert.ok(bar > 0, `note ${id} is in the score`)
+    await goToBar(page, bar)
+    await note.waitFor()
+  }
+  const box = await settledBox(page, note)
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
 }
 
 /** Waits until the router shows this screen on top (the editor is replaced or popped when Save & practice has saved). */
@@ -35,7 +138,7 @@ const onScreen = (page: Page, name: string) => page.waitForFunction((n) => windo
 
 const title = (page: Page) => page.getByRole('textbox', { name: 'Title' })
 const save = (page: Page) => page.getByRole('button', { name: 'Save & practice' })
-const tabs = (page: Page, name: 'Note' | 'Marks' | 'Score') => page.getByRole('radio', { name })
+const tabs = (page: Page, name: 'Notes' | 'Marks' | 'Bars' | 'Score') => page.getByRole('radiogroup', { name: 'Editing tools' }).getByRole('radio', { name })
 /** "Bar 3 · Note 4": what the tools say is selected. */
 const selection = (page: Page) => textOf(page.locator('.editor-selection'))
 const pitch = (page: Page) => textOf(page.getByRole('group', { name: 'Pitch' }).getByRole('status'))
@@ -86,29 +189,29 @@ async function makeOdePiece(page: Page): Promise<string> {
   )
 }
 
-test('edit: the frame shows the title and the score with no pills or photo; a tap selects, and Preview bar in the tools head plays that bar', async () => {
+test('edit: the frame shows the title, the line of the current bar and the bar large, with no pills or photo; a tap selects, and Preview plays the current bar', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await serveSamples(app)
     await openEditor(page, ID.ode)
     assert.equal(await title(page).inputValue(), 'Ode to Joy')
-    assert.equal(await page.locator('.score-view svg g.note').count(), 48, 'the twelve bars are drawn')
+    assert.equal(await page.locator(`${OVERVIEW} svg g.note`).count(), 48, 'the overview holds the twelve bars')
+    assert.deepEqual(await page.locator(`${BIG} svg g.note`).evaluateAll((notes) => notes.map((n) => n.id)), ODE[0], 'the large bar is bar 1')
+    assert.equal(await barRow(page), 'Bar 1 of 12')
     assert.equal(await selection(page), 'Tap a note to edit it.')
     assert.equal(await page.getByRole('button', { name: /^Pages|Go to bar|Add pages/ }).count(), 0, 'no pills above the score')
-    assert.equal(await page.locator('.editor-score-card img, .editor-photo').count(), 0, 'no photo')
-    const head = page.locator('.editor-tools-head')
-    assert.equal(await head.getByRole('button', { name: 'Preview' }).isDisabled(), true, 'nothing to preview before a bar is chosen')
+    assert.equal(await page.locator('.editor img, .editor-photo').count(), 0, 'no photo')
     assert.equal(await warnings(page).count(), 0, 'nothing to check: no warning and no mark')
-    assert.equal(await page.locator('.score-view g.note.mk-flag, .score-view g.note.mk-flagbar').count(), 0)
+    assert.equal(await page.locator('.editor .score-view g.note.mk-flag, .editor .score-view g.note.mk-flagbar').count(), 0)
+    // There is always a current bar (design D1): Preview plays it, also with nothing selected.
+    const toolbar = page.locator('.editor-toolbar')
+    assert.deepEqual(await toolbar.getByRole('button').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label'))), ['Preview bar 1', 'Undo', 'Redo'])
 
-    // A tap on a note selects it and its bar; Preview names the bar, before Undo and Redo.
+    // A tap on a note in bar 3 (gone to through the full score) selects it; Preview names its bar.
     await tapNote(page, ODE[2]![3]!)
     assert.equal(await selection(page), 'Bar 3 · Note 4')
-    assert.equal(await page.locator('.score-view g.note.mk-sel').count(), 1)
-    assert.deepEqual(
-      await head.getByRole('button').evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim())),
-      ['Preview bar 3', 'Undo', 'Redo'],
-    )
+    assert.equal(await page.locator(`${BIG} g.note.mk-sel`).count(), 1)
+    await toolbar.getByRole('button', { name: 'Preview bar 3' }).waitFor()
 
     // Preview: the bar plays on its own, the button says Stop while it does, then it is a button to play again.
     await page.evaluate(() => {
@@ -120,8 +223,8 @@ test('edit: the frame shows the title and the score with no pills or photo; a ta
         return start.apply(this, args)
       }
     })
-    await head.getByRole('button', { name: 'Preview bar 3' }).click()
-    await head.getByRole('button', { name: 'Stop preview' }).waitFor()
+    await toolbar.getByRole('button', { name: 'Preview bar 3' }).click()
+    await toolbar.getByRole('button', { name: 'Stop preview' }).waitFor()
     // The sound loads in real time, and the notes are scheduled on the test clock: let it run until they are.
     const starts = () => page.evaluate(() => (window as unknown as { __starts: number }).__starts)
     for (let i = 0; i < 60 && (await starts()) === 0; i++) {
@@ -130,7 +233,7 @@ test('edit: the frame shows the title and the score with no pills or photo; a ta
     }
     assert.ok((await starts()) >= 1, 'a note of the bar sounded')
     await page.clock.runFor(6000)
-    await head.getByRole('button', { name: 'Preview bar 3' }).waitFor()
+    await toolbar.getByRole('button', { name: 'Preview bar 3' }).waitFor()
     assert.equal(await starts(), 4, 'the four notes of bar 3, and no others')
     assert.deepEqual(await app.screen(), { name: 'editor', pieceId: ID.ode }, 'previewing leaves the editor open')
   })
@@ -155,149 +258,323 @@ test('edit: a new piece named before "Add pages" is not asked for its name again
   })
 })
 
-// ---- One line while editing (change simplify-editor-and-name-new-pieces, tasks 2.2 and 3.2) -----------------
+// ---- One bar at a time (change redesign-score-editor, tasks 6.1 and 6.6) -----------------------------------
+// These replace the journeys of "One line while editing" (change simplify-editor-and-name-new-pieces), a requirement the
+// change removes: the editor no longer starts on the whole sheet and shrinks it to a line on a tap.
 
-/** The line strip under the score. */
-const lineStrip = (page: Page) => page.getByRole('group', { name: 'Line of music' })
+/** The overview's line of music. */
+const overview = (page: Page) => page.getByRole('group', { name: 'Line of music' })
 
 /**
- * What the island shows: the line it is clipped to (`data-line`, or null for the whole score), its height against the
- * height of that line's drawing plus the bar box's reach, and the bars (from 1) whose drawing is in the visible area.
+ * What the overview shows: the line its island is clipped to (`data-line`, from 0; null for the whole part), the bars (from
+ * 1) whose drawing has its middle in view, the bar the tinted box is on, and how many staves each bar in view has.
  */
-async function shownLine(page: Page): Promise<{ line: number | null; height: number; lineHeight: number; visibleBars: number[] }> {
+async function shownLine(page: Page): Promise<{ line: number | null; visibleBars: number[]; tinted: number | null; staves: number[] }> {
+  assert.notEqual(await page.locator('.editor').getAttribute('data-layout'), 'numbers', 'the overview is a line of music, not bar numbers')
   return page.evaluate(() => {
-    const island = document.querySelector<HTMLElement>('.editor .score-island')!
+    const island = document.querySelector<HTMLElement>('.editor-overview .score-island')!
     const line = island.dataset.line === undefined ? null : Number(island.dataset.line)
     const view = island.getBoundingClientRect()
     const measures = [...island.querySelectorAll('g.measure')]
-    const visibleBars = measures.flatMap((m, index) => {
+    const inView = measures.flatMap((m, index) => {
       const r = m.getBoundingClientRect()
-      return r.bottom > view.top && r.top < view.bottom ? [index + 1] : []
+      const middle = r.top + r.height / 2
+      return middle > view.top && middle < view.bottom ? [{ m, bar: index + 1, r }] : []
     })
-    const systems = [...island.querySelectorAll('g.system')]
-    const system = line === null ? undefined : systems[line]
-    return { line, height: view.height, lineHeight: system ? system.getBoundingClientRect().height + 8 : 0, visibleBars }
+    const box = island.querySelector<HTMLElement>('.score-bar')
+    const b = box && !box.hidden ? box.getBoundingClientRect() : undefined
+    const tinted = b ? (inView.find(({ r }) => r.left + r.width / 2 > b.left && r.left + r.width / 2 < b.right && r.top + r.height / 2 > b.top && r.top + r.height / 2 < b.bottom)?.bar ?? null) : null
+    return { line, visibleBars: inView.map((v) => v.bar), tinted, staves: inView.map(({ m }) => m.querySelectorAll(':scope > g.staff').length) }
   })
 }
 
-/** The bars (from 1) the strip says the line holds: "Line 2 of 3 · Bars 5–8". */
-async function stripBars(page: Page): Promise<{ line: number; lines: number; bars: number[] }> {
-  const text = await textOf(lineStrip(page).locator('.editor-line-label'))
-  const m = /^Line (\d+) of (\d+) · Bars? (\d+)(?:–(\d+))?$/.exec(text)
-  assert.ok(m, `the strip says which line: "${text}"`)
-  const from = Number(m[3])
-  const to = Number(m[4] ?? m[3])
-  return { line: Number(m[1]), lines: Number(m[2]), bars: Array.from({ length: to - from + 1 }, (_, i) => from + i) }
-}
-
-/** Waits until the island shows the line with this index (from 0), or the whole score for null. */
-const onLine = (page: Page, line: number | null) =>
+/** Waits until the overview is clipped to a line other than `not` (or to any line). */
+const lineShown = (page: Page, not?: number) =>
   page.waitForFunction((n) => {
-    const shown = document.querySelector<HTMLElement>('.editor .score-island')?.dataset.line
-    return n === null ? shown === undefined : shown === String(n)
-  }, line)
+    const shown = document.querySelector<HTMLElement>('.editor-overview .score-island')?.dataset.line
+    return shown !== undefined && shown !== String(n)
+  }, not ?? -1)
 
-/** Checks that the island shows exactly the line the strip names, at that line's height. */
-async function showsOnlyItsLine(page: Page, what: string): Promise<number[]> {
-  const shown = await shownLine(page)
-  const strip = await stripBars(page)
-  assert.equal(shown.line, strip.line - 1, `${what}: the island shows the line the strip names`)
-  assert.ok(Math.abs(shown.height - shown.lineHeight) <= 1.5, `${what}: the island is the line's height (${shown.height} against ${shown.lineHeight})`)
-  assert.deepEqual(shown.visibleBars, strip.bars, `${what}: only that line's bars are in view`)
-  return strip.bars
+/** Waits until the overview shows the line that holds bar `bar` (from 1), with that bar tinted: it is laid out again a moment after its width changes. */
+async function lineHolds(page: Page, bar: number): Promise<Awaited<ReturnType<typeof shownLine>>> {
+  await overviewLaidOut(page)
+  let shown = await shownLine(page)
+  for (let i = 0; i < 40 && !(shown.line !== null && shown.visibleBars.includes(bar) && shown.tinted === bar); i++) {
+    await page.waitForTimeout(100)
+    shown = await shownLine(page)
+  }
+  assert.ok(shown.line !== null && shown.visibleBars.includes(bar) && shown.tinted === bar, `the overview shows the line of bar ${bar}, tinted (${JSON.stringify(shown)})`)
+  return shown
 }
 
-test('edit: one line while editing; the full sheet with nothing selected, a tap shows the line, the arrows step, Full score keeps the selection, and a warning on another line shows that line', async () => {
+/** Taps the middle of bar `bar` (from 1) in the overview's line. */
+async function tapInOverview(page: Page, bar: number): Promise<void> {
+  await overviewLaidOut(page)
+  const box = await settledBox(page, page.locator(`${OVERVIEW} g.measure`).nth(bar - 1))
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
+}
+
+/** "Ode to Joy" with one note missing in bar 3 and in bar 12, so those two bars do not add up. */
+async function makeFlaggedPiece(page: Page): Promise<string> {
+  const xml = barsScore(12, 60).replace(/(<measure number="(?:3|12)">)<note>.*?<\/note>/g, '$1')
+  return page.evaluate(
+    async ({ xml }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({ name: 'Two short bars', musicxml: xml, bars: 12, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 12 }] })
+      return info.id
+    },
+    { xml },
+  )
+}
+
+test('edit: one bar at a time; it opens on the bar of the first flag, else on bar 1 of 12, with its line as the overview and the bar highlighted; a piano bar shows both hands', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
-    await openEditor(page, ID.ode)
-    const width = await page.evaluate(() => document.querySelector<HTMLElement>('.editor .score-view')!.clientWidth)
-
-    // Nothing selected: the whole sheet, and no strip.
+    // A flag in bar 3: bar 3 is current, shown large, and the overview is its line with bar 3 tinted.
+    const flagged = await makeFlaggedPiece(page)
+    await openEditor(page, flagged)
+    await lineHolds(page, 3)
+    assert.equal(await barRow(page), 'Bar 3 of 12')
+    const ids = noteIdsByBar(barsScore(12, 60).replace(/(<measure number="(?:3|12)">)<note>.*?<\/note>/g, '$1'))
+    assert.deepEqual(await page.locator(`${BIG} svg g.note`).evaluateAll((notes) => notes.map((n) => n.id)), ids[2], 'bar 3 is the large bar')
     let shown = await shownLine(page)
-    assert.equal(shown.line, null)
-    assert.equal(await lineStrip(page).count(), 0)
-    assert.ok(shown.visibleBars.length > 4, `the full sheet shows more than a line (${shown.visibleBars.join(', ')})`)
+    assert.ok(shown.visibleBars.includes(3) && shown.visibleBars.length < 12, `the overview is the line of bar 3 (${shown.visibleBars.join(', ')})`)
+    assert.equal(shown.tinted, 3, 'bar 3 is highlighted in it')
+    assert.equal(await textOf(page.locator('.editor-beats')), '3 of 4 beats', 'the beats chip says what the bar adds up to')
+    assert.match(await textOf(warnings(page)), /^2 to check · Next$/)
+    assert.ok((await page.locator(`${OVERVIEW} g.note.mk-flagbar`).count()) >= 3, 'the flags are in the overview')
+    assert.equal(await page.locator(`${BIG} g.note.mk-flagbar`).count(), 3, 'and on the large bar')
+    assert.match(await textOf(page.locator('.editor-warnings-text')), /^Bar 3 adds up to 3 beats/)
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
 
-    // A tap on a note in bar 5: the score shrinks to the line that holds bar 5, with the note selected.
-    await tapNote(page, ODE[4]![1]!)
-    await page.locator('.editor .score-island[data-line]').waitFor()
-    assert.equal(await selection(page), 'Bar 5 · Note 2')
-    const fifth = await showsOnlyItsLine(page, 'bar 5')
-    assert.ok(fifth.includes(5), 'the line holds bar 5')
-    const { lines } = await stripBars(page)
-    assert.ok(lines >= 3, `twelve bars take several lines at 360px (${lines})`)
-    assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.editor .score-view')!.clientWidth), width, 'the width, and so the line breaks, stay')
+    // Nothing to check: bar 1 of 12, and a bar that adds up says so in green.
+    await openEditor(page, ID.ode)
+    assert.equal(await barRow(page), 'Bar 1 of 12')
+    assert.equal(await page.locator('.editor-beats--ok').count(), 1)
+    shown = await lineHolds(page, 1)
+    assert.deepEqual([shown.line, shown.tinted, shown.visibleBars[0]], [0, 1, 1])
+  })
 
-    // The next-line arrow selects the first bar of the next line.
-    const at = (await stripBars(page)).line
-    await lineStrip(page).getByRole('button', { name: 'Next line' }).click()
-    await onLine(page, at)
-    const next = await showsOnlyItsLine(page, 'the next line')
-    assert.equal(next[0], fifth.at(-1)! + 1)
-    await page.getByRole('button', { name: `Preview bar ${next[0]}` }).waitFor()
-    assert.equal(await selection(page), 'Tap a note to edit it.', 'a bar, not a note')
-    await lineStrip(page).getByRole('button', { name: 'Previous line' }).click()
-    await onLine(page, at - 1)
-    assert.deepEqual(await showsOnlyItsLine(page, 'back'), fifth)
-    // The first line has no line before it.
-    await tapNote(page, ODE[0]![0]!)
-    await onLine(page, 0)
-    assert.equal(await lineStrip(page).getByRole('button', { name: 'Previous line' }).isDisabled(), true)
-
-    // Full score: the whole sheet again, the selection stays; a tap on a note shrinks it to that note's line.
-    await lineStrip(page).getByRole('button', { name: 'Full score' }).click()
-    await onLine(page, null)
-    assert.equal(await selection(page), 'Bar 1 · Note 1', 'the selection stays')
-    assert.ok((await shownLine(page)).visibleBars.length > fifth.length)
-    assert.equal(await textOf(lineStrip(page).locator('.editor-line-hint')), 'Tap a note to zoom in.')
-    await lineStrip(page).getByRole('button', { name: 'Back to bar 1' }).click()
-    await onLine(page, 0)
-    await lineStrip(page).getByRole('button', { name: 'Full score' }).click()
-    await onLine(page, null)
-    await tapNote(page, ODE[9]![2]!)
-    await page.locator('.editor .score-island[data-line]').waitFor()
-    assert.equal(await selection(page), 'Bar 10 · Note 3')
-    assert.ok((await showsOnlyItsLine(page, 'after Full score')).includes(10))
-
-    // A warning about bar 12 (made here: a half note in its full bar), Next from the first line shows bar 12's line.
-    await tapNote(page, ODE[11]![0]!)
-    await page.getByRole('combobox', { name: 'Length' }).selectOption('half')
-    await warnings(page).waitFor()
-    await lineStrip(page).getByRole('button', { name: 'Full score' }).click()
-    await onLine(page, null)
-    await tapNote(page, ODE[0]![1]!)
-    await onLine(page, 0)
-    await warnings(page).getByRole('button', { name: 'Next' }).click()
-    assert.match(await textOf(page.locator('.editor-warnings-text')), /^Bar 12 /)
-    await page.locator('.editor .score-island:not([data-line="0"])[data-line]').waitFor()
-    assert.ok((await showsOnlyItsLine(page, 'the warning')).includes(12))
+  // A piano bar: the overview and the large bar both have the right hand and the left hand (a piece of the piano alone:
+  // with a part switch above it, a piano line leaves the large bar too little room at 360 x 780, see the next journey).
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    await openEditor(page, await makePiano(page))
+    await page.locator(`${BIG} g.note[id="lc1"]`).waitFor()
+    assert.equal(await page.locator('.editor').getAttribute('data-layout'), 'line')
+    const bar = Number((await barRow(page)).split(' ')[1])
+    assert.ok((await lineHolds(page, bar)).staves.every((n) => n === 2), 'every bar of the overview has two staves')
+    assert.equal(await page.locator(`${BIG} g.measure > g.staff`).count(), 2, 'the large bar has two staves')
+    assert.ok((await page.locator('.editor-surface').boundingBox())!.height >= 170, 'the large bar keeps its 170 px')
   })
 })
 
-test('edit: a slur is picked from a note on one line to a note on the next, with the arrow between the two taps', async () => {
+test('edit: when the large bar would get less than 170 px, the overview is the line\'s bar numbers with the flags; they and the line arrows go to another bar (design D13)', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    await openEditor(page, await makeDuet(page))
+    await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
+    await page.locator(`${BIG} g.note[id="lc1"]`).waitFor()
+    // A part switch and a piano line: the overview gives way first.
+    await page.locator('.editor[data-layout="numbers"]').waitFor()
+    assert.ok((await page.locator('.editor-surface').boundingBox())!.height >= 170, 'the large bar keeps its 170 px')
+    const numbers = overview(page).locator('.editor-overview-numbers').getByRole('button')
+    const shown = await numbers.evaluateAll((buttons) => buttons.map((b) => Number(b.textContent)))
+    assert.ok(shown.length >= 2 && shown[0] === 1, `the numbers of the first line (${shown.join(', ')})`)
+    assert.equal(await overview(page).getByRole('button', { name: 'Bar 1', exact: true }).getAttribute('aria-current'), 'true')
+
+    // A tap on a number makes that bar current; a bar to check says so in its name.
+    await numbers.nth(1).click()
+    await onBar(page, shown[1]!)
+    await tapNote(page, 'lc1')
+    await page.getByRole('button', { name: '+ After' }).click()
+    await overview(page).getByRole('button', { name: 'Bar 1, to check' }).waitFor()
+
+    // The arrows step from line to line.
+    await overview(page).getByRole('button', { name: 'Next line' }).click()
+    await onBar(page, shown.at(-1)! + 1)
+    await overview(page).getByRole('button', { name: `Bar ${shown.at(-1)! + 1}`, exact: true }).waitFor()
+    await overview(page).getByRole('button', { name: 'Previous line' }).click()
+    await onBar(page, 1)
+  })
+})
+
+test('edit: go to another bar; next, a tap in the overview, across to the next line, a line ahead, and a warning on another line', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await openEditor(page, ID.ode)
-    await tapNote(page, ODE[0]![0]!)
-    await onLine(page, 0)
-    const first = await showsOnlyItsLine(page, 'line 1')
-    const lastBar = first.at(-1)!
+    await lineHolds(page, 1)
+    const lines = await page.evaluate(() => document.querySelectorAll('.editor-overview g.system').length)
+    assert.ok(lines >= 3, `twelve bars take several lines of the overview at 360px (${lines})`)
+
+    // Next: bar 3 of 12 becomes bar 4 of 12.
+    await goToBar(page, 3)
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, 4)
+    assert.equal(await barRow(page), 'Bar 4 of 12')
+    assert.deepEqual(await page.locator(`${BIG} svg g.note`).evaluateAll((notes) => notes.map((n) => n.id)), ODE[3])
+
+    // A tap on another bar of the overview's line makes it current (and selects nothing).
+    let shown = await lineHolds(page, 4)
+    const other = shown.visibleBars.find((b) => b !== 4)!
+    await tapInOverview(page, other)
+    await onBar(page, other)
+    assert.equal(await selection(page), 'Tap a note to edit it.')
+    await lineHolds(page, other)
+
+    // Across to the next line: from the last bar of a line, Next shows the bar after it and the line that holds it.
+    const last = shown.visibleBars.at(-1)!
+    if (last !== other) {
+      await tapInOverview(page, last)
+      await onBar(page, last)
+    }
+    const line = (await lineHolds(page, last)).line!
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, last + 1)
+    shown = await lineHolds(page, last + 1)
+    assert.deepEqual([shown.line, shown.visibleBars[0]], [line + 1, last + 1], 'the next line, starting with that bar')
+
+    // A line ahead: the arrow shows the next line, and its first bar is current.
+    await overview(page).getByRole('button', { name: 'Next line' }).click()
+    await lineShown(page, line + 1)
+    shown = await shownLine(page)
+    assert.equal(shown.line, line + 2)
+    await onBar(page, shown.visibleBars[0]!)
+    await lineHolds(page, shown.visibleBars[0]!)
+    await overview(page).getByRole('button', { name: 'Previous line' }).click()
+    await onBar(page, last + 1)
+    assert.equal((await lineHolds(page, last + 1)).line, line + 1)
+    await goToBar(page, 1)
+    assert.equal(await overview(page).getByRole('button', { name: 'Previous line' }).isDisabled(), true, 'the first line has no line before it')
+  })
+
+  // A warning on another line: from bar 5, stepping to the warning about bar 12 shows bar 12 and its line.
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await openEditor(page, await makeFlaggedPiece(page))
+    await goToBar(page, 5)
+    const line = (await lineHolds(page, 5)).line!
+    await warnings(page).getByRole('button', { name: 'Next' }).click()
+    await onBar(page, 12)
+    assert.notEqual((await lineHolds(page, 12)).line, line, 'another line')
+    assert.match(await textOf(page.locator('.editor-warnings-text')), /^Bar 12 adds up to 3 beats/)
+  })
+})
+
+test('edit: a slur is picked from the last note of a line to a note of the next, with the line arrow between the two taps', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await openEditor(page, ID.ode)
+    const lastBar = (await lineHolds(page, 1)).visibleBars.at(-1)!
 
     await tabs(page, 'Marks').click()
     await page.getByRole('button', { name: 'Slur', exact: true }).click()
     await tapNote(page, ODE[lastBar - 1]![3]!)
     await page.getByText('Now tap the last note.').waitFor()
-    await lineStrip(page).getByRole('button', { name: 'Next line' }).click()
-    await onLine(page, 1)
+    await overview(page).getByRole('button', { name: 'Next line' }).click()
+    await onBar(page, lastBar + 1)
     await page.getByText('Now tap the last note.').waitFor() // the arrow keeps the pick
     await tapNote(page, ODE[lastBar]![1]!)
-    await drawn(page, '.score-view g.slur', 2) // drawn in two pieces, one on each line
+    await drawn(page, `${OVERVIEW} g.slur`, 2) // drawn in two pieces, one on each line
     await save(page).click()
     await onScreen(page, 'practice')
     const score = await stored(app, ID.ode)
     assert.deepEqual(noteOf(score, ODE[lastBar - 1]![3]!).slurs, [{ type: 'start', number: 1 }])
     assert.deepEqual(noteOf(score, ODE[lastBar]![1]!).slurs, [{ type: 'stop', number: 1 }])
+  })
+})
+
+// ---- Full score (change redesign-score-editor, task 6.6) -------------------------------------------------
+
+/** "Ode to Joy" over 48 bars: more than a screen of full score. */
+async function makeLongPiece(page: Page): Promise<string> {
+  return page.evaluate(
+    async ({ xml }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({ name: 'Long ode', musicxml: xml, bars: 48, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 48 }] })
+      return info.id
+    },
+    { xml: barsScore(48, 60) },
+  )
+}
+
+test('edit: Full score shows the whole part, scrolled to the current bar; a tap in bar 41 goes there, Back and the back button keep the bar and the selection', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeLongPiece(page)
+    const ids = noteIdsByBar(barsScore(48, 60))
+    await openEditor(page, id)
+    await goToBar(page, 3)
+    await tapNote(page, ids[2]![1]!)
+    assert.equal(await selection(page), 'Bar 3 · Note 2')
+
+    // Go to another section: the whole part, in place of the bar view and the tools; bar 3 is tinted and in view.
+    await page.getByRole('button', { name: 'Full score' }).click()
+    await page.locator('.editor[data-layout="full"]').waitFor()
+    assert.equal(await page.getByRole('button', { name: 'Full score' }).getAttribute('aria-pressed'), 'true')
+    assert.equal(await page.locator('.editor-surface, .editor-tools, .editor-barrow').count(), 0, 'no large bar, bar row or tools')
+    await page.getByRole('button', { name: 'Back to bar 3' }).waitFor()
+    await page.getByText('Tap a bar to go there.').waitFor()
+    const island = page.locator('.editor-overview .score-island')
+    await overviewLaidOut(page)
+    const shown = await shownLine(page)
+    assert.equal(shown.line, null, 'not clipped to a line')
+    assert.ok(shown.visibleBars.includes(3) && shown.tinted === 3, `bar 3 is in view and highlighted (${JSON.stringify(shown)})`)
+    assert.ok(await island.evaluate((e) => e.scrollHeight > e.clientHeight + 100), 'a piece long enough to scroll')
+    assert.equal(await page.locator(`${OVERVIEW} g.measure`).count(), 48)
+    await pickInFullScore(page, 'g.measure >> nth=40', 41)
+    assert.equal(await barRow(page), 'Bar 41 of 48')
+    assert.deepEqual(await page.locator(`${BIG} svg g.note`).evaluateAll((notes) => notes.map((n) => n.id)), ids[40])
+    await lineHolds(page, 41)
+    assert.equal(await selection(page), 'Tap a note to edit it.', 'a bar is picked, not a note')
+
+    // Look and go back: from bar 41 the full score opens scrolled to it; Back to bar 41 keeps the bar; so does the system
+    // back button, which does not leave the editor.
+    await tapNote(page, ids[40]![2]!)
+    await page.getByRole('button', { name: 'Full score' }).click()
+    await page.locator('.editor[data-layout="full"]').waitFor()
+    await overviewLaidOut(page)
+    const far = await shownLine(page)
+    assert.ok(far.visibleBars.includes(41) && far.tinted === 41 && !far.visibleBars.includes(1), `scrolled to bar 41 (${far.visibleBars.join(', ')})`)
+    assert.ok(await island.evaluate((e) => e.scrollTop > 0), 'scrolled')
+    await page.getByRole('button', { name: 'Back to bar 41' }).click()
+    await onBar(page, 41)
+    assert.equal(await selection(page), 'Bar 41 · Note 3', 'the selection stays')
+    await page.getByRole('button', { name: 'Full score' }).click()
+    await page.locator('.editor[data-layout="full"]').waitFor()
+    assert.equal(await app.back(), true)
+    await page.locator('.editor:not([data-layout="full"])').waitFor()
+    await onBar(page, 41)
+    assert.deepEqual(await app.screen(), { name: 'editor', pieceId: id }, 'the back button closed the full score, not the editor')
+    assert.equal(await selection(page), 'Bar 41 · Note 3')
+    // The "Full score" key closes it too.
+    await page.getByRole('button', { name: 'Full score' }).click()
+    await page.getByRole('button', { name: 'Full score' }).click()
+    await onBar(page, 41)
+  })
+})
+
+test('edit: Full score of a piano part shows the whole part with both staves, and the bars to check are marked', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeDuet(page)
+    await openEditor(page, id)
+    await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
+    await page.locator(`${BIG} g.note[id="lc1"]`).waitFor()
+    // A bar to check: a note more in bar 1's left hand.
+    await tapNote(page, 'lc1')
+    await page.getByRole('button', { name: '+ After' }).click()
+    await warnings(page).waitFor()
+    await page.getByRole('button', { name: 'Full score' }).click()
+    await page.locator('.editor[data-layout="full"]').waitFor()
+    const measures = page.locator(`${OVERVIEW} g.measure`)
+    const count = await measures.count()
+    assert.equal(count, DUET_SCORE.bars.length, 'every bar of the part')
+    assert.deepEqual(new Set(await measures.evaluateAll((all) => all.map((m) => m.querySelectorAll(':scope > g.staff').length))), new Set([2]), 'each with both staves')
+    assert.ok((await page.locator(`${OVERVIEW} g.note.mk-flagbar`).count()) >= 1, 'the bar to check is marked')
+    assert.equal(await partSwitch(page).count(), 0, 'the part switch is not in the full score')
   })
 })
 
@@ -326,7 +603,8 @@ async function makeDatedPiece(page: Page): Promise<string> {
 async function openNew(page: Page, pieceId: string): Promise<void> {
   await page.evaluate((id) => window.__test!.shell.router.push({ name: 'editor', pieceId: id, isNew: true }), pieceId)
   await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
-  await page.locator('.score-view[data-rendered="true"]').waitFor()
+  await page.locator(`${BIG}[data-rendered="true"]`).waitFor()
+  await page.locator(`${OVERVIEW}[data-rendered="true"]`).waitFor()
 }
 
 const naming = (page: Page) => page.getByRole('textbox', { name: 'Name this piece' })
@@ -379,7 +657,7 @@ test('edit: a new piece whose notes are fixed first keeps the highlight; an edit
   })
 })
 
-test('edit: the Note tab steps a pitch down and Save & practice stores the corrected score; the original reading stays as it was', async () => {
+test('edit: the Notes tray steps a pitch down and Save & practice stores the corrected score; the original reading stays as it was', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     const reading = await app.file(`pieces/${ID.ode}/pages/1/recognised.musicxml`)
@@ -399,17 +677,21 @@ test('edit: the Note tab steps a pitch down and Save & practice stores the corre
     await page.getByRole('button', { name: 'Redo' }).click()
     assert.equal(await pitch(page), 'E5', 'redo')
 
-    // The accidental, the length, a dot, and a note after it; each is one edit of the selected note.
-    await page.getByRole('combobox', { name: 'Accidental' }).selectOption('sharp')
+    // The accidental, the length, a dot, and a note after it; each is one edit of the selected note. The accidentals and
+    // the lengths are keys of the Notes tray (change redesign-score-editor, spec "Notes tools"); a tap on the accidental
+    // the note has takes it off.
+    await page.getByRole('button', { name: 'Sharp' }).click()
     assert.equal(await pitch(page), 'E♯5')
-    await page.getByRole('combobox', { name: 'Accidental' }).selectOption('none')
-    await page.getByRole('combobox', { name: 'Length' }).selectOption('half')
+    assert.equal(await page.getByRole('button', { name: 'Sharp' }).getAttribute('aria-pressed'), 'true')
+    await page.getByRole('button', { name: 'Sharp' }).click()
+    assert.equal(await pitch(page), 'E5')
+    await page.getByRole('button', { name: 'Half', exact: true }).click()
     assert.equal(await page.getByRole('group', { name: 'Things to check' }).count(), 1, 'a half note in a full bar: the bar no longer adds up')
-    assert.match(await textOf(warnings(page)), /1 thing to check/)
+    assert.match(await textOf(warnings(page)), /1 to check/)
     await page.getByRole('button', { name: 'Dotted' }).click()
     assert.equal(await page.getByRole('button', { name: 'Dotted' }).getAttribute('aria-pressed'), 'true')
     await page.getByRole('button', { name: 'Dotted' }).click()
-    await page.getByRole('combobox', { name: 'Length' }).selectOption('quarter')
+    await page.getByRole('button', { name: 'Quarter', exact: true }).click()
     assert.equal(await warnings(page).count(), 0, 'back to a quarter: the flag goes')
 
     await title(page).fill('Ode to Joy, corrected')
@@ -433,33 +715,270 @@ test('edit: the Note tab steps a pitch down and Save & practice stores the corre
   })
 })
 
-test('edit: the Note tab makes a rest, inserts notes and rests, and deletes; a rest has no pitch to step', async () => {
+test('edit: the Notes tray makes a rest, inserts notes and rests, makes a triplet and deletes; a rest has no pitch to step', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await openEditor(page, ID.ode)
-    const notes = '.score-view svg g.note, .score-view svg g.rest'
+    const notes = `${OVERVIEW} svg g.note, ${OVERVIEW} svg g.rest`
     await drawn(page, notes, 48)
+    const rest = page.getByRole('button', { name: 'Rest', exact: true })
 
+    // Note or rest is one key of the Notes tray, on when the selection is a rest (spec "Notes tools").
     await tapNote(page, ODE[0]![1]!)
-    await page.getByRole('button', { name: 'Make rest' }).click()
+    assert.equal(await rest.getAttribute('aria-pressed'), 'false')
+    await rest.click()
     assert.equal(await selection(page), 'Bar 1 · Rest 2')
     assert.equal(await pitch(page), 'Rest')
+    assert.equal(await rest.getAttribute('aria-pressed'), 'true')
     assert.equal(await page.getByRole('button', { name: 'Pitch up' }).isDisabled(), true)
-    assert.equal(await page.getByRole('combobox', { name: 'Accidental' }).isDisabled(), true)
-    await page.getByRole('button', { name: 'Make note' }).click()
+    for (const name of ['Flat', 'Sharp', 'Natural']) assert.equal(await page.getByRole('button', { name }).isDisabled(), true, `${name} is off for a rest`)
+    await rest.click()
     assert.equal(await selection(page), 'Bar 1 · Note 2')
 
-    await page.getByRole('button', { name: '+ Rest after' }).click()
-    assert.equal(await selection(page), 'Bar 1 · Rest 3', 'the new rest is selected')
+    // "+ After" adds one of the selected note's kind (spec "Notes tools": insert before and after); Rest makes it a rest.
+    await page.getByRole('button', { name: '+ After' }).click()
+    assert.equal(await selection(page), 'Bar 1 · Note 3', 'the new note is selected')
+    await rest.click()
+    assert.equal(await selection(page), 'Bar 1 · Rest 3', 'and it is a rest now')
     await drawn(page, notes, 49)
-    assert.match(await textOf(warnings(page)), /1 thing to check/, 'bar 1 has five beats now')
+    assert.match(await textOf(warnings(page)), /1 to check/, 'bar 1 has five beats now')
     await page.getByRole('button', { name: 'Delete note' }).click()
     await drawn(page, notes, 48)
     assert.equal(await warnings(page).count(), 0)
-    await page.getByRole('button', { name: '+ Note before' }).click()
+    await page.getByRole('button', { name: '+ Before' }).click()
     await drawn(page, notes, 49)
     await page.getByRole('button', { name: 'Undo' }).click()
     await drawn(page, notes, 48)
+
+    // A triplet: the selected quarter becomes a quarter triplet, named so, and back (in bar 2: a short bar 1 is a pickup).
+    await tapNote(page, ODE[1]![0]!)
+    const length = () => textOf(page.getByRole('group', { name: 'Length' }).getByRole('status'))
+    assert.equal(await length(), 'quarter')
+    await page.getByRole('button', { name: 'Triplet' }).click()
+    assert.equal(await page.getByRole('button', { name: 'Triplet' }).getAttribute('aria-pressed'), 'true')
+    assert.equal(await length(), 'quarter triplet')
+    assert.match(await textOf(warnings(page)), /1 to check/, 'a third of a beat short')
+    assert.notEqual(await textOf(page.locator('.editor-beats')), '4 of 4 beats')
+    await page.getByRole('button', { name: 'Triplet' }).click()
+    assert.equal(await length(), 'quarter')
+    assert.equal(await warnings(page).count(), 0)
+  })
+})
+
+// ---- The Notes surface (change redesign-score-editor, task 6.2) --------------------------------------------
+
+/**
+ * A finger on the screen: touches sent as the touch screen sends them (CDP touch events), so the browser makes the
+ * pointer events of a touch and keeps to `touch-action`, as on a phone.
+ */
+async function finger(page: Page) {
+  const cdp = await page.context().newCDPSession(page)
+  const send = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: { x: number; y: number }[]) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points })
+  return {
+    down: (x: number, y: number) => send('touchStart', [{ x, y }]),
+    move: (x: number, y: number) => send('touchMove', [{ x, y }]),
+    up: () => send('touchEnd', []),
+  }
+}
+
+/** The heights of the five lines of the large bar's first staff, top to bottom, once the bar is still. */
+async function staffLines(page: Page): Promise<number[]> {
+  await laidOut(page)
+  return page.evaluate((css) => {
+    const staff = document.querySelector(`${css} g.measure > g.staff`)!
+    return [...staff.querySelectorAll(':scope > path')].map((p) => {
+      const r = p.getBoundingClientRect()
+      return r.top + r.height / 2
+    }).sort((a, b) => a - b)
+  }, BIG)
+}
+
+/** The centre of a note's head in the large bar, once it is still. */
+async function headOf(page: Page, id: string): Promise<{ x: number; y: number }> {
+  const box = await settledBox(page, page.locator(`${BIG} g.note[id="${id}"] g.notehead`))
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+}
+
+/** "C5 quarter", "rest eighth": the notes and rests of a bar (from 1) of a stored score. */
+const storedBar = (score: Score, bar: number): string[] =>
+  firstLine(score).measures[bar - 1]!.items.filter(isNote).filter((n) => !n.hidden).map((n) => `${n.rest ? 'rest' : `${n.pitch!.step}${n.pitch!.octave}`} ${n.type ?? (n.measureRest ? 'bar' : '?')}${n.dots ? '.' : ''}`)
+
+test('edit: Notes: a bar is emptied and filled again through the slot, a note goes between two notes, a note is dragged one step down and made shorter; the stored score has it all', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await serveSamples(app)
+    const id = await makeOdePiece(page)
+    await openEditor(page, id)
+    const touch = await finger(page)
+    const slot = page.locator('.editor-slot')
+    assert.equal(await slot.count(), 0, 'a full bar has no slot')
+
+    // Empty bar 2 (spec "Empty a bar and fill it again"): every note deleted leaves a whole-bar rest, and the slot.
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, 2)
+    for (const note of ODE[1]!) {
+      await tapNote(page, note)
+      await page.getByRole('button', { name: 'Delete note' }).click()
+    }
+    await drawn(page, `${BIG} g.note`, 0)
+    await slot.waitFor()
+    assert.equal(await page.locator(`${BIG} g.mRest, ${BIG} g.rest`).count(), 1, 'a whole-bar rest')
+    // A tap on nothing puts the rest away: the Notes tools set what a tap adds again.
+    await page.touchscreen.tap(...(await emptySpot(page)))
+    await page.waitForFunction(() => document.querySelector('.editor-selection')?.textContent === 'Tap a note to edit it.')
+    assert.equal(await page.getByRole('button', { name: 'Quarter', exact: true }).getAttribute('aria-pressed'), 'true', 'a quarter note is what a tap adds')
+
+    // The slot, on the second line (G4): one quarter note, and the slot after it (spec "Add the next note").
+    let lines = await staffLines(page)
+    let box = await settledBox(page, slot.locator('rect'))
+    await page.touchscreen.tap(box.x + box.width / 2, lines[3]!)
+    await drawn(page, `${BIG} g.note`, 1)
+    assert.equal(await selection(page), 'Bar 2 · Note 1', 'the new note is selected')
+    assert.equal(await pitch(page), 'G4')
+    assert.equal(await textOf(page.locator('.editor-beats')), '1 of 4 beats')
+    const first = (await page.locator(`${BIG} g.note`).first().boundingBox())!
+    box = await settledBox(page, slot.locator('rect'))
+    assert.ok(box.x > first.x + first.width - 1, 'the slot is after the new note')
+    await page.touchscreen.tap(box.x + box.width / 2, lines[3]!)
+    await drawn(page, `${BIG} g.note`, 2)
+    assert.equal(await selection(page), 'Bar 2 · Note 2')
+    // With nothing selected, Eighth and Rest set what a tap adds (spec "Choose what a tap adds").
+    await page.touchscreen.tap(...(await emptySpot(page)))
+    await page.waitForFunction(() => document.querySelector('.editor-selection')?.textContent === 'Tap a note to edit it.')
+    await page.getByRole('button', { name: 'Eighth', exact: true }).click()
+    await page.getByRole('button', { name: 'Rest', exact: true }).click()
+    box = await settledBox(page, slot.locator('rect'))
+    await page.touchscreen.tap(box.x + box.width / 2, lines[2]!)
+    await page.waitForFunction(() => document.querySelector('.editor-selection')?.textContent === 'Bar 2 · Rest 3')
+    assert.equal(await textOf(page.locator('.editor-beats')), '2½ of 4 beats')
+    await page.touchscreen.tap(...(await emptySpot(page)))
+    await page.getByRole('button', { name: 'Quarter', exact: true }).click()
+    await page.getByRole('button', { name: 'Rest', exact: true }).click()
+    assert.equal(await page.getByRole('button', { name: 'Rest', exact: true }).getAttribute('aria-pressed'), 'false')
+
+    // Between C5 and D5 of bar 3, on the middle line (spec "Add a note between two notes"): B4 goes between them, selected.
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, 3)
+    lines = await staffLines(page)
+    const c5 = await headOf(page, ODE[2]![0]!)
+    const d5 = await headOf(page, ODE[2]![1]!)
+    await page.touchscreen.tap((c5.x + d5.x) / 2, lines[2]!)
+    await drawn(page, `${BIG} g.note`, 5)
+    assert.equal(await selection(page), 'Bar 3 · Note 2')
+    assert.equal(await pitch(page), 'B4')
+
+    // Drag F5 of bar 4 one staff step down (spec "Drag a note down"): the ghost says E5, and a note sounds on the step.
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, 4)
+    const f5 = ODE[3]![3]!
+    lines = await staffLines(page)
+    const step = (lines[4]! - lines[0]!) / 8
+    const head = await headOf(page, f5)
+    await page.evaluate(() => {
+      const w = window as unknown as { __starts: number }
+      w.__starts = 0
+      const start = AudioBufferSourceNode.prototype.start
+      AudioBufferSourceNode.prototype.start = function (...args: Parameters<typeof start>) {
+        w.__starts++
+        return start.apply(this, args)
+      }
+    })
+    await touch.down(head.x, head.y)
+    await touch.move(head.x, head.y + 9) // past the 8 px that decide a drag: from here it counts
+    await touch.move(head.x, head.y + 9 + step + 1)
+    await page.locator('.editor-drag-name').filter({ hasText: /^E5$/ }).waitFor()
+    assert.equal(await page.locator('.editor-ghost ellipse').count(), 1, 'the ghost notehead')
+    assert.equal(await page.locator(`${BIG} g.note.is-dragged[id="${f5}"]`).count(), 1, 'the note itself is faded')
+    const starts = () => page.evaluate(() => (window as unknown as { __starts: number }).__starts)
+    for (let i = 0; i < 60 && (await starts()) === 0; i++) {
+      await page.clock.runFor(250)
+      await page.waitForTimeout(100)
+    }
+    assert.ok((await starts()) >= 1, 'the note sounded')
+    await touch.up()
+    await page.locator('.editor-drag-name').waitFor({ state: 'detached' })
+    assert.equal(await pitch(page), 'E5')
+    assert.equal(await selection(page), 'Bar 4 · Note 4', 'the dragged note is selected')
+    await page.getByRole('button', { name: 'Undo' }).click()
+    assert.equal(await pitch(page), 'F5', 'one undo')
+    await page.getByRole('button', { name: 'Redo' }).click()
+    assert.equal(await pitch(page), 'E5')
+
+    // Shorter (spec "Shorter"): a quarter note of bar 4 is an eighth, and the bar half a beat less.
+    assert.equal(await textOf(page.locator('.editor-beats')), '4 of 4 beats')
+    await page.getByRole('button', { name: 'Shorter' }).click()
+    assert.equal(await textOf(page.getByRole('group', { name: 'Length' }).getByRole('status')), 'eighth')
+    assert.equal(await textOf(page.locator('.editor-beats')), '3½ of 4 beats')
+
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const score = await stored(app, id)
+    assert.deepEqual(storedBar(score, 2), ['G4 quarter', 'G4 quarter', 'rest eighth'])
+    assert.deepEqual(storedBar(score, 3), ['C5 quarter', 'B4 quarter', 'D5 quarter', 'E5 quarter', 'F5 quarter'])
+    assert.deepEqual(storedBar(score, 4), ['C5 quarter', 'D5 quarter', 'E5 quarter', 'E5 eighth'])
+    assert.deepEqual(storedBar(score, 5), ['C5 quarter', 'D5 quarter', 'E5 quarter', 'F5 quarter'], 'the bars around are as they were')
+  })
+})
+
+test('edit: Notes: a new note follows the finger to its pitch before it lifts, as one undo step; the Marks tools add no note; a piano bar takes a note in the hand tapped', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const ode = await makeOdePiece(page)
+    await openEditor(page, ode)
+    const touch = await finger(page)
+    // Bar 1 emptied: a touch in the slot on the second line, dragged up two steps before it lifts, is B4 (design D2).
+    for (const note of ODE[0]!) {
+      await tapNote(page, note)
+      await page.getByRole('button', { name: 'Delete note' }).click()
+    }
+    await page.locator('.editor-slot').waitFor()
+    const lines = await staffLines(page)
+    const step = (lines[4]! - lines[0]!) / 8
+    const box = await settledBox(page, page.locator('.editor-slot rect'))
+    const x = box.x + box.width * 0.7
+    await touch.down(x, lines[3]!)
+    await touch.move(x, lines[3]! - step - 1)
+    await touch.move(x, lines[3]! - 2 * step)
+    await page.locator('.editor-drag-name').filter({ hasText: /^B4$/ }).waitFor()
+    await touch.up()
+    await page.locator('.editor-drag-name').waitFor({ state: 'detached' })
+    assert.equal(await pitch(page), 'B4')
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await drawn(page, `${BIG} g.note`, 0)
+    assert.equal(await page.locator(`${BIG} g.mRest, ${BIG} g.rest`).count(), 1, 'one undo takes the note and its drag away together')
+
+    // With the Marks tools open, a tap on the staff adds nothing (spec "No stray note").
+    await tabs(page, 'Marks').click()
+    await page.touchscreen.tap(x, lines[3]!)
+    await page.waitForTimeout(300)
+    assert.equal(await page.locator(`${BIG} g.note`).count(), 0)
+    await tabs(page, 'Notes').click()
+  })
+
+  // A piano bar (spec "Tap in the left hand"): a tap on the lower staff where there is no note adds to the left hand.
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeDuet(page)
+    await openEditor(page, id)
+    await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
+    await page.locator(`${BIG} g.note[id="lc1"]`).waitFor()
+    await laidOut(page)
+    const before = await storedPart(app, id, 'P2')
+    const right = await page.locator(`${BIG} g.measure > g.staff`).nth(0).locator('g.note').count()
+    const left = page.locator(`${BIG} g.measure > g.staff`).nth(1)
+    const leftCount = await left.locator('g.note').count()
+    const staff = (await left.boundingBox())!
+    const lastHead = await left.locator('g.notehead').evaluateAll((heads) => Math.max(...heads.map((h) => h.getBoundingClientRect().right)))
+    const lineYs = await left.evaluate((g) => [...g.querySelectorAll(':scope > path')].map((p) => p.getBoundingClientRect().top).sort((a, b) => a - b))
+    await page.touchscreen.tap((lastHead + staff.x + staff.width) / 2, lineYs[2]!)
+    const leftNow = () => page.locator(`${BIG} g.measure > g.staff`).nth(1).locator('g.note').count()
+    for (let i = 0; i < 50 && (await leftNow()) === leftCount; i++) await page.waitForTimeout(100)
+    assert.equal(await page.locator(`${BIG} g.measure > g.staff`).nth(1).locator('g.note').count(), leftCount + 1, 'one note more in the left hand')
+    assert.equal(await page.locator(`${BIG} g.measure > g.staff`).nth(0).locator('g.note').count(), right, 'the right hand is unchanged')
+    assert.match(await selection(page), /^Bar 1 · Left hand · /)
+    await save(page).click()
+    await onScreen(page, 'practice')
+    assert.notEqual(await storedPart(app, id, 'P2'), before, 'the piano part is stored with it')
   })
 })
 
@@ -491,10 +1010,10 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     await page.getByText('Tap the first note.').waitFor()
     await tapNote(page, ODE[0]![0]!)
     await page.getByText('Now tap the last note.').waitFor()
-    assert.equal(await page.locator('.score-view g.slur').count(), 0, 'not before the last note is chosen')
+    assert.equal(await page.locator(`${OVERVIEW} g.slur`).count(), 0, 'not before the last note is chosen')
     await tapNote(page, ODE[0]![3]!)
     assert.equal(await on('Slur'), true, 'the last note has the slur')
-    await drawn(page, '.score-view g.slur', 1)
+    await drawn(page, `${OVERVIEW} g.slur`, 1)
     assert.equal(await page.getByText('Tap the first note.').count(), 0)
 
     // A crescendo over bar 3, and a diminuendo that would overlap it is refused with a reason.
@@ -502,12 +1021,12 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     await tapNote(page, ODE[2]![0]!)
     await tapNote(page, ODE[2]![3]!)
     assert.equal(await on('Crescendo'), true)
-    await drawn(page, '.score-view g.hairpin', 1)
+    await drawn(page, `${OVERVIEW} g.hairpin`, 1)
     await mark('Diminuendo').click()
     await tapNote(page, ODE[2]![1]!)
     await tapNote(page, ODE[3]![0]!)
     await page.getByText('A crescendo or diminuendo needs a note under it and cannot overlap another one.').waitFor()
-    assert.equal(await page.locator('.score-view g.hairpin').count(), 1)
+    assert.equal(await page.locator(`${OVERVIEW} g.hairpin`).count(), 1)
 
     // A tie needs the next note to have the same pitch: C5 D5 do not.
     await mark('Tie').click()
@@ -524,32 +1043,34 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     const wedge = firstLine(score).measures[2]!.items.find(isWedge)
     assert.deepEqual([wedge?.type, wedge?.start, wedge?.stop], ['crescendo', ODE[2]![0]!, ODE[2]![3]!])
     await openEditor(page, ode)
-    await drawn(page, '.score-view g.slur', 1)
-    await drawn(page, '.score-view g.hairpin', 1)
+    await drawn(page, `${OVERVIEW} g.slur`, 1)
+    await drawn(page, `${OVERVIEW} g.hairpin`, 1)
 
     // Tapping the active mark removes the hairpin from any note under it.
     await tabs(page, 'Marks').click()
     await tapNote(page, ODE[2]![1]!)
     assert.equal(await on('Crescendo'), true, 'every note under it shows it')
     await mark('Crescendo').click()
-    await drawn(page, '.score-view g.hairpin', 0)
+    await drawn(page, `${OVERVIEW} g.hairpin`, 0)
   })
 })
 
-test('edit: the Marks tab sets how a bar starts and ends, and the passes of an end-repeat; saving stores the repeat signs (change edit-bar-lines)', async () => {
+test('edit: the Bars tab sets how the current bar starts and ends, and the passes of an end-repeat; saving stores the repeat signs (change edit-bar-lines)', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await openEditor(page, ID.ode)
-    await tabs(page, 'Marks').click()
+    await tabs(page, 'Bars').click()
     const group = page.getByRole('region', { name: 'Bar lines' })
     const start = group.getByRole('combobox', { name: 'Starts with' })
     const end = group.getByRole('combobox', { name: 'Ends with' })
-    assert.equal(await start.isDisabled(), true, 'no bar selected: the group is disabled')
-    assert.equal(await end.isDisabled(), true)
+    // There is always a current bar (change redesign-score-editor, D1): with nothing selected the group is bar 1's.
+    await page.getByRole('heading', { name: 'Bar 1' }).waitFor()
+    assert.equal(await start.isDisabled(), false)
+    assert.equal(await end.isDisabled(), false)
 
-    // A bar without a note (a tap on the bar line that closes bar 7) has the group too.
-    const line = await centre(page, '.score-view g.barLine', 6)
-    await page.touchscreen.tap(line.x, line.y)
+    // A tap on the bar line that closes bar 7 makes bar 7 current, with no note.
+    await goToBar(page, 7)
+    await tapBarLine(page)
     await page.getByRole('heading', { name: 'Bar 7' }).waitFor()
     assert.equal(await start.isDisabled(), false)
 
@@ -593,13 +1114,14 @@ test('edit: the Score tab changes the key and the time signature, which draws th
     const time = page.getByRole('combobox', { name: 'Time signature' })
     assert.equal(await key.inputValue(), '0')
     assert.equal(await time.inputValue(), '4/4')
-    assert.equal(await page.locator('.score-view g.keyAccid').count(), 0, 'no sharps or flats')
+    assert.equal(await page.locator(`${OVERVIEW} g.keyAccid`).count(), 0, 'no sharps or flats')
 
     // One sharp: the score is drawn again with a key signature on every line.
     await key.selectOption('1')
-    await page.waitForFunction(() => document.querySelectorAll('.score-view g.keyAccid').length > 0)
-    assert.ok((await page.locator('.score-view g.keyAccid').count()) >= 1, 'a sharp in the key signature')
-    assert.equal(await page.locator('.score-view g.note').count(), 48)
+    await page.waitForFunction((css) => document.querySelectorAll(`${css} g.keyAccid`).length > 0, OVERVIEW)
+    assert.ok((await page.locator(`${OVERVIEW} g.keyAccid`).count()) >= 1, 'a sharp in the key signature')
+    assert.ok((await page.locator(`${BIG} g.keyAccid`).count()) >= 1, 'and in the large bar')
+    assert.equal(await page.locator(`${OVERVIEW} g.note`).count(), 48)
     await key.selectOption('-2')
     assert.equal(await key.inputValue(), '-2')
     await page.getByRole('button', { name: 'Undo' }).click()
@@ -608,13 +1130,14 @@ test('edit: the Score tab changes the key and the time signature, which draws th
 
     // 3/4: every bar has four beats, so every bar is flagged, and Next goes from bar to bar after the selected note (bar 3).
     await time.selectOption('3/4')
-    assert.match(await textOf(warnings(page)), /12 things to check/)
+    assert.match(await textOf(warnings(page)), /12 to check/)
     await warnings(page).getByRole('button', { name: 'Next' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /Bar 4 adds up to 4 beats but 3\/4 needs 3\./)
     await warnings(page).getByRole('button', { name: 'Next' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /Bar 5 adds up/)
     await page.getByRole('button', { name: 'Preview bar 5' }).waitFor() // the warning selected bar 5
-    assert.ok((await page.locator('.score-view g.note.mk-flagbar').count()) >= 4, 'the notes of flagged bars are marked')
+    assert.ok((await page.locator(`${OVERVIEW} g.note.mk-flagbar`).count()) >= 4, 'the notes of flagged bars are marked')
+    assert.equal(await page.locator(`${BIG} g.note.mk-flagbar`).count(), 4, 'in the overview and on the large bar')
     await warnings(page).getByRole('button', { name: 'Previous' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /Bar 4 adds up/)
     await time.selectOption('4/4')
@@ -653,30 +1176,31 @@ test('edit: a warning is marked on the note and goes when the note is fixed (the
     await tapNote(page, ODE[0]![0]!)
     for (let i = 0; i < 9; i++) await page.getByRole('button', { name: 'Pitch down' }).click()
     assert.equal(await pitch(page), 'A3')
-    assert.match(await textOf(warnings(page)), /1 thing to check/)
-    assert.equal(await page.locator('.score-view g.note.mk-flag').count(), 1, 'the note is marked')
+    assert.match(await textOf(warnings(page)), /1 to check/)
+    assert.equal(await page.locator(`${BIG} g.note.mk-flag`).count(), 1, 'the note is marked on the large bar')
+    assert.equal(await page.locator(`${OVERVIEW} g.note.mk-flag`).count(), 1, 'and in the overview')
     await warnings(page).getByRole('button', { name: 'Next' }).click()
     assert.match(await textOf(page.locator('.editor-warnings-text')), /A3 is outside the written range of the instrument \(Tenor saxophone/)
     await page.getByRole('button', { name: 'Pitch up' }).click()
     assert.equal(await warnings(page).count(), 0, 'the count goes down and the mark with it')
-    assert.equal(await page.locator('.score-view g.note.mk-flag').count(), 0)
+    assert.equal(await page.locator('.editor .score-view g.note.mk-flag').count(), 0)
   })
 })
 
-test('edit: Cancel and the back button ask before throwing edits away, and not when there are none', async () => {
+test('edit: the header\'s Back and the back button ask before throwing edits away, and not when there are none', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
-    // No edits: Cancel leaves at once.
+    // No edits: Back leaves at once. (The header has Back, not Cancel, since change redesign-score-editor, D1.)
     await openEditor(page, ID.ode)
-    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
     await page.getByRole('heading', { name: 'Let’s practise' }).waitFor()
     assert.equal((await app.stack()).length, 1)
 
-    // An edit: Cancel asks; "Keep editing" stays, and nothing was saved.
+    // An edit: Back asks; "Keep editing" stays, and nothing was saved.
     await openEditor(page, ID.ode)
     await tapNote(page, ODE[0]![0]!)
     await page.getByRole('button', { name: 'Pitch down' }).click()
-    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
     const dialog = page.getByRole('alertdialog', { name: 'Discard your edits?' })
     await dialog.waitFor()
     await dialog.getByRole('button', { name: 'Keep editing' }).click()
@@ -801,7 +1325,7 @@ test('edit: "Add pages" at the foot of the Score tab opens adding music for this
 
     // With edits: the question first. Cancel stays; Save and add pages saves, then goes on.
     await tapNote(page, ODE[0]![0]!)
-    await tabs(page, 'Note').click()
+    await tabs(page, 'Notes').click()
     await page.getByRole('button', { name: 'Pitch down' }).click()
     await tabs(page, 'Score').click()
     await addPages.click()
@@ -821,7 +1345,8 @@ test('edit: "Add pages" at the foot of the Score tab opens adding music for this
     // Back from adding music, the editor opens again on what is stored, with the correction in it.
     await app.back()
     await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
-    await page.locator('.score-view[data-rendered="true"]').waitFor()
+    await page.locator(`${BIG}[data-rendered="true"]`).waitFor()
+    await page.locator(`${OVERVIEW}[data-rendered="true"]`).waitFor()
     await tapNote(page, ODE[0]![0]!)
     assert.equal(await pitch(page), 'B4')
     assert.equal(await app.back(), true, 'a clean editor leaves without asking')
@@ -849,24 +1374,30 @@ async function makeElementsPiece(page: Page): Promise<string> {
   )
 }
 
-/** The centre of a drawn element, scrolled into view. */
+/** Taps the bar line at the end of the large bar. */
+async function tapBarLine(page: Page): Promise<void> {
+  const line = page.locator(`${BIG} g.barLine`).last()
+  const box = await settledBox(page, line)
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
+}
+
+/** The centre of a drawn element, once it is still. */
 async function centre(page: Page, selector: string, nth = 0): Promise<{ x: number; y: number }> {
   const element = page.locator(selector).nth(nth)
-  await element.scrollIntoViewIfNeeded()
-  const box = await element.boundingBox()
-  assert.ok(box, `${selector} is not drawn`)
+  await element.waitFor()
+  const box = await settledBox(page, element)
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 }
 
-/** A point on the stroke of a slur (its bounding box covers the notes under it, so its centre is not on it). */
+/** A point on the stroke of the slur in the large bar (its bounding box covers the notes under it, so its centre is not on it). */
 async function onSlur(page: Page): Promise<{ x: number; y: number }> {
-  await page.locator('.score-view g.slur').first().scrollIntoViewIfNeeded()
-  return page.evaluate(() => {
-    const path = document.querySelector<SVGGeometryElement>('.score-view g.slur path')!
+  await settledBox(page, page.locator(`${BIG} g.slur`).first())
+  return page.evaluate((css) => {
+    const path = document.querySelector<SVGGeometryElement>(`${css} g.slur path`)!
     const point = path.getPointAtLength(path.getTotalLength() / 2)
     const m = path.getScreenCTM()!
     return { x: point.x * m.a + point.y * m.c + m.e, y: point.x * m.b + point.y * m.d + m.f }
-  })
+  }, BIG)
 }
 
 const panel = (page: Page, name = 'Selected element') => page.getByRole('region', { name })
@@ -879,26 +1410,27 @@ test('edit: a tap picks the element under the finger, else the nearest note; the
     const ids = noteIdsByBar(elementsScore())
 
     // The mf sits under the first note of bar 2: the mf is selected, not the note.
-    const mf = await centre(page, '.score-view g.dynam')
+    await goToBar(page, 2)
+    const mf = await centre(page, `${BIG} g.dynam`)
     await page.touchscreen.tap(mf.x, mf.y)
     await panel(page).waitFor()
     assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Dynamic · mf · bar 2')
-    assert.equal(await page.locator('.score-view g.dynam.mk-el').count(), 1, 'the mf is highlighted')
-    assert.equal(await page.locator('.score-view g.note.mk-sel').count(), 0, 'no note is selected')
+    assert.equal(await page.locator(`${BIG} g.dynam.mk-el`).count(), 1, 'the mf is highlighted')
+    assert.equal(await page.locator('.editor .score-view g.note.mk-sel').count(), 0, 'no note is selected')
 
     // Beside the staff, near a note: the note (and the element goes).
-    const note = page.locator(`.score-view svg g.note[id="${ids[0]![3]!}"]`)
-    await note.scrollIntoViewIfNeeded()
-    const box = (await note.boundingBox())!
+    await goToBar(page, 1)
+    const note = page.locator(`${BIG} svg g.note[id="${ids[0]![3]!}"]`)
+    const box = await settledBox(page, note)
     await page.touchscreen.tap(box.x + box.width / 2, box.y - 14)
-    await page.waitForFunction(() => document.querySelectorAll('.score-view g.note.mk-sel').length === 1)
+    await page.waitForFunction((css) => document.querySelectorAll(`${css} g.note.mk-sel`).length === 1, BIG)
     assert.equal(await panel(page).count(), 0, 'a note brings the normal tabs back')
-    assert.equal(await page.locator('.score-view .mk-el').count(), 0)
+    assert.equal(await page.locator('.editor .score-view .mk-el').count(), 0)
 
     // A slur's drawing covers the notes under it, but a tap on a note still selects the note.
     await tapNote(page, ids[0]![0]!)
     assert.equal(await panel(page).count(), 0)
-    assert.equal(await page.locator(`.score-view g.note.mk-sel[id="${ids[0]![0]!}"]`).count(), 1)
+    assert.equal(await page.locator(`${BIG} g.note.mk-sel[id="${ids[0]![0]!}"]`).count(), 1)
     // And on its stroke, the slur.
     const slur = await onSlur(page)
     await page.touchscreen.tap(slur.x, slur.y)
@@ -906,23 +1438,24 @@ test('edit: a tap picks the element under the finger, else the nearest note; the
     assert.match(await textOf(panel(page).locator('.editor-element-title')), /^Slur · bar 1$/)
 
     // A staccato dot is smaller than a finger: a tap a few pixels beside it still selects it, not its note.
-    const dot = page.locator('.score-view g.artic').first()
-    await dot.scrollIntoViewIfNeeded()
-    const dotBox = (await dot.boundingBox())!
+    await goToBar(page, 2)
+    const dot = page.locator(`${BIG} g.artic`).first()
+    const dotBox = await settledBox(page, dot)
     await page.touchscreen.tap(dotBox.x + dotBox.width + 3, dotBox.y + dotBox.height / 2)
     await page.waitForFunction(() => document.querySelector('.editor-element-title')?.textContent === 'Staccato · bar 2')
-    assert.equal(await page.locator('.score-view g.artic.mk-el').count(), 1, 'the dot is highlighted')
+    assert.equal(await page.locator(`${BIG} g.artic.mk-el`).count(), 1, 'the dot is highlighted')
 
-    // An empty part of the score puts the element away, and keeps its bar.
+    // An empty part of the bar puts the element away, and keeps its bar.
     await page.touchscreen.tap(...(await emptySpot(page)))
     await panel(page).waitFor({ state: 'detached' })
-    assert.equal(await page.locator('.score-view .mk-el').count(), 0)
+    assert.equal(await page.locator('.editor .score-view .mk-el').count(), 0)
+    assert.equal(await barRow(page), 'Bar 2 of 4')
   })
 })
 
-/** A point in the visible score that is on no note, element or staff line: its right margin, at the top. */
+/** A point in the large bar that is on no note, element or staff line: its right margin, at the top. */
 async function emptySpot(page: Page): Promise<[number, number]> {
-  const box = (await page.locator('.score-island').boundingBox())!
+  const box = (await page.locator('.editor-bar-host').boundingBox())!
   return [box.x + box.width - 4, box.y + 6]
 }
 
@@ -931,8 +1464,9 @@ test('edit: deleting a misread clef moves the notes up 12 steps, as one undo ste
     const { page } = app
     const id = await makeElementsPiece(page)
     await openEditor(page, id)
-    // The clef change of bar 3 is drawn at the end of bar 2, with the drawing id `clef-P1-0-2` (part, staff and bar from 0).
-    const at = await centre(page, '.score-view g.clef[id="clef-P1-0-2"]')
+    // The clef change of bar 3 is drawn at the start of bar 3's large bar, as the clef of that bar.
+    await goToBar(page, 3)
+    const at = await centre(page, `${BIG} g.clef`)
     await page.touchscreen.tap(at.x, at.y)
     await panel(page).waitFor()
     assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Clef · bass · bar 3')
@@ -954,7 +1488,8 @@ test('edit: the clef select changes a clef and keeps its notes on the staff; the
     const { page } = app
     const id = await makeElementsPiece(page)
     await openEditor(page, id)
-    const first = await centre(page, '.score-view g.clef', 0)
+    await goToBar(page, 1)
+    const first = await centre(page, `${BIG} g.clef`, 0)
     await page.touchscreen.tap(first.x, first.y)
     await panel(page).waitFor()
     assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Clef · treble · bar 1')
@@ -972,31 +1507,33 @@ test('edit: deleting a slur through the panel is one undo step, and undo brings 
     const { page } = app
     const id = await makeElementsPiece(page)
     await openEditor(page, id)
-    await drawn(page, '.score-view g.slur', 1)
+    await goToBar(page, 1)
+    await drawn(page, `${BIG} g.slur`, 1)
     const slur = await onSlur(page)
     await page.touchscreen.tap(slur.x, slur.y)
     await panel(page).waitFor()
     await panel(page).getByRole('button', { name: 'Delete' }).click()
-    await drawn(page, '.score-view g.slur', 0)
+    await drawn(page, `${BIG} g.slur`, 0)
     await panel(page).waitFor({ state: 'detached' })
     await page.getByRole('button', { name: 'Undo' }).click()
-    await drawn(page, '.score-view g.slur', 1)
+    await drawn(page, `${BIG} g.slur`, 1)
     await panel(page).waitFor()
     assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Slur · bar 1', 'the slur is selected again')
-    await page.waitForFunction(() => document.querySelectorAll('.score-view g.slur.mk-el').length === 1)
+    await page.waitForFunction((css) => document.querySelectorAll(`${css} g.slur.mk-el`).length === 1, BIG)
   })
 })
 
-test('edit: a tap on a bar line selects its bar and shows the bar-line controls with its start and end', async () => {
+test('edit: a tap on a bar line makes its bar current and opens the Bars tools with its start and end (spec "Remove a bar line", "From the bar line itself")', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
     const id = await makeElementsPiece(page)
     await openEditor(page, id)
     // The bar line that closes bar 2.
-    const line = await centre(page, '.score-view g.barLine', 1)
-    await page.touchscreen.tap(line.x, line.y)
+    await goToBar(page, 2)
+    await tapBarLine(page)
     await page.getByRole('heading', { name: 'Bar 2' }).waitFor()
-    assert.equal(await tabs(page, 'Marks').isChecked(), true, 'the Marks tab is shown')
+    assert.equal(await tabs(page, 'Bars').isChecked(), true, 'the Bars tools are open')
+    assert.equal(await barRow(page), 'Bar 2 of 4')
     assert.equal(await panel(page).count(), 0, 'a bar line has no element panel')
     const group = page.getByRole('region', { name: 'Bar lines' })
     assert.equal(await group.getByRole('combobox', { name: 'Starts with' }).isDisabled(), false)
@@ -1025,12 +1562,12 @@ test('edit: Trill from the Marks tab is stored as <trill-mark/> on its note, a t
     // Trill, then Turn replaces it, then Trill again.
     await mark('Trill').click()
     assert.equal(await on('Trill'), true)
-    await drawn(page, '.score-view g.trill', 1)
+    await drawn(page, `${BIG} g.trill`, 1)
     await mark('Turn').click()
     assert.deepEqual([await on('Trill'), await on('Turn')], [false, true], 'a turn replaces the trill')
     await mark('Trill').click()
     assert.deepEqual([await on('Trill'), await on('Turn'), await on('Mordent')], [true, false, false])
-    await drawn(page, '.score-view g.turn', 0)
+    await drawn(page, `${BIG} g.turn`, 0)
 
     await save(page).click()
     await onScreen(page, 'practice')
@@ -1043,14 +1580,15 @@ test('edit: Trill from the Marks tab is stored as <trill-mark/> on its note, a t
 
     // Tap the trill on the score: it is selected and named with its bar; Delete removes it, and the note keeps its place.
     await openEditor(page, ode)
-    await drawn(page, '.score-view g.trill', 1)
-    const trill = await centre(page, '.score-view g.trill')
+    await goToBar(page, 2)
+    await drawn(page, `${BIG} g.trill`, 1)
+    const trill = await centre(page, `${BIG} g.trill`)
     await page.touchscreen.tap(trill.x, trill.y)
     await panel(page).waitFor()
     assert.equal(await textOf(panel(page).locator('.editor-element-title')), 'Trill · bar 2')
-    assert.equal(await page.locator('.score-view g.trill.mk-el').count(), 1, 'the trill is highlighted')
+    assert.equal(await page.locator(`${BIG} g.trill.mk-el`).count(), 1, 'the trill is highlighted')
     await panel(page).getByRole('button', { name: 'Delete' }).click()
-    await drawn(page, '.score-view g.trill', 0)
+    await drawn(page, `${BIG} g.trill`, 0)
     await panel(page).waitFor({ state: 'detached' })
     await save(page).click()
     await onScreen(page, 'practice')
@@ -1086,6 +1624,20 @@ async function makeDuet(page: Page): Promise<string> {
   )
 }
 
+/** The duet's piano alone: one part of two staves. */
+async function makePiano(page: Page): Promise<string> {
+  const xml = DUET.replace(/<score-part id="P1">[\s\S]*?<\/score-part>/, '').replace(/<part id="P1">[\s\S]*?<\/part>/, '')
+  return page.evaluate(
+    async ({ xml }) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      const info = await shell.library.create({ name: 'Piano', musicxml: xml, bars: 8, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 8 }] })
+      return info.id
+    },
+    { xml },
+  )
+}
+
 /** One part of a stored MusicXML file, as the app writes it. */
 async function storedPart(app: App, pieceId: string, part: string): Promise<string> {
   const info = JSON.parse((await app.file(`pieces/${pieceId}/piece.json`)) ?? '{}') as { score: string }
@@ -1095,21 +1647,6 @@ async function storedPart(app: App, pieceId: string, part: string): Promise<stri
 
 const partSwitch = (page: Page) => page.getByRole('radiogroup', { name: 'Part to edit' })
 
-/** Taps a drawn note by its id, once the score has settled (a selection lays the score out again, as one line). */
-async function tapDrawn(page: Page, id: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await page.locator('.score-view[data-rendered="true"]').waitFor()
-      const at = await centre(page, `.score-view g.note[id="${id}"]`)
-      await page.touchscreen.tap(at.x, at.y)
-      return
-    } catch (error) {
-      if (attempt >= 3) throw error
-      await page.waitForTimeout(200)
-    }
-  }
-}
-
 test('edit parts: switch to the piano, fix a note of a left-hand chord, save: the piano changes, the melody does not', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
@@ -1118,12 +1655,12 @@ test('edit parts: switch to the piano, fix a note of a left-hand chord, save: th
     const melodyBefore = await storedPart(app, id, 'P1')
     // The editor opens on the melody; the switch offers both parts.
     assert.equal(await partSwitch(page).getByRole('radio', { name: 'Melody' }).getAttribute('aria-checked'), 'true')
-    assert.equal(await page.locator('.score-view g.staff').count() > 0, true)
+    assert.equal(await page.locator(`${BIG} g.staff`).count() > 0, true)
     await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
-    await page.locator('.score-view g.note[id="lc1"]').waitFor()
+    await page.locator(`${OVERVIEW} g.note[id="lc1"]`).waitFor()
     // The piano is drawn as a grand staff: two staves in every bar.
-    assert.equal(await page.locator('.score-view g.measure').first().locator(':scope > g.staff').count(), 2)
-    await tapDrawn(page, 'lc1')
+    assert.equal(await page.locator(`${OVERVIEW} g.measure`).first().locator(':scope > g.staff').count(), 2)
+    await tapNote(page, 'lc1')
     assert.equal(await selection(page), 'Bar 1 · Left hand · Chord, note 2 of 2')
     assert.equal(await pitch(page), 'E3')
     await page.getByRole('button', { name: 'Pitch up' }).click()
@@ -1146,15 +1683,15 @@ test('edit parts: "+ Chord note" adds and selects the note; "To other hand" says
     await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
     // The right hand's first chord, C4–E4–G4: a fourth note a third above G4.
     const middle = duetNote('P2', 0, 1, 1)
-    await page.locator(`.score-view g.note[id="${middle}"]`).waitFor()
-    await tapDrawn(page, middle)
+    await page.locator(`${OVERVIEW} g.note[id="${middle}"]`).waitFor()
+    await tapNote(page, middle)
     assert.equal(await selection(page), 'Bar 1 · Right hand · Chord, note 2 of 3')
     await page.getByRole('button', { name: '+ Chord note' }).click()
     assert.equal(await selection(page), 'Bar 1 · Right hand · Chord, note 4 of 4', 'the new note is selected')
     assert.equal(await pitch(page), 'B4')
     // Bar 2: the right hand's second chord, on beat 3, where the left hand holds a whole note.
     const held = duetNote('P2', 0, 2, 3)
-    await tapDrawn(page, held)
+    await tapNote(page, held)
     await page.getByRole('button', { name: 'To other hand' }).click()
     assert.equal(await textOf(page.locator('.editor-message')), 'The other hand has no rest or chord of the same length there. Make room for it first.')
     // The Score tab names the part whose key it sets.
@@ -1183,16 +1720,14 @@ test('edit parts: tap a bar line, remove it, save: one bar fewer in the score an
     const { page } = app
     const id = await makeOdePiece(page)
     await openEditor(page, id)
-    await tabs(page, 'Marks').click()
     // The bar line that closes bar 4 ends the first page: it stays.
-    const pageEnd = await centre(page, '.score-view g.barLine', 3)
-    await page.touchscreen.tap(pageEnd.x, pageEnd.y)
+    await goToBar(page, 4)
+    await tapBarLine(page)
     await page.getByRole('heading', { name: 'Bar 4' }).waitFor()
     assert.equal(await page.getByRole('button', { name: 'Remove bar line' }).count(), 0)
     // The bar line that closes bar 1 goes.
-    await page.getByRole('button', { name: 'Full score' }).click()
-    const line = await centre(page, '.score-view g.barLine', 0)
-    await page.touchscreen.tap(line.x, line.y)
+    await goToBar(page, 1)
+    await tapBarLine(page)
     await page.getByRole('heading', { name: 'Bar 1' }).waitFor()
     await page.getByRole('button', { name: 'Remove bar line' }).click()
     await save(page).click()
@@ -1212,13 +1747,15 @@ test('edit parts: add a bar line, Save & practice: the loop is over the same mus
     const id = await makeOdePiece(page)
     await page.evaluate((pieceId) => window.__test!.shell.library.writePractice(pieceId, { bar: 9, tempo: null, loop: { start: 9, end: 12 }, loopRest: 0, metronome: false }), id)
     await openEditor(page, id)
-    // Bar 6, before its third note.
+    // Bar 6, before its third note: the Bars tools add the bar line.
     await tapNote(page, ODE[5]![2]!)
+    await tabs(page, 'Bars').click()
     await page.getByRole('button', { name: 'Bar line before' }).click()
     assert.equal(await selection(page), 'Bar 7 · Note 1', 'the note stays selected, now the first of the new bar 7')
+    await onBar(page, 7)
     // Not offered before the first note of a bar.
-    await tapDrawn(page, ODE[5]![0]!)
-    await page.getByRole('button', { name: '+ Chord note' }).waitFor()
+    await tapNote(page, ODE[5]![0]!)
+    await page.getByRole('heading', { name: 'Bar 6' }).waitFor()
     assert.equal(await page.getByRole('button', { name: 'Bar line before' }).count(), 0)
     await save(page).click()
     await onScreen(page, 'practice')
@@ -1236,7 +1773,8 @@ test('edit parts: a bar line that would cut a note of the other part is refused,
     const id = await makeDuet(page)
     await openEditor(page, id)
     // The melody's second note: the right hand holds a half-note chord across it.
-    await tapDrawn(page, duetNote('P1', 0, 1, 1))
+    await tapNote(page, duetNote('P1', 0, 1, 1))
+    await tabs(page, 'Bars').click()
     await page.getByRole('button', { name: 'Bar line before' }).click()
     assert.equal(await textOf(page.locator('.editor-message')), 'A note in the right hand sounds across that point, so a bar line cannot go there.')
     assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), true, 'nothing changed')

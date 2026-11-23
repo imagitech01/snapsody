@@ -36,6 +36,25 @@ test('render: the fixture shows clef, key, metre, tuplet, slur and staccato', as
   assert.match(svg, /<svg[^>]*viewBox=/)
 })
 
+test('render: one bar fitted to a box fills its width at the box\'s proportions; a bar wider than that keeps its own (change redesign-score-editor, D2)', async () => {
+  const ratio = (svg: string): number => {
+    const [, w, h] = /viewBox="[\d.-]+ [\d.-]+ ([\d.]+) ([\d.]+)"/.exec(svg)!
+    return Number(w) / Number(h)
+  }
+  const score = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  const oneBar = { ...score, bars: score.bars.slice(1, 2) }
+  // The piano's grand staff alone is taller than wide: stretched to a box three times as wide as high.
+  const [piano] = await renderScore(oneBar, { width: 360, parts: ['P2'], fit: { height: 120 } })
+  assert.ok(Math.abs(ratio(piano!) - 3) < 0.05, `the box's proportions (${ratio(piano!)})`)
+  assert.ok(!/\swidth=/.test(/<svg[^>]*>/.exec(piano!)![0]), 'a view box only: the page sizes it')
+  // In a high box, the bar keeps its own width, cropped to the music.
+  const [high] = await renderScore(oneBar, { width: 360, parts: ['P1'], fit: { height: 2000 } })
+  assert.ok(ratio(high!) > 1, `not squeezed to the box (${ratio(high!)})`)
+  // The next render without `fit` is the whole page again.
+  const [page] = await renderScore(score, { width: 360 })
+  assert.ok(ratio(page!) < ratio(piano!))
+})
+
 test('render: a narrower page makes more systems, not wider ones', async () => {
   const score = parseMusicXml(read(COMMITTED_FIXTURE))
   const count = (svg: string | undefined) => (svg?.match(/class="system"/g) ?? []).length
