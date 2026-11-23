@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import type { Measure, MeasureItem, Note, Score } from '../src/core/score/model.ts'
 import { allItemLists, isDirection, isNote, isWedge, notesOf } from '../src/core/score/model.ts'
 import { beamScore } from '../src/core/score/beams.ts'
+import { dynamicOf, setDynamic, toggleBreath, toggleCaesura } from '../src/core/score/edit.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { eq, frac } from '../src/core/score/rational.ts'
 import { barLength } from '../src/core/score/repairs.ts'
@@ -848,4 +849,24 @@ test('parts: a direction inside a hidden rest of the first voice splits the rest
   const xml2 = wrap(piano, qn('C', 1, 1, 4, 'whole') + '<backup><duration>4</duration></backup><forward><duration>2</duration></forward>' + qn('D', 6, 2, 2, 'half') + '<backup><duration>4</duration></backup>' + '<forward><duration>1</duration></forward>' + mid)
   const items2 = parseMusicXml(xml2).bars[0]!.parts[0]!.staves[1]!.voices[0]!
   assert.deepEqual(items2.map((i) => (isNote(i) ? `${i.hidden ? 'H' : 'n'}${i.duration.n}/${i.duration.d}` : i.kind)), ['H1/4', 'dynamic', 'H1/4', 'n1/2'])
+})
+
+test('marks: a loudness mark, a breath mark and a caesura set in the editor survive writing and reading (change redesign-score-editor, D5)', () => {
+  const s = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  // The melody's first note (bar 1), its second and its third.
+  const [a, b, c] = notesOf(firstLine(s).measures[0]!)
+  setDynamic(s, a!.id, 'p')
+  toggleBreath(s, b!.id)
+  toggleCaesura(s, c!.id)
+  const back = parseMusicXml(serializeMusicXml(s))
+  assert.equal(dynamicOf(back, a!.id)?.mark, 'p')
+  const [a2, b2, c2] = notesOf(firstLine(back).measures[0]!)
+  assert.deepEqual([a2!.id, b2!.breath, b2!.caesura, c2!.breath, c2!.caesura], [a!.id, true, undefined, undefined, true])
+  assert.equal(serializeMusicXml(back), serializeMusicXml(s), 'and the same again')
+  // Each one, changed or taken off, is written that way too.
+  setDynamic(back, a!.id, 'ff')
+  toggleBreath(back, b!.id)
+  const again = parseMusicXml(serializeMusicXml(back))
+  assert.equal(dynamicOf(again, a!.id)?.mark, 'ff')
+  assert.equal(notesOf(firstLine(again).measures[0]!)[1]!.breath, undefined)
 })

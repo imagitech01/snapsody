@@ -35,12 +35,17 @@ export interface BarLinesOfBar {
  * its stop or discontinue; a forward repeat before the stop also ends it.
  */
 export function endingsOf(bars: readonly BarLinesOfBar[]): (number[] | null)[] {
-  const result: (number[] | null)[] = []
-  let current: number[] | null = null
+  return endingLabels(bars).map((label) => (label === null ? null : parseEndingNumbers(label)))
+}
+
+/** As `endingsOf`, with the ending's number as written ("1", "2", "1, 2"), for the editor to keep it as it is. */
+export function endingLabels(bars: readonly BarLinesOfBar[]): (string | null)[] {
+  const result: (string | null)[] = []
+  let current: string | null = null
   bars.forEach((m) => {
     const starts = m.leftBarline?.ending ?? (m.rightBarline?.ending?.type === 'start' ? m.rightBarline.ending : undefined)
-    if (starts?.type === 'start') current = parseEndingNumbers(starts.number)
-    else if (current && m.leftBarline?.repeat === 'forward') current = null
+    if (starts?.type === 'start') current = starts.number
+    else if (current !== null && m.leftBarline?.repeat === 'forward') current = null
     result.push(current)
     const closes = m.rightBarline?.ending
     if (closes && (closes.type === 'stop' || closes.type === 'discontinue')) current = null

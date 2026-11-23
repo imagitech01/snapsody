@@ -86,9 +86,11 @@ function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, la
     const time = times[index]
     if (time && hasNotes(m)) {
       const length = barLength(m)
-      // A voice after the first is flagged only when it is too long: a short one is simply not full.
+      // A voice after the first is flagged only when it is too long: a short one is simply not full. A short first bar
+      // is a pickup, as playback counts it (change redesign-score-editor, D11); a first bar that is too long is flagged.
       const expected = expectedLength(time)
-      if (!eq(length, expected) && !(laterVoice && cmp(length, expected) < 0)) {
+      const short = cmp(length, expected) < 0
+      if (!eq(length, expected) && !(laterVoice && short) && !(index === 0 && short)) {
         const counted = beatsText(mul(length, frac(time.beatType)))
         found.push({
           kind: 'bar-length',

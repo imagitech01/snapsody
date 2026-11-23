@@ -10,14 +10,14 @@ import { loadSettings } from '../src/app/settings.ts'
 import { preparePages } from '../src/core/pages/pages.ts'
 import type { AudioBackend } from '../src/core/playback/player.ts'
 import type { NoteOnSpec, TimerApi } from '../src/core/playback/scheduler.ts'
-import { addChordNote, addSlur, addTie, addWedge, deleteElement, deleteNote, insertNote, joinBars, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
+import { addBar, addChordNote, addSlur, addTie, addWedge, deleteBar, deleteElement, deleteNote, insertNote, joinBars, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
 import { isWedge, notesOf, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
 import type { MeasureItem } from '../src/core/score/model.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
 import { MELODY_PIANO_FIXTURE, note, quarters, read, score } from './helpers.ts'
-import { firstLine, setAttr } from './helpers.ts'
+import { barNumberProblems, firstLine, setAttr } from './helpers.ts'
 
 // The editor session (practice-app task 9.6, spec `score-editing`): selection, edits with undo and
 // redo, live warnings and stepping through them, the bar preview, the title and asking for the name
@@ -761,7 +761,7 @@ test('bar lines: a bar line added and undone saves no bar map; one added and sav
   editor.apply((s) => splitBar(s, idsOf(editor, 2)[1]!))
   const result = await editor.save()
   assert.equal(result.ok, true)
-  assert.deepEqual(calls[1]![3], [{ first: 1, last: 1 }, { first: 2, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }])
+  assert.deepEqual(calls[1]![3], { bars: [{ first: 1, last: 1 }, { first: 2, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }], added: [] })
   const info = await library.info('piece-1')
   assert.equal(info.bars, 5)
   assert.deepEqual(info.pages.map((p) => [p.firstBar, p.lastBar, p.staves.map((s) => [s.firstBar, s.lastBar])]), [[1, 3, []], [4, 5, [[4, 4], [5, 5]]]])
@@ -782,12 +782,261 @@ test('bar lines: a second save maps from the first save, and a retry after a fai
   }
   const failed = await editor.save()
   assert.equal(!failed.ok && failed.reason, 'failed')
-  assert.deepEqual(calls[1]![3], [{ first: 1, last: 2 }, { first: 3, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }, { first: 6, last: 6 }], 'from the piece as saved the first time')
+  assert.deepEqual(calls[1]![3], { bars: [{ first: 1, last: 2 }, { first: 3, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }, { first: 6, last: 6 }], added: [] }, 'from the piece as saved the first time')
   library.update = realUpdate
   assert.equal((await editor.save()).ok, true)
   assert.equal(calls.length, 2, 'the score was saved: the retry only renames')
   const info = await library.info('piece-1')
   assert.deepEqual([info.name, info.bars, info.pages.map((p) => [p.firstBar, p.lastBar])], ['Renamed', 6, [[1, 4], [5, 6]]])
+})
+
+test('bars: an added and a deleted bar save with their map; a second save maps from the first, where the added bar is deleted again', async () => {
+  const { editor, library } = await setup()
+  const calls = spyOnWrites(library)
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 4, loop: { start: 4, end: 4 } })
+  // A bar added after bar 2 (the end of page 1), and the old bar 4 (the second line of page 2) deleted.
+  editor.apply((s) => addBar(s, 1, 'after'))
+  editor.apply((s) => deleteBar(s, 4))
+  assert.equal((await editor.save()).ok, true)
+  assert.deepEqual(calls[0]![3], { bars: [{ first: 1, last: 1 }, { first: 2, last: 2 }, { first: 4, last: 4 }, null], added: [{ bar: 3, of: 2 }] })
+  let info = await library.info('piece-1')
+  assert.deepEqual([info.bars, info.pages.map((p) => [p.firstBar, p.lastBar, p.staves.map((s) => [s.firstBar, s.lastBar])])], [4, [[1, 3, []], [4, 4, [[4, 4]]]]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 4, loop: null })
+
+  editor.apply((s) => deleteBar(s, 2))
+  assert.equal((await editor.save()).ok, true)
+  assert.deepEqual(calls[1]![3], { bars: [{ first: 1, last: 1 }, { first: 2, last: 2 }, null, { first: 3, last: 3 }], added: [] }, 'the added bar, saved, is deleted')
+  info = await library.info('piece-1')
+  assert.deepEqual([info.bars, info.pages.map((p) => [p.firstBar, p.lastBar])], [3, [[1, 2], [3, 3]]])
+})
+
+// ---- bar numbers after added and deleted bars, through the session (change redesign-score-editor, D8, task 3.6) ---
+
+const SIX_1 = score([quarters(3, 'C'), quarters(3, 'D'), quarters(3, 'E')], [3, 4])
+const SIX_2 = score([quarters(3, 'F'), quarters(3, 'G'), quarters(3, 'A')])
+type Line = { firstBar: number; lastBar: number }
+
+/** A six-bar piece: page 1 is bars 1–3 in the lines 1 and 2–3, page 2 bars 4–6 in the lines [lines2]. */
+async function setupSix(lines2: Line[] = [{ firstBar: 4, lastBar: 6 }]) {
+  const platform = createFakePlatform()
+  const library = createLibrary(platform.files, { newId: () => 'piece-1' })
+  const settings = await loadSettings(platform.files)
+  const router = createRouter('library')
+  platform.files.seed('scans/1/page-1.jpg', Uint8Array.of(1))
+  platform.files.seed('scans/1/page-2.jpg', Uint8Array.of(2))
+  const prepared = preparePages([SIX_1, SIX_2])
+  await library.create({
+    name: 'Six bars',
+    musicxml: prepared.musicxml,
+    bars: prepared.bars,
+    repairs: prepared.repairs,
+    pages: [
+      { source: 'scans/1/page-1.jpg', recognised: SIX_1, ...prepared.pages[0]!, staves: [{ box: BOX, firstBar: 1, lastBar: 1 }, { box: { ...BOX, y: 0.5 }, firstBar: 2, lastBar: 3 }] },
+      { source: 'scans/1/page-2.jpg', recognised: SIX_2, ...prepared.pages[1]!, staves: lines2.map((line, k) => ({ box: { ...BOX, y: 0.1 + 0.4 * k }, ...line })) },
+    ],
+  })
+  router.push({ name: 'editor', pieceId: 'piece-1' })
+  const editor = await openEditor({ library, settings, router, i18n: createI18n() }, 'piece-1')
+  /** Saves, and returns the pages with their lines as [first, last, lines], after checking the bar numbers hold. */
+  const save = async () => {
+    const result = await editor.save()
+    assert.equal(result.ok, true, result.ok ? '' : String(result.error))
+    const info = await library.info('piece-1')
+    assert.deepEqual(barNumberProblems(info, await library.readPractice('piece-1')), [])
+    assert.equal(info.bars, editor.score.value.bars.length)
+    return [info.bars, info.pages.map((p) => [p.firstBar, p.lastBar, p.staves.map((s) => [s.firstBar, s.lastBar])])]
+  }
+  return { editor, library, save }
+}
+
+test('bar numbers: a bar added between the halves of a split bar belongs to it (finding 3)', async () => {
+  const { editor, save } = await setupSix()
+  editor.apply((s) => splitBar(s, idsOf(editor, 2)[1]!))
+  editor.apply((s) => addBar(s, 1, 'after'))
+  assert.deepEqual(await save(), [8, [[1, 5, [[1, 1], [2, 5]]], [6, 8, [[6, 8]]]]], 'bar 2 is bars 2 to 4, with the added bar 3 between its halves')
+})
+
+test('bar numbers: two bars joined, saved, the join undone and a bar added after the first: the bar added lies inside the joined bar\'s range (finding 3)', async () => {
+  const { editor, save } = await setupSix()
+  editor.apply((s) => joinBars(s, 1))
+  assert.deepEqual(await save(), [5, [[1, 2, [[1, 1], [2, 2]]], [3, 5, [[3, 5]]]]])
+  editor.undo()
+  editor.apply((s) => addBar(s, 1, 'after'))
+  assert.deepEqual(await save(), [7, [[1, 4, [[1, 1], [2, 4]]], [5, 7, [[5, 7]]]]])
+})
+
+test('bar numbers: a deleted bar brought back by an undo after a save, and a bar added before it, join the line or page before it, without an overlap (findings 1, 2, 4)', async () => {
+  // Finding 1: the first bar of line 2 deleted, saved, undone, a bar added before it: both go to line 1, and the lines do not overlap.
+  let six = await setupSix()
+  six.editor.apply((s) => deleteBar(s, 1))
+  assert.deepEqual(await six.save(), [5, [[1, 2, [[1, 1], [2, 2]]], [3, 5, [[3, 5]]]]])
+  six.editor.undo()
+  six.editor.apply((s) => addBar(s, 1, 'before'))
+  assert.deepEqual(await six.save(), [7, [[1, 4, [[1, 3], [4, 4]]], [5, 7, [[5, 7]]]]])
+  // Finding 2: the same on the first bar of page 2: saved, not refused.
+  six = await setupSix()
+  six.editor.apply((s) => deleteBar(s, 3))
+  assert.deepEqual(await six.save(), [5, [[1, 3, [[1, 1], [2, 3]]], [4, 5, [[4, 5]]]]])
+  six.editor.undo()
+  six.editor.apply((s) => addBar(s, 3, 'before'))
+  assert.deepEqual(await six.save(), [7, [[1, 5, [[1, 1], [2, 5]]], [6, 7, [[6, 7]]]]])
+  // Finding 4, a known limitation: `from` cannot say where a bar that is not in the saved score sat, so the restored first bar of page 2 lands on page 1.
+  six = await setupSix()
+  await six.library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 4, loop: { start: 4, end: 5 } })
+  six.editor.apply((s) => deleteBar(s, 3))
+  await six.save()
+  assert.deepEqual(await six.library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 4, loop: { start: 4, end: 4 } })
+  six.editor.undo()
+  assert.deepEqual(await six.save(), [6, [[1, 4, [[1, 1], [2, 4]]], [5, 6, [[5, 6]]]]])
+  assert.deepEqual(await six.library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 5, loop: { start: 5, end: 5 } })
+  // What follows from it: the piece now counts bar 4 on page 1, so bars 4 and 5 joined would be a join across a page,
+  // and the save is refused (the session will not offer it once it checks against the piece as last saved).
+  six.editor.apply((s) => joinBars(s, 3))
+  const across = await six.editor.save()
+  assert.match(String(!across.ok && across.error), /two pages/)
+  // Likewise, page 2 left with only the restored bar is a page left without bars.
+  six = await setupSix()
+  six.editor.apply((s) => deleteBar(s, 3))
+  await six.save()
+  six.editor.undo()
+  six.editor.apply((s) => deleteBar(s, 5))
+  six.editor.apply((s) => deleteBar(s, 4))
+  const empty = await six.editor.save()
+  assert.match(String(!empty.ok && empty.error), /page 2 would hold no bars/)
+})
+
+test('bar numbers: a line whose only bar is deleted keeps a bar added next to it, in one save or two (finding 6)', async () => {
+  const lines: Line[] = [
+    { firstBar: 4, lastBar: 5 },
+    { firstBar: 6, lastBar: 6 },
+  ]
+  const one = await setupSix(lines)
+  one.editor.apply((s) => addBar(s, 5, 'after'))
+  one.editor.apply((s) => deleteBar(s, 5))
+  const once = await one.save()
+  assert.deepEqual(once, [6, [[1, 3, [[1, 1], [2, 3]]], [4, 6, [[4, 5], [6, 6]]]]])
+  const two = await setupSix(lines)
+  two.editor.apply((s) => addBar(s, 5, 'after'))
+  await two.save()
+  two.editor.apply((s) => deleteBar(s, 5))
+  assert.deepEqual(await two.save(), once)
+})
+
+test('bar numbers: a position on a deleted bar moves to a bar added in its place, else to the bar that follows (finding 7)', async () => {
+  const { editor, library, save } = await setupSix()
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 4, loop: { start: 4, end: 4 } })
+  editor.apply((s) => addBar(s, 3, 'before'))
+  editor.apply((s) => deleteBar(s, 4))
+  assert.deepEqual(await save(), [6, [[1, 3, [[1, 1], [2, 3]]], [4, 6, [[4, 6]]]]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 4, loop: null })
+  // Bar 5 deleted with nothing added: the position moves to the bar that follows.
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 5 })
+  editor.apply((s) => deleteBar(s, 4))
+  await save()
+  assert.equal((await library.readPractice('piece-1'))!.bar, 5)
+})
+
+test('bar numbers: a line whose last bar is deleted and whose neighbours are joined across it is dropped; across a page the save is refused (finding 5)', async () => {
+  const lines: Line[] = [
+    { firstBar: 4, lastBar: 5 },
+    { firstBar: 6, lastBar: 6 },
+  ]
+  const { editor, save } = await setupSix([{ firstBar: 4, lastBar: 4 }, { firstBar: 5, lastBar: 5 }, { firstBar: 6, lastBar: 6 }])
+  editor.apply((s) => deleteBar(s, 4))
+  editor.apply((s) => joinBars(s, 3))
+  assert.deepEqual(await save(), [4, [[1, 3, [[1, 1], [2, 3]]], [4, 4, [[4, 4]]]]], 'the joined bar holds bars 4 to 6: it is in the first line')
+  const across = await setupSix(lines)
+  across.editor.apply((s) => deleteBar(s, 2))
+  across.editor.apply((s) => joinBars(s, 1))
+  const refused = await across.editor.save()
+  assert.equal(!refused.ok && refused.reason, 'failed')
+  assert.match(String(!refused.ok && refused.error), /two pages/)
+})
+
+/** [list] with [count] items from [at] replaced by [items], as a copy. */
+function spliced<T>(list: readonly T[], at: number, count: number, ...items: T[]): T[] {
+  const copy = list.slice()
+  copy.splice(at, count, ...items)
+  return copy
+}
+
+/** A pseudo-random number generator with a fixed seed (a linear congruential one), so a failure can be run again. */
+function seeded(seed: number): (n: number) => number {
+  let state = seed >>> 0
+  return (n) => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return Math.floor((state / 2 ** 32) * n)
+  }
+}
+
+test('bar numbers: short random sessions of bars added, deleted, split, joined and undone keep the pages, the lines and practice consistent', async () => {
+  const random = seeded(36)
+  const refusals = new Map<string, number>()
+  let saves = 0
+  for (let run = 0; run < 300; run++) {
+    const { editor, library } = await setupSix([
+      { firstBar: 4, lastBar: 5 },
+      { firstBar: 6, lastBar: 6 },
+    ])
+    // The page and line each bar was read on (what the session will offer follows them), with an undo stack of its own.
+    let labels = [0, 1, 1, 2, 2, 3].map((line) => ({ page: line < 2 ? 1 : 2, line }))
+    const undone: (typeof labels)[] = []
+    const steps: string[] = []
+    let undoAcrossSave = false
+    let sinceSave = 0
+    const edit = (name: string, change: (s: Score) => unknown, next: typeof labels): void => {
+      try {
+        editor.apply(change)
+      } catch {
+        return
+      }
+      undone.push(labels)
+      labels = next
+      steps.push(name)
+      sinceSave++
+    }
+    sessions: for (let save = 0; save < 3; save++) {
+      for (let op = random(5); op >= 0; op--) {
+        const n = labels.length
+        const i = random(n)
+        const kind = random(5)
+        if (kind === 0) {
+          const side = random(2) === 0 ? 'before' : 'after'
+          edit(`add ${side} ${i + 1}`, (s) => addBar(s, i, side), spliced(labels, side === 'after' ? i + 1 : i, 0, labels[i]!))
+        } else if (kind === 1 && labels.filter((l) => l.page === labels[i]!.page).length > 1) {
+          edit(`delete ${i + 1}`, (s) => deleteBar(s, i), spliced(labels, i, 1))
+        } else if (kind === 2 && idsOf(editor, i + 1).length > 1) {
+          edit(`split ${i + 1}`, (s) => splitBar(s, idsOf(editor, i + 1)[1]!), spliced(labels, i, 0, labels[i]!))
+        } else if (kind === 3 && i + 1 < n && labels[i]!.line === labels[i + 1]!.line) {
+          edit(`join ${i + 1}`, (s) => joinBars(s, i), spliced(labels, i + 1, 1))
+        } else if (kind === 4 && undone.length > 0 && editor.undo()) {
+          labels = undone.pop()!
+          steps.push('undo')
+          if (sinceSave-- <= 0) undoAcrossSave = true
+        }
+      }
+      const old = (await library.info('piece-1')).bars
+      const start = 1 + random(old)
+      const end = start + random(old - start + 1)
+      await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 1 + random(old), loop: random(4) === 0 ? null : { start, end } })
+      steps.push('save')
+      sinceSave = 0
+      const result = await editor.save()
+      if (!result.ok) {
+        const kind = /two pages/.test(String(result.error)) ? 'a join across a page' : /would hold no bars/.test(String(result.error)) ? 'a page left without bars' : String(result.error)
+        refusals.set(kind, (refusals.get(kind) ?? 0) + 1)
+        assert.ok(undoAcrossSave, `refused (${kind}) without an undo across a save: ${steps.join(', ')}`)
+        break sessions
+      }
+      saves++
+      const info = await library.info('piece-1')
+      assert.deepEqual(barNumberProblems(info, await library.readPractice('piece-1')), [], steps.join(', '))
+      assert.equal(info.bars, editor.score.value.bars.length, steps.join(', '))
+    }
+    editor.close()
+  }
+  assert.ok(saves > 500, `${saves} saves`)
+  assert.deepEqual([...refusals.keys()].filter((kind) => kind !== 'a join across a page' && kind !== 'a page left without bars'), [])
 })
 
 test('bar lines: "Bar line before" is not offered for the first note of a bar; "Remove bar line" not after the last bar or where a page or a line of the photo ends', async () => {
@@ -830,7 +1079,7 @@ test('bar lines: a missed bar line in a bar that does not add up is split and sa
     assert.deepEqual([idsOf(editor, 2).length, idsOf(editor, 3).length], [before, count - before])
     if (count === 6) assert.deepEqual(editor.warnings.value.filter((w) => w.kind === 'bar-length' && (w.bar === '2' || w.bar === '3')).map((w) => w.bar), [], 'neither half is marked')
     assert.equal((await editor.save()).ok, true)
-    assert.deepEqual(calls[0]![3], [{ first: 1, last: 1 }, { first: 2, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }], `${count} quarters: old 2 is 2–3, old 3 is 4`)
+    assert.deepEqual(calls[0]![3], { bars: [{ first: 1, last: 1 }, { first: 2, last: 3 }, { first: 4, last: 4 }, { first: 5, last: 5 }], added: [] }, `${count} quarters: old 2 is 2–3, old 3 is 4`)
     assert.equal((await library.info('piece-1')).bars, 5)
     editor.close()
   }

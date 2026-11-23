@@ -266,6 +266,16 @@ export interface Bar {
    * keep it right, and it is never written to MusicXML.
    */
   from?: [number, number]
+  /**
+   * Transient, while editing (change redesign-score-editor, D8): set on a bar the editor added (`addBar`), which holds
+   * no music of the loaded score. Its `from` is then the empty stretch `[k, k]` at the place it was added: the end of
+   * the stretch of the bar it was added after, or the start of the one it was added before. `side` says which, so the
+   * loaded bar it belongs to is the one that ends at `k` (`after`) or starts at `k` (`before`); a bar added next to an
+   * added bar takes that bar's `from` and `side`, as it belongs to the same loaded bar. `id` is unique in the session
+   * (never reused, also after undo), so an added bar of a score saved earlier in the session can be found again in the
+   * working score. Like `from`, it is never written to MusicXML.
+   */
+  added?: { id: string; side: 'before' | 'after' }
 }
 
 export interface Score {
@@ -548,29 +558,75 @@ export function barSpans(score: Score): [number, number][] {
 /** Whether two bars hold some of the same music of the loaded score. */
 export const sameMusic = (a: readonly [number, number], b: readonly [number, number]): boolean => a[0] < b[1] && b[0] < a[1]
 
-/** For each bar of an earlier score (by index), the bars of a later one that hold its music: bar numbers from 1, first and last included. */
-export type BarMap = readonly { first: number; last: number }[]
+/**
+ * Where the bars of an earlier score went in a later one (change edit-parts D10, change redesign-score-editor D8). Bar
+ * numbers count from 1. `bars` has, for each bar of the earlier score (by index), the bars of the later one that hold
+ * its music, first and last included, or null when no bar holds it any more (it was deleted). `added` lists the bars of
+ * the later score that hold no bar of the earlier one (bars added since), each with `of`, the bar of the earlier score
+ * it belongs to: the one it was added next to, whose page and line of the photo it joins.
+ */
+export interface BarMap {
+  bars: readonly ({ first: number; last: number } | null)[]
+  added: readonly { bar: number; of: number }[]
+}
 
 /**
- * Where each bar of `before` went in `after` (change edit-parts, D10), worked out through their `from`s, which both
- * count in the score as the editor loaded it: a bar of `before` is now held by every bar of `after` whose stretch
- * of the loaded score overlaps its own. Edits keep the bars in order, so that is one range. Undefined when nothing
- * moved (the same number of bars, each in its own place), so a save without bar-line changes writes no map.
+ * Where each bar of `before` went in `after` (change edit-parts D10, change redesign-score-editor D8), worked out
+ * through their `from`s, which both count in the score as the editor loaded it. Undefined when nothing moved (the same
+ * number of bars, each in its own place), so a save without bar-line changes writes no map.
+ *
+ * - A bar of `before` that holds music of the loaded score is now held by every bar of `after` whose stretch overlaps
+ *   its own: one range, as edits keep the bars in order (a split bar is two bars, two joined bars share one), or null
+ *   when none does (a deleted bar).
+ * - An added bar of `before` (saved earlier in the session) is the bar of `after` with the same `added.id`, or null
+ *   when it was deleted since. Its empty stretch holds no music, so `from` never matches it, either way (an empty
+ *   stretch inside another one would count as overlapping it).
+ * - Every other bar of `after` is listed in `added`. The bar it belongs to is found through its `from` and side
+ *   (`Bar.added`): the bar of `before` whose stretch ends at its place (`after`) or starts there (`before`), counted as
+ *   containing the place, as the bar it was added next to may have been split since; else an added bar of `before`
+ *   at the same place and side (the loaded bar was deleted before the last save). A bar for which neither says (a
+ *   deleted bar that an undo brought back after a save, or an added bar whose own bar is not in `before`) belongs to
+ *   the bar of `before` that the bar of `after` before it belongs to (worked out from left to right), else to the one
+ *   of the bar after it, so they follow the order of the bars. `from` cannot say where a bar that is not in `before`
+ *   sat: a restored bar that was the first of a page or a line of the photo joins the one before it.
+ *
+ * A join of two loaded bars across the place of a deleted one makes one stretch that covers the deleted bar's, which
+ * `from` cannot tell apart from a join of the three: the deleted bar then maps to the joined bar.
  */
 export function barMap(before: Score, after: Score): BarMap | undefined {
   const was = barSpans(before)
   const now = barSpans(after)
-  const map = was.map((span, j) => {
+  // For each bar of `after`, the first bar of `before` it holds, if any.
+  const held: (number | undefined)[] = now.map(() => undefined)
+  const bars = before.bars.map((bar, j) => {
     let first = -1
     let last = -1
     now.forEach((other, i) => {
-      if (!sameMusic(span, other)) return
+      const holds = bar.added ? after.bars[i]!.added?.id === bar.added.id : !after.bars[i]!.added && sameMusic(was[j]!, other)
+      if (!holds) return
       if (first < 0) first = i
       last = i
+      held[i] ??= j
     })
-    if (first < 0) throw new Error(`bar ${j + 1} of the saved score is in no bar of the edited one`)
-    return { first: first + 1, last: last + 1 }
+    return first < 0 ? null : { first: first + 1, last: last + 1 }
   })
-  const same = before.bars.length === after.bars.length && map.every((r, j) => r.first === j + 1 && r.last === j + 1)
-  return same ? undefined : map
+  // The bar of `before` each bar of `after` belongs to: the one it holds, the one it was added next to, else (in a
+  // second pass) the one of its neighbour.
+  const owner = now.map((span, i) => held[i] ?? addedNextTo(before, was, after.bars[i]!, span))
+  for (let i = 1; i < owner.length; i++) owner[i] ??= owner[i - 1]
+  for (let i = owner.length - 2; i >= 0; i--) owner[i] ??= owner[i + 1]
+  const added = now.flatMap((_, i) => (held[i] === undefined ? [{ bar: i + 1, of: (owner[i] ?? 0) + 1 }] : []))
+  const same = added.length === 0 && before.bars.length === after.bars.length && bars.every((r, j) => r !== null && r.first === j + 1 && r.last === j + 1)
+  return same ? undefined : { bars, added }
+}
+
+/** The index of the bar of `before` that `bar`, an added bar of a later score, was added next to (see `barMap`), if it can tell. */
+function addedNextTo(before: Score, was: [number, number][], bar: Bar, span: [number, number]): number | undefined {
+  const side = bar.added?.side
+  if (!side) return undefined
+  const k = span[0]
+  const loaded = was.findIndex(([lo, hi], j) => !before.bars[j]!.added && lo < hi && (side === 'after' ? lo < k && k <= hi : lo <= k && k < hi))
+  if (loaded >= 0) return loaded
+  const next = before.bars.findIndex((other, j) => other.added?.side === side && was[j]![0] === k)
+  return next >= 0 ? next : undefined
 }

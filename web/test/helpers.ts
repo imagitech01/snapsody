@@ -100,3 +100,32 @@ export function setAttr<K extends 'clef' | 'key' | 'time' | 'leftBarline' | 'rig
   if (value === undefined) delete target[name]
   else target[name] = value
 }
+
+/**
+ * What is wrong with a piece's bar numbers (change redesign-score-editor, D8): the pages must cover bars 1 to `bars`
+ * in order without a gap or an overlap; the lines of the photo (staves) of a page must be in order, not overlap and
+ * lie inside the page; the practice bar and loop must lie inside the piece. Empty when all is well.
+ */
+export function barNumberProblems(
+  info: { bars: number; pages: readonly { n: number; firstBar: number; lastBar: number; staves: readonly { firstBar: number; lastBar: number }[] }[] },
+  practice?: { bar: number; loop: { start: number; end: number } | null } | null,
+): string[] {
+  const problems: string[] = []
+  let next = 1
+  for (const page of info.pages) {
+    if (page.firstBar !== next || page.lastBar < page.firstBar) problems.push(`page ${page.n} is bars ${page.firstBar}-${page.lastBar}, after bar ${next - 1}`)
+    let line = page.firstBar
+    for (const staff of page.staves) {
+      if (staff.firstBar < line || staff.lastBar < staff.firstBar || staff.lastBar > page.lastBar) problems.push(`page ${page.n} has a line ${staff.firstBar}-${staff.lastBar} out of order or outside it`)
+      line = staff.lastBar + 1
+    }
+    next = page.lastBar + 1
+  }
+  if (next !== info.bars + 1) problems.push(`the pages end at bar ${next - 1}, the piece at bar ${info.bars}`)
+  if (practice) {
+    if (practice.bar < 1 || practice.bar > info.bars) problems.push(`the practice bar ${practice.bar} is outside the piece`)
+    const loop = practice.loop
+    if (loop && (loop.start < 1 || loop.end < loop.start || loop.end > info.bars)) problems.push(`the loop ${loop.start}-${loop.end} is outside the piece`)
+  }
+  return problems
+}

@@ -200,3 +200,19 @@ test('warnings: a hand with one voice is named without a voice, and a one-line p
   assert.equal(one!.message, 'Bar 1 adds up to 4 beats but 3/4 needs 3')
   assert.equal(createI18n().warning(one!), 'Bar 1 adds up to 4 beats but 3/4 needs 3.')
 })
+
+// --- a pickup bar (change redesign-score-editor, D11) ---
+
+test('warnings: a short first bar is a pickup and not flagged; a long first bar and a short second bar are (spec "Pickup bar")', () => {
+  // A 4/4 piece that starts with one quarter note: the last beat before bar 2.
+  const pickup = parseMusicXml(score([quarters(1), quarters(4), quarters(4)], [4, 4]))
+  assert.deepEqual(kinds(pickup, TENOR_SAX), [])
+  // A first bar of five beats is too long, not a pickup.
+  const long = parseMusicXml(score([quarters(5), quarters(4)], [4, 4]))
+  assert.deepEqual(kinds(long, TENOR_SAX), ['bar-length@1'])
+  // A short bar after the first is flagged as before.
+  const second = parseMusicXml(score([quarters(4), quarters(3), quarters(4)], [4, 4]))
+  assert.deepEqual(kinds(second, TENOR_SAX), ['bar-length@2'])
+  // After a pickup, a short second bar is still flagged.
+  assert.deepEqual(kinds(parseMusicXml(score([quarters(1), quarters(3)], [4, 4])), TENOR_SAX), ['bar-length@2'])
+})

@@ -148,6 +148,15 @@ A second save in the same session (for example after a rename that failed) maps 
 
 `checkPages` only requires that the pages cover the piece without gaps; the staves of a page do not have to, so dropping a staff keeps a piece loadable.
 
+**Decided while applying (2026-11-23), after a review of the first version found overlapping lines and refused saves:**
+
+- `library.ts` does not map each range by its ends. It gives every new bar one owner, an old bar (an added bar: the bar it belongs to; else the first old bar that holds it), keeps the owners in order from left to right, and a page or line is the new bars whose owner lies in it. So the pages and the lines of a page cannot overlap or leave a gap.
+- A line keeps an added bar also when the bar it was added next to is deleted (the spec: an added bar belongs to the printed line of the bar it was added next to). A line is dropped only when it holds no bar at all.
+- The practice bar on a deleted bar moves to the first bar that follows its place, which can be a bar added there.
+- A bar of the working score that the score as last saved does not hold and that has no owner there (a deleted bar brought back by an undo after a save) belongs to the bar before it. Known limit: when it was the first bar of its page or line, it lands on the page or line before. `from` cannot say where it sat. The data stays consistent. After such an undo a save can still be refused for a page left without bars or a join across a page; the session's checks (task 5.3) must not offer those.
+- Two bars joined across the place of a deleted bar hold that bar's stretch too, so a loop on the deleted bar alone becomes the joined bar and is not cleared.
+- An ending that runs over more than one bar: Verovio draws a bracket in a one-bar excerpt only when the ending starts and ends in that bar. How the large bar shows it is decided with the screen (group 6).
+
 `piece.json` and `practice.json` keep their shape, so no compatibility folder under `web/test/fixtures/stores/` is needed. The bar map is passed in memory and never stored.
 
 ### D9. Note names

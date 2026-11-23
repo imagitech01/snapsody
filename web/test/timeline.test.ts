@@ -11,7 +11,7 @@ import { ACCENT_DB, DYNAMIC_GAIN, MAX_ATTACK_GAIN, STRONG_ACCENT_DB, buildTimeli
 import type { PlaybackEvent } from '../src/core/playback/timeline.ts'
 import { COMMITTED_FIXTURE, MELODY_PIANO_FIXTURE, read } from './helpers.ts'
 import { backup, barOf, dyn, inChord, inVoice, n, onLeftHand, partsOf, scoreOf, scoreXml, tenorTimeline, wedge } from './playbackHelpers.ts'
-import { setBarEnd, setBarStart, setRepeatTimes } from '../src/core/score/edit.ts'
+import { setBarEnd, setBarStart, setDynamic, setEnding, setRepeatTimes } from '../src/core/score/edit.ts'
 import { firstLine, setAttr } from './helpers.ts'
 
 const order = (bars: Parameters<typeof scoreOf>[0]): number[] =>
@@ -161,6 +161,38 @@ test('timeline: an end-repeat the user adds, a count of 3, and an end set back t
   assert.deepEqual(playedOrder(misread), [1, 2, 3, 4, 5])
 })
 
+test('timeline: an end bar line the user sets counts as a double bar line: a later end-repeat goes back to it (change redesign-score-editor, D5)', () => {
+  const s = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F', { right: '<repeat direction="backward"/>' }), barOf('G')])
+  assert.deepEqual(playedOrder(s), [1, 2, 3, 4, 1, 2, 3, 4, 5])
+  setBarEnd(s, 1, 'final')
+  assert.deepEqual(playedOrder(s), [1, 2, 3, 4, 3, 4, 5])
+})
+
+test('timeline: a first and a second ending set in the editor are followed (spec "Add a missed first and second ending")', () => {
+  // Bars 1 to 4 are repeated; bar 4 becomes "1st time only" and bar 5 "2nd time only".
+  const s = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F', { right: '<repeat direction="backward"/>' }), barOf('G'), barOf('A')])
+  assert.deepEqual(playedOrder(s), [1, 2, 3, 4, 1, 2, 3, 4, 5, 6])
+  setEnding(s, 3, 1)
+  setEnding(s, 4, 2)
+  assert.deepEqual(playedOrder(s), [1, 2, 3, 4, 1, 2, 3, 5, 6])
+  // Two bars in one first ending, marked one after the other, are skipped together on the second pass.
+  const two = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F'), barOf('G'), barOf('A')])
+  setEnding(two, 2, 1)
+  setEnding(two, 3, 1)
+  setEnding(two, 4, 2)
+  assert.deepEqual(playedOrder(two), [1, 2, 3, 4, 1, 2, 5, 6])
+  // A first ending of two bars made one bar again, the second bar becoming the second ending.
+  const back = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F', { right: '<repeat direction="backward"/>' }), barOf('G'), barOf('A')])
+  setEnding(back, 3, 1)
+  setEnding(back, 4, 1)
+  setEnding(back, 4, 2)
+  assert.deepEqual(playedOrder(back), [1, 2, 3, 4, 1, 2, 3, 5, 6])
+  // Misread endings turned off: each bar plays on every pass again.
+  setEnding(s, 3, undefined)
+  setEnding(s, 4, undefined)
+  assert.deepEqual(playedOrder(s), [1, 2, 3, 4, 1, 2, 3, 4, 5, 6])
+})
+
 test('timeline: first and second endings still play right after the count of the first ending changes; a "1." ending still plays twice at 3x', () => {
   const s = scoreOf([
     barOf('C', { left: '<repeat direction="forward"/>' }),
@@ -285,6 +317,20 @@ test('timeline: f is louder than mf, and mf is the default', () => {
   assert.ok(c.gain < a.gain, 'p softer than mf')
   const mf = tenorTimeline(scoreOf([{ body: dyn('mf') + n() }]))
   assert.equal(ev(mf.events, 0).gain, a.gain)
+})
+
+test('timeline: a p added in the editor lowers the gain from its note on (spec "Add a missed piano")', () => {
+  const s = scoreOf([{ body: n({ id: 'a' }) + n({ id: 'b' }) + n({ id: 'c' }) + n({ id: 'd' }) }, { body: n({ id: 'e', type: 'whole' }) }])
+  const before = tenorTimeline(s).events.map((e) => e.gain)
+  setDynamic(s, 'c', 'p')
+  const after = tenorTimeline(s).events
+  assert.deepEqual(after.map((e) => e.dynamic), ['mf', 'mf', 'p', 'p', 'p'])
+  assert.deepEqual(after.slice(0, 2).map((e) => e.gain), before.slice(0, 2), 'the notes before it keep their loudness')
+  for (const e of after.slice(2)) assert.equal(e.gain, DYNAMIC_GAIN.p)
+  assert.ok(DYNAMIC_GAIN.p! < before[2]!)
+  // Removed again, playback keeps the loudness from before it.
+  setDynamic(s, 'c', undefined)
+  assert.deepEqual(tenorTimeline(s).events.map((e) => e.gain), before)
 })
 
 test('timeline: a dynamic carries on through a repeat', () => {

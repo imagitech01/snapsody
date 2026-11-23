@@ -151,7 +151,8 @@ test('time signature change re-checks the bars', () => {
   assert.equal(recheck(s).length, 0)
   ed.setTime(s, 4, 4)
   const flags = recheck(s)
-  assert.deepEqual(flags.map((f) => [f.kind, f.bar]), [['bar-length', '1'], ['bar-length', '2']])
+  // Bar 1 is short in 4/4, so it is a pickup and not flagged (change redesign-score-editor, D11).
+  assert.deepEqual(flags.map((f) => [f.kind, f.bar]), [['bar-length', '2']])
   ed.setTime(s, 3, 4)
   assert.equal(recheck(s).length, 0)
 })
@@ -609,14 +610,15 @@ test('bar lines: read a double bar line on either side of the boundary, a final 
     barOf('F', { left: '<bar-style>heavy-light</bar-style><repeat direction="forward"/>', right: '<bar-style>light-heavy</bar-style><repeat direction="backward" times="3"/>' }),
     barOf('G', { right: '<bar-style>light-heavy</bar-style>' }),
   ])
-  assert.deepEqual([0, 1, 2, 3, 4].map((i) => linesOf(s, i)), ['normal/double/2', 'normal/double/2', 'normal/normal/2', 'repeat/repeat/3', 'normal/double/2'])
+  // A final bar line (`light-heavy` without a repeat) is reported as an end bar line (change redesign-score-editor, D5).
+  assert.deepEqual([0, 1, 2, 3, 4].map((i) => linesOf(s, i)), ['normal/double/2', 'normal/double/2', 'normal/normal/2', 'repeat/repeat/3', 'normal/final/2'])
   assert.throws(() => ed.barLinesOf(s, 5), ed.EditError)
   assert.throws(() => ed.barLinesOf(s, -1), ed.EditError)
 })
 
 test('bar lines: every start and end value round-trips through MusicXML', () => {
   for (const start of ['normal', 'repeat'] as const) {
-    for (const end of ['normal', 'double', 'repeat'] as const) {
+    for (const end of ['normal', 'double', 'repeat', 'final'] as const) {
       const s = scoreOf([barOf('C'), barOf('D'), barOf('E')])
       ed.setBarStart(s, 1, start)
       ed.setBarEnd(s, 1, end)
@@ -682,6 +684,31 @@ test('bar lines: an ending stays through every edit', () => {
   assert.equal(endings(s), before)
   assert.equal(endings(roundTrip(s)), before)
   assert.equal(firstLine(s).measures[1]!.rightBarline!.times, undefined, 'a repeat set back from normal starts at 2 again')
+})
+
+test('bar lines: an end bar line is stored as light-heavy without a repeat, reported as final, and keeps an ending (spec "Close the piece")', () => {
+  const s = scoreOf([
+    barOf('C', { left: '<repeat direction="forward"/>' }),
+    barOf('D', { left: '<ending number="1" type="start"/>', right: '<ending number="1" type="stop"/><repeat direction="backward"/>' }),
+    barOf('E', { left: '<ending number="2" type="start"/>', right: '<ending number="2" type="discontinue"/>' }),
+  ])
+  ed.setBarEnd(s, 2, 'final')
+  assert.deepEqual(s.bars[2]!.rightBarline, { style: 'light-heavy', ending: { number: '2', type: 'discontinue' } })
+  assert.equal(linesOf(s, 2), 'normal/final/2')
+  assert.equal(linesOf(roundTrip(s), 2), 'normal/final/2')
+  assert.match(serializeMusicXml(s), /<barline location="right">\s*<bar-style>light-heavy<\/bar-style>\s*<ending number="2" type="discontinue"\/>\s*<\/barline>/)
+  // From an end-repeat to the end bar line: no repeat stays, the first ending stays.
+  ed.setBarEnd(s, 1, 'final')
+  assert.deepEqual(s.bars[1]!.rightBarline, { style: 'light-heavy', ending: { number: '1', type: 'stop' } })
+  assert.equal(linesOf(s, 1), 'normal/final/2')
+  // And back: a plain bar line keeps the ending only.
+  ed.setBarEnd(s, 2, 'normal')
+  assert.deepEqual(s.bars[2]!.rightBarline, { ending: { number: '2', type: 'discontinue' } })
+  // The last bar of a piece read with a plain bar line.
+  const plain = scoreOf([barOf('C'), barOf('D')])
+  ed.setBarEnd(plain, 1, 'final')
+  assert.deepEqual(plain.bars[1]!.rightBarline, { style: 'light-heavy' })
+  assert.equal(linesOf(plain, 1), 'normal/final/2')
 })
 
 test('bar lines: a bar out of range, a count outside 2-8 and a count on a bar without an end-repeat fail without an undo step', () => {
@@ -1486,7 +1513,7 @@ test('bar lines: a rest across the new bar line is split into standard lengths, 
   ])
   assert.equal(voiceView(after, PIANO_LEFT).measures[0]!.items[1]!.kind === 'note' && (voiceView(after, PIANO_LEFT).measures[0]!.items[1] as Note).id, 'l2', 'the first piece keeps the id')
   assert.equal(new Set(after.bars.flatMap((b) => b.parts.flatMap((p) => p.staves.flatMap((st) => st.voices.flat().filter(isNote).map((n) => n.id))))).size, 10, 'every id is unique')
-  assert.deepEqual([...new Set(computeScoreWarnings(after, 'P1', TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar))], ['1', '2'], 'two bars of two beats in 4/4')
+  assert.deepEqual([...new Set(computeScoreWarnings(after, 'P1', TENOR_SAX).filter((w) => w.kind === 'bar-length').map((w) => w.bar))], ['2'], 'two bars of two beats in 4/4: the first is a pickup (D11), the second is flagged')
   // A second voice in the left hand that starts after a hidden half rest: the hidden rest crosses the point.
   const two = piano([{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }, { id: 'r4' }], [{ id: 'l1', octave: 3 }, { id: 'l2', octave: 3 }, { id: 'l3', octave: 3, type: 'half' }])
   const quarter = (id: string): Note => ({ kind: 'note', id, pitch: { step: 'C', octave: 2 }, type: 'quarter', dots: 0, duration: frac(1, 4), slurs: [], tuplets: [] })
@@ -1664,4 +1691,494 @@ test('bar lines: a bar line added before another part\'s multi-measure rest keep
   const inside = edited(s, (sc) => ed.splitBar(sc, 'n53')).after
   assert.deepEqual(runs(inside), [])
   assert.ok(inside.bars.every((b) => b.parts[0]!.multiRest === undefined))
+})
+
+// ---------------------------------------------------------------- a bar always takes a note (change redesign-score-editor, D5)
+
+const QUARTER: ed.DurationChoice = { type: 'quarter', dots: 0, triplet: false }
+const kindsIn = (s: Score, ref: VoiceRef, bar: number): string[] =>
+  voiceView(s, ref).measures[bar]!.items.filter(isNote).map((n) => (n.rest ? (n.measureRest ? 'bar-rest' : `rest:${n.type}`) : `${n.pitch!.step}${n.pitch!.octave}:${n.type}`))
+
+test('a bar always takes a note: empty a bar and fill it again (spec "Empty a bar and fill it again", "Emptied bar is saved")', () => {
+  const session = new EditSession(six())
+  const line = firstVoice(session.score)
+  assert.equal(session.apply((s) => ed.deleteNote(s, 'd')), 'e')
+  assert.equal(session.apply((s) => ed.deleteNote(s, 'e')), 'f')
+  // The last note of the bar goes: a whole-bar rest of the 3/4 bar takes its place, and is what is selected next.
+  const rest = session.apply((s) => ed.deleteNote(s, 'f'))!
+  assert.deepEqual(kindsIn(session.score, line, 1), ['bar-rest'])
+  const held = byId(session.score, rest)
+  assert.deepEqual([held.rest, held.measureRest, held.duration], [true, true, frac(3, 4)])
+  assert.deepEqual(barCheck(session.score), [], 'an emptied bar adds up')
+  // It is saved as a whole-bar rest and plays as a silent bar.
+  const back = roundTrip(session.score)
+  assert.deepEqual(kindsIn(back, line, 1), ['bar-rest'])
+  assert.match(serializeMusicXml(session.score), /<rest measure="yes"\/>/)
+  const timeline = buildTimeline(back, TENOR_SAX)
+  const inBar2 = timeline.events.filter((e) => e.barIndex === 1)
+  assert.deepEqual(inBar2.map((e) => [e.rest, e.pitches.length, e.length]), [[true, 0, frac(3)]], 'bar 2 is three silent beats')
+  // Deleting the whole-bar rest leaves it there.
+  assert.equal(session.apply((s) => ed.deleteNote(s, rest)), rest)
+  assert.deepEqual(kindsIn(session.score, line, 1), ['bar-rest'])
+  // Fill it again: a quarter note in the slot replaces the rest, and the next one goes after it.
+  const first = session.apply((s) => ed.appendNote(s, line, 1, { ...QUARTER, pitch: { step: 'E', octave: 5 } }))
+  assert.deepEqual(kindsIn(session.score, line, 1), ['E5:quarter'])
+  assert.deepEqual(barCheck(session.score), ['bar-length@2'], 'the bar holds one beat of three')
+  const second = session.apply((s) => ed.appendNote(s, line, 1, { type: 'half', dots: 0, triplet: false }))
+  assert.deepEqual(kindsIn(session.score, line, 1), ['E5:quarter', 'rest:half'])
+  assert.deepEqual(barCheck(session.score), [])
+  assert.equal(new Set([first, second, 'a', 'b', 'c']).size, 5, 'fresh ids')
+  // Each step is one undo step.
+  session.undo()
+  session.undo()
+  assert.deepEqual(kindsIn(session.score, line, 1), ['bar-rest'])
+})
+
+test('a bar always takes a note: the first note replaces the whole-bar rest, with a hairpin on it; a note takes the key\'s alter', () => {
+  // Bar 5 of the melody is a whole-bar rest as read.
+  const s = melodyPiano()
+  assert.deepEqual(kindsIn(s, MELODY, 4), ['bar-rest'])
+  const restId = idsIn(s, MELODY, 4)[0]!
+  s.bars[4]!.parts[0]!.staves[0]!.voices[0]!.unshift({ kind: 'wedge', type: 'crescendo', start: restId, stop: restId })
+  const { before, after } = edited(s, (sc) => ed.appendNote(sc, MELODY, 4, { ...QUARTER, triplet: false, pitch: { step: 'G', octave: 4 } }))
+  assert.deepEqual(kindsIn(after, MELODY, 4), ['G4:quarter'])
+  assert.deepEqual(allWedges(after), allWedges(before).filter(([, start]) => start !== restId), 'the hairpin on the rest went with it')
+  for (const ref of voices(before)) if (!sameVoice(ref, MELODY)) assert.equal(voiceJson(after, ref), voiceJson(before, ref))
+  // The left hand's whole-bar rest in bar 6 takes a note too.
+  const left = edited(melodyPiano(), (sc) => ed.appendNote(sc, LEFT_HAND, 5, { type: 'whole', dots: 0, triplet: false, pitch: { step: 'G', octave: 2 } })).after
+  assert.deepEqual(kindsIn(left, LEFT_HAND, 5), ['G2:whole'])
+  // A note added in G major is F sharp without an accidental of its own; a triplet note is bracketed.
+  const g = score([[{ id: 'a' }]], { fifths: 1 })
+  const f = ed.appendNote(g, firstVoice(g), 0, { ...QUARTER, pitch: { step: 'F', octave: 5 } })
+  assert.equal(name(byId(g, f)), 'F#5')
+  assert.equal(byId(g, f).accidental, undefined)
+  const t = ['x', 'y', 'z'].map(() => ed.appendNote(g, firstVoice(g), 0, { ...QUARTER, triplet: true, pitch: { step: 'G', octave: 4 } }))
+  assert.deepEqual(t.map((id) => byId(g, id).tuplets.map((m) => m.type).join()), ['start', '', 'stop'])
+  // A bar or a voice that does not exist is refused, without an undo step.
+  failsWithoutUndoStep(six(), (sc) => ed.appendNote(sc, firstVoice(sc), 2, QUARTER))
+  failsWithoutUndoStep(six(), (sc) => ed.appendNote(sc, { part: 'P1', staff: 0, voice: 1 }, 0, QUARTER))
+})
+
+test('a bar always takes a note: an append in voice 2 leaves voice 1 alone, and an emptied voice 2 stays empty (spec "A second voice stays as it is")', () => {
+  // Bar 3 of the left hand has a second voice: a hidden half rest, then C2 (n44).
+  const { before, after } = edited(melodyPiano(), (s) => ed.appendNote(s, LEFT_HAND_2, 2, { ...QUARTER, pitch: { step: 'E', octave: 2 } }))
+  assert.deepEqual(kindsIn(after, LEFT_HAND_2, 2).slice(-2), ['C2:half', 'E2:quarter'])
+  for (const ref of voices(before)) if (!sameVoice(ref, LEFT_HAND_2)) assert.equal(voiceJson(after, ref), voiceJson(before, ref), `${JSON.stringify(ref)} is unchanged`)
+  // The second voice loses its only note: no rest is added to it, and it is not flagged.
+  const emptied = edited(melodyPiano(), (s) => ed.deleteNote(s, 'n44')).after
+  assert.deepEqual(idsIn(emptied, LEFT_HAND_2, 2), [])
+  assert.deepEqual(computeScoreWarnings(emptied, 'P1', TENOR_SAX), [])
+  // The left hand's first voice in bar 3 loses its three notes: a whole-bar rest of 4/4.
+  const s = melodyPiano()
+  const ids = idsIn(s, LEFT_HAND, 2)
+  for (const id of ids) ed.deleteNote(s, id)
+  assert.deepEqual(kindsIn(s, LEFT_HAND, 2), ['bar-rest'])
+  assert.deepEqual(voiceView(s, LEFT_HAND).measures[2]!.items.filter(isNote).map((n) => n.duration), [frac(1)])
+})
+
+// ---------------------------------------------------------------- loudness marks, breath marks and caesuras (change redesign-score-editor, D5)
+
+/** Every dynamic of one staff of a part in one bar (from 0), as "voice:mark", in voice order. */
+const dynamicsIn = (s: Score, part: string, staff: number, bar: number): string[] =>
+  voices(s)
+    .filter((r) => r.part === part && r.staff === staff)
+    .flatMap((r) => voiceView(s, r).measures[bar]!.items.flatMap((i) => (i.kind === 'dynamic' ? [`${r.voice}:${i.mark}`] : [])))
+
+test('loudness marks: add, change and remove one on a note, in the note\'s staff (spec "Loudness marks")', () => {
+  // The first note of bar 5 of the left hand (n56): a p goes directly before it, in the left hand only.
+  const added = edited(melodyPiano(), (s) => ed.setDynamic(s, 'n56', 'p'))
+  assert.deepEqual(dynamicsIn(added.after, 'P2', 1, 4), ['0:p'])
+  assert.deepEqual(dynamicsIn(added.after, 'P2', 0, 4), [], 'the right hand has none')
+  const items = voiceView(added.after, LEFT_HAND).measures[4]!.items
+  assert.equal(items[items.findIndex((i) => isNote(i) && i.id === 'n56') - 1]!.kind, 'dynamic', 'directly before the note')
+  for (const ref of voices(added.before)) if (!sameVoice(ref, LEFT_HAND)) assert.equal(voiceJson(added.after, ref), voiceJson(added.before, ref))
+  const id = ed.dynamicOf(added.after, 'n56')!.id
+  assert.deepEqual(ed.dynamicOf(added.after, 'n56'), { kind: 'dynamic', id, mark: 'p' })
+  // Change it: the note has an f and no p, and the mark keeps its id (a selection of it stays).
+  const changed = edited(added.after, (s) => ed.setDynamic(s, 'n56', 'f')).after
+  assert.deepEqual(dynamicsIn(changed, 'P2', 1, 4), ['0:f'])
+  assert.equal(ed.dynamicOf(changed, 'n56')!.id, id)
+  // Remove it: none is left, and the next note of the bar has none either.
+  const removed = edited(changed, (s) => ed.setDynamic(s, 'n56', undefined)).after
+  assert.deepEqual(dynamicsIn(removed, 'P2', 1, 4), [])
+  assert.equal(ed.dynamicOf(removed, 'n56'), undefined)
+  assert.deepEqual(removed, melodyPiano(), 'the score is as it was')
+  // The mf read before the first chord of the right hand is that chord's mark, from any of its notes; it is changed in place.
+  const s = melodyPiano()
+  const chord = idsIn(s, RIGHT_HAND, 0)
+  assert.equal(ed.dynamicOf(s, chord[1]!.slice(1))!.mark, 'mf')
+  ed.setDynamic(s, chord[1]!.slice(1), 'pp')
+  assert.deepEqual(dynamicsIn(s, 'P2', 0, 0), ['0:pp'])
+  // A mark goes before a hairpin that starts on the note.
+  const w = six()
+  ed.addWedge(w, 'crescendo', 'b', 'c')
+  ed.setDynamic(w, 'b', 'mp')
+  assert.deepEqual(firstLine(w).measures[0]!.items.map((i) => (isNote(i) ? i.id : i.kind)), ['a', 'dynamic', 'wedge', 'b', 'c'])
+  // A rest takes none, and there is nothing to remove from a note without one.
+  failsWithoutUndoStep(score([[{ id: 'a' }, { id: 'r', rest: true }]]), (sc) => ed.setDynamic(sc, 'r', 'p'))
+  failsWithoutUndoStep(six(), (sc) => ed.setDynamic(sc, 'a', undefined))
+  failsWithoutUndoStep(six(), (sc) => ed.setDynamic(sc, 'missing', 'p'))
+})
+
+test('loudness marks: a mark written in another voice of the staff at the note\'s start is the note\'s', () => {
+  // Bar 3 of the left hand: voice 2 starts with C2 (n44) at beat 3, where voice 1 has its third note.
+  const s = melodyPiano()
+  ed.setDynamic(s, 'n44', 'p')
+  assert.deepEqual(dynamicsIn(s, 'P2', 1, 2), ['1:p'])
+  // Written and read again, the p stands in voice 1 at that start: it is still n44's, and changing it keeps one mark.
+  const back = roundTrip(s)
+  assert.deepEqual(dynamicsIn(back, 'P2', 1, 2), ['0:p'])
+  assert.equal(ed.dynamicOf(back, 'n44')!.mark, 'p')
+  ed.setDynamic(back, 'n44', 'ff')
+  assert.deepEqual(dynamicsIn(back, 'P2', 1, 2), ['0:ff'])
+})
+
+test('breath marks and caesuras: on and off, after their note; a rest takes neither (spec "Add a missed breath mark")', () => {
+  for (const [toggle, mark] of [[ed.toggleBreath, 'breath'], [ed.toggleCaesura, 'caesura']] as const) {
+    const on = throughSession(six(), (s) => toggle(s, 'c'))
+    assert.equal(byId(on.after, 'c')[mark], true, mark)
+    const off = throughSession(on.after, (s) => toggle(s, 'c'))
+    assert.equal(byId(off.after, 'c')[mark], undefined, mark)
+    assert.deepEqual(off.after, six())
+    failsWithoutUndoStep(score([[{ id: 'a' }, { id: 'r', rest: true }]]), (s) => toggle(s, 'r'))
+  }
+})
+
+// ---------------------------------------------------------------- first and second endings (change redesign-score-editor, D7)
+
+/** The ending marks of every bar: "left|right", each "-" or number and type, with ":||" for an end-repeat. */
+const endingMarks = (s: Score): string[] =>
+  s.bars.map((b) => {
+    const mark = (e: { number: string; type: string } | undefined): string => (e ? `${e.number}${e.type}` : '-')
+    return `${mark(b.leftBarline?.ending)}|${mark(b.rightBarline?.ending)}${b.rightBarline?.repeat === 'backward' ? ':||' : ''}`
+  })
+const refusedBar = (s: Score, edit: (s: Score) => unknown, reason: ed.BarEditRefusal): void => {
+  const session = new EditSession(s)
+  const before = serializeMusicXml(session.score)
+  let error: unknown
+  try {
+    session.apply(edit)
+  } catch (e) {
+    error = e
+  }
+  assert.ok(error instanceof ed.BarEditError, `refused with a BarEditError, not ${String(error)}`)
+  assert.equal(error.reason, reason)
+  assert.equal(session.canUndo, false)
+  assert.equal(serializeMusicXml(session.score), before, 'nothing changed')
+}
+/** Six one-note bars; bars 1 to 4 are repeated. */
+const repeated = (): Score => scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F', { right: '<repeat direction="backward"/>' }), barOf('G'), barOf('A')])
+
+test('endings: add a missed first and second ending (spec "Add a missed first and second ending")', () => {
+  const { after } = throughSession(repeated(), (s) => {
+    ed.setEnding(s, 3, 1)
+    ed.setEnding(s, 4, 2)
+  })
+  assert.deepEqual(endingMarks(after), ['-|-', '-|-', '-|-', '1start|1stop:||', '2start|2discontinue', '-|-'])
+  assert.deepEqual(endingMarks(roundTrip(after)), endingMarks(after))
+})
+
+test('endings: two bars in one ending, marked in either order (spec "Two bars in one ending")', () => {
+  for (const order of [[2, 3], [3, 2]]) {
+    const s = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F'), barOf('G'), barOf('A')])
+    for (const bar of order) ed.setEnding(s, bar, 1)
+    // One bracket "1." over bars 3 and 4, with the end-repeat on its last bar only.
+    assert.deepEqual(endingMarks(s), ['-|-', '-|-', '1start|-', '-|1stop:||', '-|-', '-|-'], `marked ${order.join(', ')}`)
+  }
+  // A count of passes on the end-repeat moves with it when the first ending is made longer.
+  const s = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F'), barOf('G')])
+  ed.setEnding(s, 2, 1)
+  ed.setRepeatTimes(s, 2, 3)
+  ed.setEnding(s, 3, 1)
+  assert.deepEqual(endingMarks(s), ['-|-', '-|-', '1start|-', '-|1stop:||', '-|-'])
+  assert.equal(s.bars[3]!.rightBarline!.times, 3)
+  // A bar taken out of the middle of an ending makes it two.
+  ed.setEnding(s, 1, 1)
+  ed.setEnding(s, 2, undefined)
+  assert.deepEqual(endingMarks(s), ['-|-', '1start|1stop', '-|-', '1start|1stop:||', '-|-'])
+  // A first ending made shorter at its end takes its end-repeat back: bar 5 marked 1st and then 2nd ends as if marked 2nd at once.
+  const direct = repeated()
+  ed.setEnding(direct, 3, 1)
+  ed.setEnding(direct, 4, 2)
+  const changed = repeated()
+  ed.setEnding(changed, 3, 1)
+  ed.setEnding(changed, 4, 1)
+  assert.deepEqual(endingMarks(changed), ['-|-', '-|-', '-|-', '1start|-', '-|1stop:||', '-|-'])
+  ed.setEnding(changed, 4, 2)
+  assert.deepEqual(endingMarks(changed), endingMarks(direct))
+  ed.setEnding(changed, 4, 1)
+  ed.setEnding(changed, 4, undefined)
+  assert.deepEqual(endingMarks(changed), ['-|-', '-|-', '-|-', '1start|1stop:||', '-|-', '-|-'])
+})
+
+test('endings: remove a misread ending; one with other numbers can only be removed (spec "Remove a misread ending")', () => {
+  const s = scoreOf([
+    barOf('C'),
+    barOf('D'),
+    barOf('E', { left: '<ending number="1, 2" type="start"/>' }),
+    barOf('F', { right: '<ending number="1, 2" type="stop"/><repeat direction="backward" times="3"/>' }),
+    barOf('G', { left: '<ending number="3" type="start"/>', right: '<ending number="3" type="discontinue"/>' }),
+    barOf('A'),
+    barOf('B'),
+    barOf('C', { left: '<ending number="1" type="start"/>', right: '<ending number="1" type="stop"/>' }),
+    barOf('D'),
+  ])
+  const { after } = throughSession(s, (sc) => ed.setEnding(sc, 7, undefined))
+  assert.equal(endingMarks(after)[7], '-|-')
+  assert.deepEqual(endingMarks(after).slice(0, 7), endingMarks(s).slice(0, 7), 'the other endings are as they were read')
+  // The "1, 2" ending is shown with its numbers and can only be removed, bar by bar.
+  refusedBar(s, (sc) => ed.setEnding(sc, 2, 1), 'otherEnding')
+  refusedBar(s, (sc) => ed.setEnding(sc, 3, 2), 'otherEnding')
+  const off = throughSession(s, (sc) => ed.setEnding(sc, 3, undefined)).after
+  assert.deepEqual(endingMarks(off).slice(2, 5), ['1, 2start|1, 2stop', '-|-:||', '3start|3discontinue'])
+  // Nothing to change: no undo step's worth of change.
+  const same = structuredClone(s)
+  ed.setEnding(same, 0, undefined)
+  ed.setEnding(same, 7, 1)
+  assert.deepEqual(endingMarks(same).slice(0, 7), endingMarks(s).slice(0, 7))
+})
+
+test('endings: the end-repeat comes along, and one undo takes both away (spec "The end-repeat comes along")', () => {
+  const s = scoreOf([barOf('C'), barOf('D'), barOf('E'), barOf('F'), barOf('G')])
+  const session = new EditSession(s)
+  session.apply((sc) => ed.setEnding(sc, 3, 1))
+  assert.deepEqual(endingMarks(session.score), ['-|-', '-|-', '-|-', '1start|1stop:||', '-|-'])
+  assert.equal(ed.barLinesOf(session.score, 3).end, 'repeat')
+  session.undo()
+  assert.deepEqual(session.score, s)
+  // A second ending is not given one, and a first ending that has one keeps it as it is.
+  const t = repeated()
+  ed.setRepeatTimes(t, 3, 4)
+  ed.setEnding(t, 3, 1)
+  ed.setEnding(t, 4, 2)
+  assert.equal(t.bars[3]!.rightBarline!.times, 4)
+  assert.equal(t.bars[4]!.rightBarline!.repeat, undefined)
+})
+
+test('endings: a second ending out of place is refused; after a first or a second ending it is not (spec "A second ending out of place")', () => {
+  refusedBar(repeated(), (s) => ed.setEnding(s, 5, 2), 'secondEnding')
+  refusedBar(repeated(), (s) => ed.setEnding(s, 0, 2), 'secondEnding')
+  const s = repeated()
+  ed.setEnding(s, 3, 1)
+  ed.setEnding(s, 4, 2)
+  ed.setEnding(s, 5, 2)
+  assert.deepEqual(endingMarks(s), ['-|-', '-|-', '-|-', '1start|1stop:||', '2start|-', '-|2discontinue'])
+  // An ending "1, 2" before it counts as a first ending.
+  const t = scoreOf([barOf('C', { left: '<ending number="1, 2" type="start"/>', right: '<ending number="1, 2" type="stop"/><repeat direction="backward"/>' }), barOf('D')])
+  ed.setEnding(t, 1, 2)
+  assert.deepEqual(endingMarks(t), ['1, 2start|1, 2stop:||', '2start|2discontinue'])
+  failsWithoutUndoStep(repeated(), (sc) => ed.setEnding(sc, 6, 1))
+})
+
+// ---------------------------------------------------------------- add, delete and copy a bar (change redesign-score-editor, D5, D8)
+
+/** Per bar: in every part, staff and voice, the notes as ids, or "rest" for a whole-bar rest; voices with "/", staves with "|", parts with " # ". */
+const barShape = (s: Score): string[] =>
+  s.bars.map((b) => b.parts.map((p) => p.staves.map((st) => st.voices.map((v) => v.filter(isNote).map((n) => (n.measureRest ? 'rest' : n.hidden ? 'H' : n.id)).join(',')).join('/')).join('|')).join(' # '))
+
+test('add a bar: after bar 6, in every part, empty, and the bars after it renumbered (spec "A missed bar")', () => {
+  const { before, after } = throughSession(melodyPiano(), (s) => {
+    assert.equal(ed.addBar(s, 5, 'after'), 6, 'the new bar is bar 7')
+  })
+  assert.equal(after.bars.length, 9)
+  assert.deepEqual(barShape(after).slice(0, 6), barShape(before).slice(0, 6))
+  assert.deepEqual(barShape(after).slice(7), barShape(before).slice(6), 'the old bar 7 is now bar 8')
+  assert.deepEqual(barShape(after)[6], 'rest # rest|rest/', 'a whole-bar rest on each staff; the second voice of the left hand is empty')
+  assert.deepEqual(numbers(after), ['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+  // The rests are of the 4/4 bar, the bar adds up, and the score is saved and read as it is.
+  const added = after.bars[6]!
+  assert.deepEqual(voiceView(after, MELODY).measures[6]!.items.filter(isNote).map((n) => n.duration), [frac(1)])
+  assert.deepEqual(computeScoreWarnings(after, 'P1', TENOR_SAX), [])
+  assert.deepEqual(barShape(roundTrip(after)).map((b) => b.replace(/n\d+|e\d+/g, 'x')), barShape(after).map((b) => b.replace(/n\d+|e\d+/g, 'x')))
+  // What it carries for the bar numbers (D8): an empty stretch at the end of bar 6's, the side, and an id.
+  assert.deepEqual(froms(after), [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 6], [6, 7], [7, 8]])
+  assert.deepEqual(added.added?.side, 'after')
+  assert.match(added.added!.id, /\S/)
+  assert.equal(after.bars.filter((b) => b.added).length, 1)
+  assert.deepEqual(after.bars[6]!.leftBarline, undefined)
+  assert.equal(after.bars[6]!.newSystem, undefined)
+})
+
+test('add a bar: before bar 1 it takes over the time, the keys and the clefs; before a bar that starts a line it starts the line (spec "A missed first bar")', () => {
+  const { before, after } = throughSession(melodyPiano(), (s) => {
+    assert.equal(ed.addBar(s, 0, 'before'), 0)
+  })
+  assert.deepEqual(barShape(after).slice(1), barShape(before))
+  assert.deepEqual(numbers(after), ['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+  const [first, second] = after.bars
+  assert.deepEqual(first!.time, before.bars[0]!.time)
+  assert.equal(second!.time, undefined)
+  assert.deepEqual(first!.parts.map((p) => [p.key, p.staves.map((st) => st.clef)]), before.bars[0]!.parts.map((p) => [p.key, p.staves.map((st) => st.clef)]))
+  assert.deepEqual(second!.parts.map((p) => [p.key, p.staves.map((st) => st.clef)]), [[undefined, [undefined]], [undefined, [undefined, undefined]]])
+  assert.equal(second!.leftBarline?.repeat, 'forward', 'the start-repeat stays on the old bar 1')
+  assert.deepEqual([first!.from, first!.added?.side], [[0, 0], 'before'])
+  // The pitches of the left hand still read in the bass clef, and nothing is flagged.
+  assert.deepEqual(pitches(after, 1).slice(0, 2), pitches(before, 0).slice(0, 2))
+  assert.deepEqual(computeScoreWarnings(after, 'P1', TENOR_SAX), [])
+  // Bar 5 starts a line: a bar added before it starts the line instead.
+  const line = edited(melodyPiano(), (s) => ed.addBar(s, 4, 'before')).after
+  assert.deepEqual(line.bars.map((b) => !!b.newSystem).indexOf(true), 4)
+  assert.equal(line.bars[5]!.newSystem, undefined)
+})
+
+test('add a bar: next to an added bar it belongs to the same bar of the piece; ids are never reused; split and join keep them apart', () => {
+  const session = new EditSession(six())
+  session.apply((s) => ed.addBar(s, 0, 'after'))
+  const first = session.score.bars[1]!.added!.id
+  session.apply((s) => ed.addBar(s, 1, 'before'))
+  session.apply((s) => ed.addBar(s, 1, 'after'))
+  // Three added bars after bar 1, all with the empty stretch at its end and the side it was added on.
+  assert.deepEqual(froms(session.score), [[0, 1], [1, 1], [1, 1], [1, 1], [1, 2]])
+  assert.deepEqual(session.score.bars.map((b) => b.added?.side), [undefined, 'after', 'after', 'after', undefined])
+  // Undo, then add again: the new bar does not get an id an earlier one had.
+  const seen = new Set(session.score.bars.flatMap((b) => (b.added ? [b.added.id] : [])))
+  assert.equal(seen.size, 3)
+  session.undo()
+  session.apply((s) => ed.addBar(s, 3, 'before'))
+  assert.ok(!seen.has(session.score.bars[3]!.added!.id), 'a fresh id after undo')
+  assert.ok(session.score.bars.some((b) => b.added?.id === first))
+  // An added bar that is filled and split: its second half is an added bar with an id of its own.
+  const s = six()
+  ed.addBar(s, 1, 'after')
+  const place = firstVoice(s)
+  const rest = idsIn(s, place, 2)[0]!
+  ed.deleteNote(s, rest)
+  ed.appendNote(s, place, 2, { ...QUARTER, pitch: { step: 'C', octave: 5 } })
+  ed.splitBar(s, ed.appendNote(s, place, 2, { ...QUARTER, pitch: { step: 'D', octave: 5 } }))
+  assert.deepEqual([s.bars[2]!.from, s.bars[3]!.from], [[2, 2], [2, 2]])
+  assert.ok(s.bars[2]!.added && s.bars[3]!.added)
+  assert.notEqual(s.bars[2]!.added!.id, s.bars[3]!.added!.id)
+  // Joined again they are one added bar; joined with a bar of the piece, the bar holds music of the piece.
+  ed.joinBars(s, 2)
+  assert.ok(s.bars[2]!.added)
+  ed.joinBars(s, 1)
+  assert.deepEqual([s.bars[1]!.from, s.bars[1]!.added], [[1, 2], undefined])
+})
+
+test('delete a bar: in every part, the bars after it renumbered; undo brings it back (spec "A bar that is not in the book", "Undo a deleted bar")', () => {
+  const { before, after } = throughSession(melodyPiano(), (s) => ed.deleteBar(s, 3))
+  assert.equal(after.bars.length, 7)
+  assert.deepEqual(barShape(after), [...barShape(before).slice(0, 3), ...barShape(before).slice(4)])
+  assert.deepEqual(numbers(after), ['1', '2', '3', '4', '5', '6', '7'])
+  // Its end-repeat went with it; the bar is in no bar of the edited score (`from`, D8).
+  assert.deepEqual(after.bars.map((b) => b.rightBarline?.repeat), [undefined, undefined, undefined, undefined, undefined, undefined, undefined])
+  assert.deepEqual(froms(after), [[0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7], [7, 8]])
+  // The only bar of a piece is not deleted.
+  refusedBar(score([[{ id: 'a' }]]), (s) => ed.deleteBar(s, 0), 'onlyBar')
+  failsWithoutUndoStep(six(), (s) => ed.deleteBar(s, 2))
+})
+
+test('delete a bar: a slur, a tie and a hairpin with an end in it go; one that only passes it stays (spec "Delete under a slur")', () => {
+  // Three 3/4 bars: C5 D5 E5 | E5 G5 A5 | B5 C6 D6; a slur from D5 into bar 2, a tie from E5 to E5, a hairpin from bar 2 into bar 3.
+  const s = score([
+    [{ id: 'a', step: 'C', octave: 5 }, { id: 'b', step: 'D', octave: 5 }, { id: 'c', step: 'E', octave: 5 }],
+    [{ id: 'd', step: 'E', octave: 5 }, { id: 'e', step: 'G', octave: 5 }, { id: 'f', step: 'A', octave: 5 }],
+    [{ id: 'g', step: 'B', octave: 5 }, { id: 'h', step: 'C', octave: 6 }, { id: 'i', step: 'D', octave: 6 }],
+  ])
+  ed.addSlur(s, 'b', 'e')
+  ed.addTie(s, 'c', 'd')
+  ed.addWedge(s, 'crescendo', 'f', 'h')
+  ed.addSlur(s, 'a', 'i')
+  const after = edited(s, (sc) => ed.deleteBar(sc, 1)).after
+  assert.deepEqual(notes(after).map((n) => n.id), ['a', 'b', 'c', 'g', 'h', 'i'], 'bar 1 keeps its notes')
+  assert.deepEqual(slurs(after), [['a', 'start', 2], ['i', 'stop', 2]], 'the slur over the whole piece stays')
+  assert.equal(byId(after, 'c').tieStart, undefined)
+  assert.deepEqual(allWedges(after), [])
+  assert.deepEqual(roundTrip(after).bars.length, 2)
+})
+
+test('delete a bar: the first bar hands on the time, key, clef and tempo; an ending it was in ends or starts at its neighbour', () => {
+  const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c' }], [{ id: 'd' }, { id: 'e' }, { id: 'f' }]], { fifths: 2, direction: '<direction><direction-type><words>Moderato</words></direction-type><sound tempo="108"/></direction>' })
+  ed.setTempoMarking(s, { words: 'Moderato', perMinute: 108 })
+  const { after } = throughSession(s, (sc) => ed.deleteBar(sc, 0))
+  assert.deepEqual(after.bars[0]!.time, { beats: 3, beatType: 4 })
+  assert.deepEqual(after.bars[0]!.parts[0]!.key, { fifths: 2 })
+  assert.equal(ed.firstTempoMarking(after)?.perMinute, 108)
+  assert.equal(name(byId(after, 'd')), 'G4')
+  assert.deepEqual(recheck(after), [])
+  // A two-bar first ending loses its first bar: the ending starts at the other one. A bar after the ending is deleted: no change to it.
+  const t = scoreOf([
+    barOf('C'),
+    barOf('D', { left: '<ending number="1" type="start"/>' }),
+    barOf('E', { right: '<ending number="1" type="stop"/><repeat direction="backward"/>' }),
+    barOf('F', { left: '<ending number="2" type="start"/>' }),
+    barOf('G', { right: '<ending number="2" type="discontinue"/>' }),
+    barOf('A'),
+  ])
+  const first = edited(t, (sc) => ed.deleteBar(sc, 1)).after
+  assert.deepEqual(endingMarks(first), ['-|-', '1start|1stop:||', '2start|-', '-|2discontinue', '-|-'])
+  // The second ending loses its last bar: it ends, as it did, at the bar before.
+  const second = edited(t, (sc) => ed.deleteBar(sc, 4)).after
+  assert.deepEqual(endingMarks(second), ['-|-', '1start|-', '-|1stop:||', '2start|2discontinue', '-|-'])
+})
+
+test('same as the bar before: a copy with fresh ids, its marks and its inner slurs; bar lines, dynamics and the other part stay (spec "Same as the bar before")', () => {
+  // Bar 6 of the melody: E5 D5 C5 B4 with a slur over the first three; bar 7: C5 D5 (halves), with a p and an end-repeat.
+  const s = melodyPiano()
+  ed.toggleStaccato(s, 'n16')
+  ed.addWedge(s, 'diminuendo', 'n14', 'n16')
+  ed.setDynamic(s, 'n17', 'p')
+  ed.setBarEnd(s, 6, 'repeat')
+  ed.addSlur(s, 'n16', 'n17') // from bar 6 into bar 7: not inside bar 6, so not copied
+  const { before, after } = edited(s, (sc) => ed.copyBarBefore(sc, MELODY, 6))
+  const copied = voiceView(after, MELODY).measures[6]!.items.filter(isNote)
+  const source = voiceView(before, MELODY).measures[5]!.items.filter(isNote)
+  assert.deepEqual(copied.map((n) => `${n.pitch!.step}${n.pitch!.octave}:${n.type}`), source.map((n) => `${n.pitch!.step}${n.pitch!.octave}:${n.type}`))
+  const ids = copied.map((n) => n.id)
+  assert.equal(new Set([...ids, ...[...noteIndex(before).keys()]]).size, noteIndex(before).size + 4, 'fresh ids, unique in the score')
+  assert.equal(copied[3]!.staccato, true, 'its marks')
+  assert.deepEqual(copied.map((n) => n.slurs.map((m) => m.type).join()), ['start', 'continue', 'stop', ''], 'its inner slur, not the one into the next bar')
+  assert.deepEqual(allWedges(after).filter(([, start]) => ids.includes(start)), [['diminuendo', ids[1]!, ids[3]!]])
+  // The slur from the old bar 7 is gone at both ends; the bar keeps its p, before its first note, and its end-repeat.
+  assert.deepEqual(byId(after, 'n16').slurs, [])
+  assert.deepEqual(voiceView(after, MELODY).measures[6]!.items.map((i) => (isNote(i) ? 'note' : i.kind)), ['dynamic', 'note', 'wedge', 'note', 'note', 'note'])
+  assert.equal(ed.dynamicOf(after, ids[0]!)?.mark, 'p')
+  assert.equal(ed.barLinesOf(after, 6).end, 'repeat')
+  // The piano part is unchanged.
+  for (const ref of voices(before)) if (ref.part === 'P2') assert.equal(voiceJson(after, ref), voiceJson(before, ref))
+  assert.deepEqual(computeScoreWarnings(after, 'P1', TENOR_SAX), [])
+  // The first bar has no bar before it.
+  refusedBar(melodyPiano(), (sc) => ed.copyBarBefore(sc, MELODY, 0), 'firstBar')
+})
+
+test('same as the bar before: an empty bar takes four staccato eighth notes and a half note (spec "Same as the bar before")', () => {
+  const s = score([[{ id: 'a', type: 'whole' }], [{ id: 'b', type: 'eighth' }, { id: 'c', type: 'eighth' }, { id: 'd', type: 'eighth' }, { id: 'e', type: 'eighth' }, { id: 'f', type: 'half', step: 'C', octave: 5 }], [{ id: 'g', type: 'whole' }]], { beats: 4 })
+  for (const id of ['b', 'c', 'd', 'e']) ed.toggleStaccato(s, id)
+  ed.deleteNote(s, 'g')
+  ed.addSlur(s, 'b', 'e')
+  const { after } = throughSession(s, (sc) => ed.copyBarBefore(sc, firstVoice(sc), 2))
+  const bar3 = firstLine(after).measures[2]!.items.filter(isNote)
+  assert.deepEqual(bar3.map((n) => `${n.type}${n.staccato ? '.' : ''}`), ['eighth.', 'eighth.', 'eighth.', 'eighth.', 'half'])
+  assert.deepEqual(bar3.map((n) => n.slurs.map((m) => `${m.type}${m.number}`).join()), ['start1', '', '', 'stop1', ''])
+  assert.deepEqual(recheck(after), [])
+  // On a voice view, the voice is copied the same way.
+  const t = structuredClone(s)
+  ed.copyBarBefore(firstLine(t), firstVoice(t), 2)
+  assert.deepEqual(firstLine(t).measures[2]!.items.filter(isNote).map((n) => n.type), ['eighth', 'eighth', 'eighth', 'eighth', 'half'])
+})
+
+test('a bar always takes a note: a first voice with only hidden rests takes the note in their place, and is not left with them alone', () => {
+  // The reader fills an empty first voice with a hidden rest as long as the bar (a bar with notes in voice 2 only).
+  const hiddenRest = (id: string, duration: ReturnType<typeof frac>): Note => ({ kind: 'note', id, rest: true, hidden: true, dots: 0, duration, slurs: [], tuplets: [] })
+  const s = six()
+  s.bars[1]!.parts[0]!.staves[0]!.voices[0]!.splice(0, 3, hiddenRest('h', frac(3, 4)))
+  const id = ed.appendNote(s, firstVoice(s), 1, { ...QUARTER, pitch: { step: 'A', octave: 4 } })
+  assert.deepEqual(idsIn(s, firstVoice(s), 1), [id])
+  assert.equal(firstLine(s).measures[1]!.items.filter(isNote).length, 1, 'the hidden rest made way')
+  // A first voice of a hidden half rest and a half note loses the note: a whole-bar rest, not a hidden rest alone.
+  const t = six()
+  const half: Note = { kind: 'note', id: 'x', pitch: { step: 'C', octave: 5 }, type: 'quarter', dots: 0, duration: frac(1, 4), slurs: [], tuplets: [] }
+  t.bars[1]!.parts[0]!.staves[0]!.voices[0]!.splice(0, 3, hiddenRest('h', frac(1, 2)), half)
+  const rest = ed.deleteNote(t, 'x')!
+  assert.deepEqual(firstLine(t).measures[1]!.items.filter(isNote).map((n) => [n.id, n.hidden, n.measureRest, n.duration]), [[rest, undefined, true, frac(3, 4)]])
+})
+
+test('join: an added bar joined with a bar of the piece holds that bar\'s stretch only, not one of a deleted bar between (D8)', () => {
+  const s = score([[{ id: 'a' }, { id: 'b' }, { id: 'c' }], [{ id: 'd' }, { id: 'e' }, { id: 'f' }], [{ id: 'g' }, { id: 'h' }, { id: 'i' }]])
+  ed.addBar(s, 0, 'after')
+  ed.deleteBar(s, 2)
+  assert.deepEqual(froms(s), [[0, 1], [1, 1], [2, 3]])
+  ed.joinBars(s, 1)
+  assert.deepEqual(froms(s), [[0, 1], [2, 3]])
+  assert.equal(s.bars[1]!.added, undefined)
 })

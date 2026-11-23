@@ -509,15 +509,20 @@ export class Library {
    * piece.json names another one, the call rejects with `conflict` and writes nothing.
    *
    * Without [barMap] the bars of the piece do not change, and piece.json changes only in the score
-   * file it names. With one (change edit-parts, D10: bar lines were added or removed), [barMap] says
-   * for each bar of the stored piece the bars of the new score that hold it, and the change carries
-   * the numbers along: the piece's `bars`; each page's and staff box's range (its first bar is the
-   * first new bar of its first old bar, its last bar the last new bar of its last old bar); and
-   * practice.json (the bar is the first new bar of the old one, the loop's start the first new bar of
-   * its start, its end the last new bar of its end). The repairs keep their numbers: they record what
-   * reading changed. A map that does not fit the piece, or pages that would no longer follow each
-   * other, are `invalid` and nothing is written. practice.json is written with the new score, before
-   * piece.json commits the change, and put back as it was when the change fails where the store can
+   * file it names. With one (change edit-parts D10, change redesign-score-editor D8: bar lines or bars
+   * were added or removed), [barMap] says for each bar of the stored piece the bars of the new score
+   * that hold it (none for a deleted bar), and which bars were added next to which, and the change
+   * carries the numbers along. Every new bar belongs to one old bar: the first one it holds, or for an
+   * added bar the one it was added next to, never one before the bar the new bar before it belongs to
+   * (`barOwners`). Each page and each staff box (a line of the photo) then holds the new bars that
+   * belong to one of its old bars, so the pages follow each other and the lines do not overlap; a
+   * line left without bars is dropped. practice.json follows: the bar to the first new bar of the old
+   * one, or for a deleted bar to the first new bar that belongs to it or to a bar after it, else the
+   * last bar; the loop from its first surviving bar's first new bar to its last surviving bar's last
+   * new bar, cleared (null) when none of its bars survives. The repairs keep their numbers: they
+   * record what reading changed. A map that does not fit the piece, a new bar that holds bars of two
+   * pages (a join across a page), or a page left without bars, are `invalid` and nothing is written.
+   * practice.json is written with the new score, before piece.json commits the change, and put back as it was when the change fails where the store can
    * see it; a crash between the two leaves it with the new numbers on the old score (it is only a
    * convenience). A practice.json that is missing or does not read is left as it is.
    */
@@ -536,12 +541,27 @@ export class Library {
       const bad = (message: string): never => {
         throw new LibraryError('invalid', message, id)
       }
-      const bars = checkBarMap(barMap, info.bars, bad)
-      const pages: PageInfo[] = info.pages.map((page) => ({ ...page, ...mapRange(page, barMap), staves: page.staves.map((staff) => ({ ...staff, ...mapRange(staff, barMap) })) }))
+      const holders = checkBarMap(barMap, info.bars, bad)
+      const pageOf = (old: number): number | undefined => info.pages.find((page) => page.firstBar <= old && old <= page.lastBar)?.n
+      holders.forEach((olds, b) => {
+        if (new Set(olds.map(pageOf)).size > 1) bad(`bar ${b + 1} would hold bars of two pages`)
+      })
+      const owners = barOwners(barMap, holders)
+      const bars = owners.length
+      const pages: PageInfo[] = info.pages.map((page) => {
+        const range = ownedRange(owners, page) ?? bad(`page ${page.n} would hold no bars`)
+        const staves = page.staves.flatMap((staff) => {
+          const own = ownedRange(owners, staff)
+          const firstBar = Math.max(own?.firstBar ?? Infinity, range.firstBar)
+          const lastBar = Math.min(own?.lastBar ?? -Infinity, range.lastBar)
+          return firstBar <= lastBar ? [{ ...staff, firstBar, lastBar }] : []
+        })
+        return { ...page, ...range, staves }
+      })
       checkPages(pages, bars, bad)
       const next: PieceInfo = { ...info, score: nextScore(info.score), bars, pages }
       const practice = await this.readPracticeText(id)
-      const mapped = practice === undefined ? undefined : mapPractice(practice, barMap)
+      const mapped = practice === undefined ? undefined : mapPractice(practice, barMap, owners)
       await this.commit(
         info,
         next,
@@ -880,32 +900,79 @@ function checkPages(pages: PageInfo[], bars: number, bad: Bad): void {
 }
 
 /**
- * Checks a bar map (change edit-parts, D10) against a piece of [bars] bars and returns the new number of bars: one
- * range of new bars per old bar, from bar 1, in order, each starting at most one bar after the one before ends (two
- * old bars joined share one new bar). The new piece ends where the last old bar does.
+ * Checks a bar map (change edit-parts D10, change redesign-score-editor D8) against a piece of [bars] bars and returns,
+ * for each new bar (by index), the old bars that hold it. One entry per old bar: a range of new bars or null (deleted);
+ * the ranges in order, each starting at or after the end of the one before (two old bars joined share one new bar).
+ * The added bars are new bars of the piece, each listed once, that belong to an old bar; one may lie inside an old
+ * bar's range (a bar added between the halves of a split bar). Every new bar, from 1 to the last, is in a range or
+ * added.
  */
-function checkBarMap(map: BarMap, bars: number, bad: Bad): number {
-  if (!Array.isArray(map) || map.length !== bars) return bad(`the bar map has ${Array.isArray(map) ? map.length : 'no'} bars, the piece ${bars}`)
-  map.forEach((range: unknown, k) => {
+function checkBarMap(map: BarMap, bars: number, bad: Bad): number[][] {
+  if (!isRecord(map) || !Array.isArray(map.bars) || !Array.isArray(map.added)) return bad('the bar map is not a bar map')
+  if (map.bars.length !== bars) return bad(`the bar map has ${map.bars.length} bars, the piece ${bars}`)
+  let count = 0
+  let before: { first: number; last: number } | undefined
+  map.bars.forEach((range: unknown, k) => {
+    if (range === null) return
     if (!isRecord(range) || !isInt(range.first, 1) || !isInt(range.last, 1) || range.last < range.first) bad(`the bar map's bar ${k + 1} is not a range`)
     const r = range as { first: number; last: number }
-    const before = map[k - 1]
-    if (before === undefined ? r.first !== 1 : r.first < before.first || r.last < before.last || r.first > before.last + 1) bad(`the bar map's bar ${k + 1} does not follow the one before`)
+    if (before !== undefined && r.first < before.last) bad(`the bar map's bar ${k + 1} does not follow the one before`)
+    count = Math.max(count, r.last)
+    before = r
   })
-  return map[map.length - 1]!.last
-}
-
-/** A bar range carried over a bar map: its first old bar's first new bar to its last old bar's last new bar. */
-function mapRange(range: { firstBar: number; lastBar: number }, map: BarMap): { firstBar: number; lastBar: number } {
-  return { firstBar: map[range.firstBar - 1]?.first ?? range.firstBar, lastBar: map[range.lastBar - 1]?.last ?? range.lastBar }
+  const added = new Set<number>()
+  map.added.forEach((entry: unknown) => {
+    if (!isRecord(entry) || !isInt(entry.bar, 1) || !isInt(entry.of, 1) || entry.of > bars) return bad('an added bar of the bar map is not a bar of the piece')
+    if (added.has(entry.bar)) bad(`the bar map lists added bar ${entry.bar} twice`)
+    added.add(entry.bar)
+    count = Math.max(count, entry.bar)
+  })
+  if (count === 0) return bad('the bar map leaves no bars')
+  const holders: number[][] = Array.from({ length: count }, () => [])
+  map.bars.forEach((r, k) => {
+    if (r) for (let b = r.first; b <= r.last; b++) holders[b - 1]!.push(k + 1)
+  })
+  holders.forEach((h, b) => {
+    if (h.length === 0 && !added.has(b + 1)) bad(`the bar map leaves out bar ${b + 1}`)
+  })
+  return holders
 }
 
 /**
- * practice.json's text with its bar and loop carried over a bar map: the bar to the first new bar of the old one, the
- * loop from the first new bar of its start to the last new bar of its end. Anything else in it stays as it is; a bar
- * that is not in the map stays too. Undefined when the text does not read: it is then left alone.
+ * The old bar each new bar belongs to (by index), from a bar map checked by `checkBarMap` and the old bars that hold
+ * each new bar ([holders]): an added bar's own (`of`), else the first old bar that holds it, and never one before the
+ * bar the new bar before it belongs to. So the bars they belong to run in order, and a page or a line of the photo
+ * holds one stretch of new bars.
  */
-function mapPractice(text: string, map: BarMap): string | undefined {
+function barOwners(map: BarMap, holders: number[][]): number[] {
+  const of = new Map(map.added.map((entry) => [entry.bar, entry.of]))
+  let last = 1
+  return holders.map((h, b) => {
+    last = Math.max(last, of.get(b + 1) ?? h[0]!)
+    return last
+  })
+}
+
+/** The new bars that belong to one of the old bars of [range] (see `barOwners`), or undefined when none does. */
+function ownedRange(owners: number[], range: { firstBar: number; lastBar: number }): { firstBar: number; lastBar: number } | undefined {
+  const inside = (old: number): boolean => range.firstBar <= old && old <= range.lastBar
+  const first = owners.findIndex(inside)
+  if (first < 0) return undefined
+  let last = owners.length - 1
+  while (!inside(owners[last]!)) last--
+  return { firstBar: first + 1, lastBar: last + 1 }
+}
+
+/**
+ * practice.json's text with its bar and loop carried over a bar map, whose new bars belong to the old bars [owners]
+ * (see `barOwners`): the bar to the first new bar of the old one; for a deleted bar to the first new bar that belongs
+ * to it or to a bar after it (a bar added in its place, else the bar that follows), else to the last bar; the loop from
+ * the first new bar of its first surviving bar to the last new bar of its last surviving bar, or no loop (null) when
+ * none survived. A bar deleted and then joined across is held by the joined bar, so it survives there. Anything else
+ * in it stays as it is; a bar that is not in the map stays too. Undefined when the text does not read: it is then
+ * left alone.
+ */
+function mapPractice(text: string, map: BarMap, owners: number[]): string | undefined {
   let json: unknown
   try {
     json = JSON.parse(text)
@@ -914,10 +981,16 @@ function mapPractice(text: string, map: BarMap): string | undefined {
   }
   if (!isRecord(json)) return undefined
   const state = { ...json }
-  if (isInt(state.bar, 1) && map[state.bar - 1]) state.bar = map[state.bar - 1]!.first
+  const old = map.bars
+  const bar = state.bar
+  if (isInt(bar, 1) && bar <= old.length) {
+    const next = owners.findIndex((owner) => owner >= bar)
+    state.bar = old[bar - 1]?.first ?? (next >= 0 ? next + 1 : owners.length)
+  }
   const loop = state.loop
-  if (isRecord(loop) && isInt(loop.start, 1) && isInt(loop.end, 1) && map[loop.start - 1] && map[loop.end - 1]) {
-    state.loop = { ...loop, start: map[loop.start - 1]!.first, end: map[loop.end - 1]!.last }
+  if (isRecord(loop) && isInt(loop.start, 1) && isInt(loop.end, 1) && loop.start <= old.length && loop.end <= old.length) {
+    const kept = old.slice(loop.start - 1, loop.end).filter((r) => r !== null)
+    state.loop = kept.length === 0 ? null : { ...loop, start: kept[0]!.first, end: kept[kept.length - 1]!.last }
   }
   return serialise(state)
 }

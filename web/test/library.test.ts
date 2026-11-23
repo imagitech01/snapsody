@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { isDeepStrictEqual } from 'node:util'
 import { DEFAULT_PRACTICE, LibraryError, PIECE_FORMAT, createLibrary, normalisePractice } from '../src/app/library.ts'
-import type { Library, NewPage, NewPages, NewPiece, Piece, PracticeState } from '../src/app/library.ts'
+import type { Library, NewPage, NewPages, NewPiece, PageInfo, Piece, PracticeState } from '../src/app/library.ts'
+import type { BarMap } from '../src/core/score/model.ts'
 import { tempSuffix } from '../src/platform/atomicWrite.ts'
 import { PlatformError } from '../src/platform/port.ts'
 import { createFakePlatform } from '../src/platform/fake/index.ts'
@@ -1049,11 +1050,15 @@ test('practice: the fields of parts-and-accompaniment are absent in an old file,
 // ---- bar lines added or removed (change edit-parts, D10, task 5.2) ----------------------------
 
 /** The bar map of a piece of [bars] bars after a bar line was added in bar [bar]: it becomes bars bar and bar + 1. */
-const splitMap = (bars: number, bar: number) =>
-  Array.from({ length: bars }, (_, k) => (k + 1 < bar ? { first: k + 1, last: k + 1 } : k + 1 === bar ? { first: bar, last: bar + 1 } : { first: k + 2, last: k + 2 }))
+const splitMap = (bars: number, bar: number): BarMap => ({
+  bars: Array.from({ length: bars }, (_, k) => (k + 1 < bar ? { first: k + 1, last: k + 1 } : k + 1 === bar ? { first: bar, last: bar + 1 } : { first: k + 2, last: k + 2 })),
+  added: [],
+})
 /** The bar map of a piece of [bars] bars after the bar line after bar [bar] was removed. */
-const joinMap = (bars: number, bar: number) =>
-  Array.from({ length: bars }, (_, k) => (k + 1 <= bar ? { first: k + 1, last: k + 1 } : k + 1 === bar + 1 ? { first: bar, last: bar } : { first: k, last: k }))
+const joinMap = (bars: number, bar: number): BarMap => ({
+  bars: Array.from({ length: bars }, (_, k) => (k + 1 <= bar ? { first: k + 1, last: k + 1 } : k + 1 === bar + 1 ? { first: bar, last: bar } : { first: k, last: k })),
+  added: [],
+})
 const EDITED = '<score-partwise><!-- a bar line added --></score-partwise>'
 
 test('writeScore with a bar map: "A loop after the change" moves the loop, the position, the pages and the lines of the photo along, in one change', async () => {
@@ -1099,8 +1104,147 @@ test('writeScore with a bar map: a map that does not fit, or joins across a page
   const before = files.paths().map((p) => [p, files.text(p)])
   assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', splitMap(13, 6))), 'invalid', 'a map of another number of bars')
   assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', joinMap(14, 8))), 'invalid', 'bars 8 and 9 are on two pages')
-  const gap = splitMap(14, 6).map((r, k) => (k === 9 ? { first: r.first + 1, last: r.last + 1 } : r))
+  const gap: BarMap = { bars: splitMap(14, 6).bars.map((r, k) => (k === 9 && r ? { first: r.first + 1, last: r.last + 1 } : r)), added: [] }
   assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', gap)), 'invalid', 'a bar left out')
+  assert.deepEqual(files.paths().map((p) => [p, files.text(p)]), before)
+})
+
+// ---- bars added or deleted (change redesign-score-editor, D8, task 3.6) ------------------------
+
+/** The bar map of a piece of [bars] bars after bar [bar] was deleted. */
+const deleteMap = (bars: number, bar: number): BarMap => ({
+  bars: Array.from({ length: bars }, (_, k) => (k + 1 < bar ? { first: k + 1, last: k + 1 } : k + 1 === bar ? null : { first: k, last: k })),
+  added: [],
+})
+/** The bar map of a piece of [bars] bars after a bar was added on [side] of bar [bar]. */
+const addMap = (bars: number, bar: number, side: 'before' | 'after'): BarMap => {
+  const at = side === 'after' ? bar + 1 : bar
+  return { bars: Array.from({ length: bars }, (_, k) => (k + 1 < at ? { first: k + 1, last: k + 1 } : { first: k + 2, last: k + 2 })), added: [{ bar: at, of: bar }] }
+}
+/** Each of [bars] bars in its own place. */
+const identity = (bars: number) => Array.from({ length: bars }, (_, k) => ({ first: k + 1, last: k + 1 }))
+const shape = (info: { bars: number; pages: PageInfo[] }) => [info.bars, info.pages.map((p) => [p.firstBar, p.lastBar, p.staves.map((s) => [s.firstBar, s.lastBar])])]
+
+test('writeScore with a bar map: "A loop over a deleted bar" keeps the music that is left, and the position on it moves to the bar that follows', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 6, loop: { start: 5, end: 8 } })
+  const written = await library.writeScore('piece-1', EDITED, 'score-1.musicxml', deleteMap(14, 6))
+  assert.deepEqual(shape(written), [13, [[1, 7, []], [8, 13, [[8, 12], [13, 13]]]]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 6, loop: { start: 5, end: 7 } }, 'the old bar 7 is bar 6 now')
+  // A loop that starts or ends on the deleted bar keeps the bars it has left.
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 4, loop: { start: 4, end: 6 } })
+  await library.writeScore('piece-1', EDITED, 'score-2.musicxml', deleteMap(13, 6))
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 4, loop: { start: 4, end: 5 } })
+})
+
+test('writeScore with a bar map: "A loop that is gone" is cleared; a position on the deleted last bar moves to the new last bar, and its line of the photo is dropped', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 9, loop: { start: 6, end: 6 } })
+  await library.writeScore('piece-1', EDITED, 'score-1.musicxml', deleteMap(14, 6))
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 8, loop: null }, 'practice has no loop')
+
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 13, loop: { start: 12, end: 13 } })
+  const written = await library.writeScore('piece-1', EDITED, 'score-2.musicxml', deleteMap(13, 13))
+  assert.deepEqual(shape(written), [12, [[1, 7, []], [8, 12, [[8, 12]]]]], 'the line that held only bar 13 holds no bars any more')
+  assert.deepEqual(written.pages[1]!.staves[0]!.box, { x: 0.03, y: 0.15, width: 0.94, height: 0.3 })
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 12, loop: { start: 12, end: 12 } })
+  // The piece with the dropped line loads again, from a new library on the same files.
+  const again = createLibrary(files)
+  assert.deepEqual(await again.info('piece-1'), written)
+  assert.equal((await again.load('piece-1')).musicxml, EDITED)
+})
+
+test('writeScore with a bar map: "An added bar and its page" joins the page and the line of the bar it was added next to', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 9, loop: { start: 8, end: 9 } })
+  // Added after bar 8, the last bar of page 1: page 1 holds bars 1 to 9.
+  const after8 = await library.writeScore('piece-1', EDITED, 'score-1.musicxml', addMap(14, 8, 'after'))
+  assert.deepEqual(shape(after8), [15, [[1, 9, []], [10, 15, [[10, 14], [15, 15]]]]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 10, loop: { start: 8, end: 10 } }, 'the loop holds the bar added between its bars')
+  // Added before bar 10, the first bar of page 2 (and of its first line): page 2 starts with it.
+  const before10 = await library.writeScore('piece-1', EDITED, 'score-2.musicxml', addMap(15, 10, 'before'))
+  assert.deepEqual(shape(before10), [16, [[1, 9, []], [10, 16, [[10, 15], [16, 16]]]]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 11, loop: { start: 8, end: 11 } })
+})
+
+test('writeScore with a bar map: a bar added before bar 1 or after the last bar grows the first or the last page, and the piece', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 1, loop: { start: 1, end: 14 } })
+  const first = await library.writeScore('piece-1', EDITED, 'score-1.musicxml', addMap(14, 1, 'before'))
+  assert.deepEqual(shape(first), [15, [[1, 9, []], [10, 15, [[10, 14], [15, 15]]]]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 2, loop: { start: 2, end: 15 } }, 'the loop keeps its bars; the added bar is not one of them')
+  const last = await library.writeScore('piece-1', EDITED, 'score-2.musicxml', addMap(15, 15, 'after'))
+  assert.deepEqual(shape(last), [16, [[1, 9, []], [10, 16, [[10, 14], [15, 16]]]]])
+  assert.deepEqual(await library.info('piece-1'), last, 'piece.json reads, so its pages pass the page check')
+})
+
+test('writeScore with a bar map: an added bar whose bar was deleted keeps its page and its line; a bar deleted, one split and one added in one save', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  // Bar 8 deleted, a bar added after it: page 1 still ends with the added bar.
+  const replaced: BarMap = { bars: deleteMap(14, 8).bars.map((r, k) => (r && k >= 8 ? { first: r.first + 1, last: r.last + 1 } : r)), added: [{ bar: 8, of: 8 }] }
+  assert.deepEqual(shape(await library.writeScore('piece-1', EDITED, 'score-1.musicxml', replaced)), [14, [[1, 8, []], [9, 14, [[9, 13], [14, 14]]]]])
+  // The last bar deleted, a bar added after it: the page and the line of the deleted bar keep the added bar.
+  const last: BarMap = { bars: deleteMap(14, 14).bars, added: [{ bar: 14, of: 14 }] }
+  assert.deepEqual(shape(await library.writeScore('piece-1', EDITED, 'score-2.musicxml', last)), [14, [[1, 8, []], [9, 14, [[9, 13], [14, 14]]]]])
+  // Then bar 2 split, bar 4 deleted, a bar added after bar 9 (the first bar of page 2 and of its first line).
+  const r = (first: number, last: number) => ({ first, last })
+  const mixed: BarMap = { bars: [r(1, 1), r(2, 3), r(4, 4), null, r(5, 5), r(6, 6), r(7, 7), r(8, 8), r(9, 9), r(11, 11), r(12, 12), r(13, 13), r(14, 14), r(15, 15)], added: [{ bar: 10, of: 9 }] }
+  assert.deepEqual(shape(await library.writeScore('piece-1', EDITED, 'score-3.musicxml', mixed)), [15, [[1, 8, []], [9, 15, [[9, 14], [15, 15]]]]])
+})
+
+test('writeScore with a bar map: a bar added between the halves of a split bar lies inside its range, and belongs to it', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 14, loop: { start: 13, end: 14 } })
+  // Bar 13 split in two, a bar added between the halves: old bar 13 is new bars 13 to 15, of which 14 is the added bar.
+  const map: BarMap = { bars: [...identity(14).slice(0, 13).map((r, k) => (k === 12 ? { first: 13, last: 15 } : r)), { first: 16, last: 16 }], added: [{ bar: 14, of: 13 }] }
+  assert.deepEqual(shape(await library.writeScore('piece-1', EDITED, 'score-1.musicxml', map)), [16, [[1, 8, []], [9, 16, [[9, 15], [16, 16]]]]])
+  assert.deepEqual(await library.readPractice('piece-1'), { ...DEFAULT_PRACTICE, bar: 16, loop: { start: 13, end: 16 } })
+})
+
+test('writeScore with a bar map: the bars the new bars belong to run in order, so the lines of a page never overlap', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  // A bar added at the end that says it belongs to bar 9: it follows bar 14, so it goes with bar 14's line.
+  const late: BarMap = { bars: identity(14), added: [{ bar: 15, of: 9 }] }
+  assert.deepEqual(shape(await library.writeScore('piece-1', EDITED, 'score-1.musicxml', late)), [15, [[1, 8, []], [9, 15, [[9, 13], [14, 15]]]]])
+})
+
+test('writeScore with a bar map: a line of the photo that reaches outside its page (a damaged piece.json) is kept inside the page', async () => {
+  const { files, library } = setup()
+  const piece = twoPages(files)
+  const [first, second] = piece.pages as [NewPage, NewPage]
+  const box = { x: 0, y: 0, width: 1, height: 0.5 }
+  // Page 1's line reaches into page 2, page 2's first line starts on page 1.
+  await library.create({ ...piece, pages: [{ ...first, staves: [{ box, firstBar: 1, lastBar: 9 }] }, { ...second, staves: [{ box, firstBar: 8, lastBar: 13 }, second.staves![1]!] }] })
+  assert.deepEqual(shape(await library.writeScore('piece-1', EDITED, 'score-1.musicxml', splitMap(14, 6))), [15, [[1, 9, [[1, 9]]], [10, 15, [[10, 14], [15, 15]]]]])
+})
+
+test('writeScore with a bar map: a map that leaves a page without bars, or a bar held twice or by no one, is refused and nothing is written', async () => {
+  const { files, library } = setup()
+  await library.create(twoPages(files))
+  await library.writePractice('piece-1', { ...DEFAULT_PRACTICE, bar: 9 })
+  const before = files.paths().map((p) => [p, files.text(p)])
+  const noPage1: BarMap = { bars: Array.from({ length: 14 }, (_, k) => (k < 8 ? null : { first: k - 7, last: k - 7 })), added: [] }
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', noPage1)), 'invalid', 'page 1 would hold no bars')
+  const twice: BarMap = { ...addMap(14, 8, 'after'), added: [{ bar: 9, of: 8 }, { bar: 9, of: 8 }] }
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', twice)), 'invalid', 'an added bar listed twice')
+  const swapped: BarMap = { bars: identity(14).map((r, k) => (k === 1 ? { first: 3, last: 3 } : k === 2 ? { first: 2, last: 2 } : r)), added: [] }
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', swapped)), 'invalid', 'old bars 2 and 3 out of order')
+  const acrossPages: BarMap = { bars: identity(14).map((r, k) => (k >= 8 ? { first: k, last: k } : r)), added: [] }
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', acrossPages)), 'invalid', 'bar 8 holds bars 8 and 9 of two pages')
+  const lost: BarMap = { ...addMap(14, 8, 'after'), added: [] }
+  const error = await library.writeScore('piece-1', EDITED, 'score-1.musicxml', lost).catch((e: unknown) => e)
+  assert.ok(error instanceof LibraryError && error.code === 'invalid' && /leaves out bar 9/.test(error.message), 'a bar that no one holds')
+  const stranger: BarMap = { ...addMap(14, 8, 'after'), added: [{ bar: 9, of: 15 }] }
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', stranger)), 'invalid', 'an added bar of a bar that is not in the piece')
+  const none: BarMap = { bars: Array.from({ length: 14 }, () => null), added: [] }
+  assert.equal(await codeOf(library.writeScore('piece-1', EDITED, 'score-1.musicxml', none)), 'invalid', 'no bars left')
   assert.deepEqual(files.paths().map((p) => [p, files.text(p)]), before)
 })
 

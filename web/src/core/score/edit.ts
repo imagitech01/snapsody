@@ -1,6 +1,7 @@
 import type { ElementRef } from './elements.ts'
-import type { Bar, StaffBar, Barline, Clef, Measure, MeasureItem, Note, NoteType, PartBar, Pitch, Score, Step, TempoItem, TimeSignature, VoiceRef, VoiceScore, WedgeItem } from './model.ts'
+import type { Bar, StaffBar, Barline, Clef, DynamicItem, Measure, MeasureItem, Note, NoteType, PartBar, Pitch, Score, Step, TempoItem, TimeSignature, VoiceRef, VoiceScore, WedgeItem } from './model.ts'
 import { allItemLists, firstVoice, freshDirectionId, isDirection, isNote, isWedge, partIndex, placeOfNote, sameVoice, usedIds, voiceView, voices } from './model.ts'
+import { endingLabels, parseEndingNumbers } from './endings.ts'
 import { noteDuration } from './musicxml.ts'
 import type { Frac } from './rational.ts'
 import { add, cmp, eq, frac, sub } from './rational.ts'
@@ -287,9 +288,16 @@ export function toggleStaccato(target: Score | VoiceScore, id: string): void {
   else note.staccato = true
 }
 
-const MARK_NAMES = { tenuto: 'a tenuto', accent: 'an accent', strongAccent: 'a strong accent', staccatissimo: 'a staccatissimo' } as const
+const MARK_NAMES = {
+  tenuto: 'a tenuto',
+  accent: 'an accent',
+  strongAccent: 'a strong accent',
+  staccatissimo: 'a staccatissimo',
+  breath: 'a breath mark',
+  caesura: 'a caesura',
+} as const
 
-/** Tenuto, accent, strong accent and staccatissimo belong to notes; tapping the active mark removes it. */
+/** Tenuto, accent, strong accent, staccatissimo, breath mark and caesura belong to notes; tapping the active mark removes it. */
 function toggleArticulation(target: Score | VoiceScore, id: string, mark: keyof typeof MARK_NAMES): void {
   const score = viewFor(target, id)
   const { note } = locate(score, id)
@@ -312,6 +320,16 @@ export function toggleStrongAccent(score: Score | VoiceScore, id: string): void 
 
 export function toggleStaccatissimo(score: Score | VoiceScore, id: string): void {
   toggleArticulation(score, id, 'staccatissimo')
+}
+
+/** A breath mark after the note, on or off (change redesign-score-editor, D5); playback leaves a short gap after the note. */
+export function toggleBreath(score: Score | VoiceScore, id: string): void {
+  toggleArticulation(score, id, 'breath')
+}
+
+/** A caesura after the note, on or off (change redesign-score-editor, D5); playback leaves a longer gap than a breath mark. */
+export function toggleCaesura(score: Score | VoiceScore, id: string): void {
+  toggleArticulation(score, id, 'caesura')
 }
 
 /**
@@ -629,6 +647,67 @@ export function removeWedge(target: Score | VoiceScore, id: string): void {
   found.measure.items.splice(found.measure.items.indexOf(found.item), 1)
 }
 
+// ---------------------------------------------------------------- loudness marks (change redesign-score-editor, D5)
+
+/** The loudness marks the editor sets on a note (spec "Loudness marks"). */
+export const LOUDNESS_MARKS = ['pp', 'p', 'mp', 'mf', 'f', 'ff'] as const
+export type LoudnessMark = (typeof LOUDNESS_MARKS)[number]
+
+/**
+ * The loudness marks of a note: every dynamic of the note's staff (any voice) that stands directly before a note or rest
+ * starting where the note's chord starts, in the note's bar. A dynamic belongs to a staff (spec "Marks belong to a staff
+ * or voice"), so one written in another voice at the same start is the note's too. Throws `EditError` for a missing note.
+ */
+function dynamicsOf(target: Score | VoiceScore, id: string): { view: VoiceScore; measure: Measure; at: number; found: { items: MeasureItem[]; item: DynamicItem }[] } {
+  const views = staffViewsFor(target, id)
+  const view = views.find((v) => v.measures.some((m) => m.items.some((i) => isNote(i) && i.id === id)))
+  if (!view) throw new EditError('That note no longer exists')
+  const { measure, barIndex, at: own } = locate(view, id)
+  const at = chordSpan(measure.items, own)[0]
+  const start = onsetIn(measure.items, at)
+  const found: { items: MeasureItem[]; item: DynamicItem }[] = []
+  for (const v of views) {
+    const items = v.measures[barIndex]!.items
+    items.forEach((item, k) => {
+      if (item.kind !== 'dynamic' || !eq(onsetIn(items, k), start)) return
+      // Not one after the voice's last note: that one stands before nothing.
+      if (items.slice(k + 1).some(isNote)) found.push({ items, item })
+    })
+  }
+  return { view, measure, at, found }
+}
+
+/** The loudness mark of a note (see `dynamicsOf`), for showing the active mark; the first when there are more. */
+export function dynamicOf(target: Score | VoiceScore, id: string): DynamicItem | undefined {
+  return dynamicsOf(target, id).found[0]?.item
+}
+
+/**
+ * Puts a loudness mark on a note, changes it, or with `undefined` removes it (spec "Loudness marks"). A note has at most
+ * one: a mark of the note's staff at the note's start (see `dynamicsOf`) is changed in place and keeps its id, and any
+ * further one goes. A new mark is one `DynamicItem` directly before the note (before its chord, and before a hairpin
+ * that starts on it), in the note's voice, so in its staff. A rest takes none. Throws `EditError` when there is nothing
+ * to remove.
+ */
+export function setDynamic(target: Score | VoiceScore, id: string, mark: LoudnessMark | undefined): void {
+  const { view, measure, at, found } = dynamicsOf(target, id)
+  const note = measure.items[at] as Note
+  if (mark !== undefined && note.rest) throw new EditError('A rest cannot have a loudness mark')
+  if (mark !== undefined && !LOUDNESS_MARKS.includes(mark)) throw new EditError('That is not a loudness mark')
+  if (mark === undefined && found.length === 0) throw new EditError('There is no loudness mark on that note')
+  // Removed: every one goes. Set: the first is changed, any further one goes.
+  const kept = mark === undefined ? undefined : found[0]
+  for (const { items, item } of found) if (item !== kept?.item) items.splice(items.indexOf(item), 1)
+  if (mark === undefined) return
+  if (kept) {
+    kept.item.mark = mark
+    return
+  }
+  let index = measure.items.indexOf(note)
+  while (index > 0 && isWedge(measure.items[index - 1]!)) index--
+  measure.items.splice(index, 0, { kind: 'dynamic', id: freshDirectionId(view), mark })
+}
+
 // ---------------------------------------------------------------- delete and insert
 
 /** First and last item index of the chord that contains the item at `at`. */
@@ -663,6 +742,12 @@ function dropSlursAndTies(score: VoiceScore, note: Note): void {
  */
 export function deleteNote(target: Score | VoiceScore, id: string): string | undefined {
   const score = viewFor(target, id)
+  const isFirstVoice = (score.of?.ref.voice ?? 0) === 0
+  {
+    // A bar's whole-bar rest is what an emptied first voice holds: deleting it would only put it back.
+    const { measure, note } = locate(score, id)
+    if (isFirstVoice && wholeBarRestOf(measure.items) === note) return id
+  }
   dropSlursAndTies(score, locate(score, id).note)
   removeTremolo(score, id)
   // A hairpin item sits before its first note, so look the note up again once they are gone. On a whole score a
@@ -692,7 +777,89 @@ export function deleteNote(target: Score | VoiceScore, id: string): string | und
   }
   normaliseTuplets(measure)
   resolveAlters(score, barIndex, barIndex)
+  // A staff's first voice is never left without a note or rest to see: it gets a whole-bar rest in place of what is left
+  // (nothing, or hidden rests), which stays selected, so the bar can be filled again (change redesign-score-editor, D5).
+  // A later voice may stay empty.
+  if (isFirstVoice && !measure.items.some((i) => isNote(i) && !i.hidden)) {
+    const rest = wholeBarRest(freshId(score), barLengthAt(score, barIndex))
+    const kept = measure.items.filter((i) => !isNote(i))
+    measure.items.splice(0, measure.items.length, ...kept, rest)
+    return rest.id
+  }
   return (left ?? next ?? prev)?.id
+}
+
+/**
+ * The length of a whole-bar rest in bar `index` of a view: the time signature in force there; without one, the longest
+ * voice of the bar in the view's score, else a whole note.
+ */
+function barLengthAt(view: VoiceScore, index: number): Frac {
+  for (let b = index; b >= 0; b--) {
+    const time = view.measures[b]?.time
+    if (time) return frac(time.beats, time.beatType)
+  }
+  let longest = frac(0)
+  const lists = view.of ? view.of.score.bars[index]!.parts.flatMap((pb) => pb.staves.flatMap((sb) => sb.voices)) : [view.measures[index]!.items]
+  for (const items of lists) if (cmp(voiceLength(items), longest) > 0) longest = voiceLength(items)
+  return longest.n > 0 ? longest : frac(1)
+}
+
+/** A note or rest to add (`appendNote`): its length, and the written step and octave of a note; without a pitch it is a rest. */
+export interface NoteChoice extends DurationChoice {
+  pitch?: { step: Step; octave: number }
+}
+
+/** The voice `where` of a score as a view, or `EditError` when the score has no such voice. */
+function voiceAt(score: Score, where: VoiceRef): VoiceScore {
+  const pi = partOf(score, where)
+  if (!score.bars.every((bar) => bar.parts[pi]?.staves[where.staff]?.voices[where.voice])) throw new EditError('That voice does not exist')
+  return voiceView(score, where)
+}
+
+/** Every item list a hairpin of the view may be kept in: the whole score's, for a view made from one. */
+function wedgeLists(target: Score | VoiceScore): MeasureItem[][] {
+  if ('bars' in target) return allItemLists(target)
+  return target.of ? allItemLists(target.of.score) : target.measures.map((m) => m.items)
+}
+
+/**
+ * Adds a note or a rest at the end of the voice `where` in bar `bar` (from 0) and returns its id (change
+ * redesign-score-editor, D5, spec "A bar always takes a note"): the place after the last note or rest, where the editor
+ * shows the slot for the next note. A voice that holds nothing but a whole-bar rest has that rest replaced, together with
+ * a hairpin that starts or stops on it. A note gets no accidental of its own: the key and the bar's accidentals give its
+ * alter. On a voice view `where` is the view's own voice. A bar that no longer adds up is flagged, never refused.
+ */
+export function appendNote(target: Score | VoiceScore, where: VoiceRef, bar: number, what: NoteChoice): string {
+  const score = 'bars' in target ? voiceAt(target, where) : target
+  const measure = Number.isInteger(bar) ? score.measures[bar] : undefined
+  if (!measure) throw new EditError('That bar does not exist')
+  if (!DURATION_TYPES.includes(what.type) || !Number.isInteger(what.dots) || what.dots < 0 || what.dots > 2) throw new EditError('That length cannot be added')
+  const fresh: Note = { kind: 'note', id: freshId(score), type: what.type, dots: what.dots, duration: frac(0), slurs: [], tuplets: [] }
+  if (what.triplet) fresh.timeMod = { actual: 3, normal: 2 }
+  fresh.duration = noteDuration(fresh.type!, fresh.dots, fresh.timeMod)
+  if (what.pitch) fresh.pitch = { step: what.pitch.step, octave: what.pitch.octave }
+  else fresh.rest = true
+  const notes = measure.items.filter(isNote)
+  const [only] = notes
+  const barRest = notes.length === 1 && only!.rest && !only!.hidden && (only!.measureRest || eq(only!.duration, barLengthAt(score, bar))) ? only : undefined
+  // A first voice with nothing to see holds hidden rests only (the reader fills an empty first voice so): they make way too.
+  const firstVoice = ('bars' in target ? where.voice : (score.of?.ref.voice ?? 0)) === 0
+  const hiddenOnly = firstVoice && notes.length > 0 && notes.every((n) => n.hidden)
+  if (barRest) {
+    for (const items of wedgeLists(target)) {
+      const kept = items.filter((i) => !(isWedge(i) && (i.start === barRest.id || i.stop === barRest.id)))
+      items.splice(0, items.length, ...kept)
+    }
+    measure.items.splice(measure.items.indexOf(barRest), 1, fresh)
+  } else if (hiddenOnly) {
+    const at = measure.items.indexOf(notes[0]!)
+    const kept = measure.items.filter((i, k) => !isNote(i) || k === at)
+    kept.splice(kept.indexOf(notes[0]!), 1, fresh)
+    measure.items.splice(0, measure.items.length, ...kept)
+  } else measure.items.push(fresh)
+  normaliseTuplets(measure)
+  resolveAlters(score, bar, bar)
+  return fresh.id
 }
 
 /** A pitch for a note made next to, or out of a rest at, the note `id`: its own, else the nearest pitched note's, else B4. No accidental. */
@@ -1039,7 +1206,8 @@ export function firstTempoMarking(target: Score | VoiceScore): TempoItem | undef
 // ---------------------------------------------------------------- bar lines (change edit-bar-lines, design D1)
 
 export type BarStart = 'normal' | 'repeat'
-export type BarEnd = 'normal' | 'double' | 'repeat'
+/** How a bar ends; `final` is the end bar line (thin and thick, `light-heavy`) without a repeat (change redesign-score-editor, D5). */
+export type BarEnd = 'normal' | 'double' | 'repeat' | 'final'
 
 export interface BarLines {
   start: BarStart
@@ -1052,9 +1220,13 @@ export interface BarLines {
 export const MIN_REPEAT_TIMES = 2
 export const MAX_REPEAT_TIMES = 8
 
-/** Styles that read as a double bar line (a recognised final bar line `light-heavy` counts too, as in playback). */
+/**
+ * Styles that read as a double bar line (a recognised final bar line `light-heavy` counts too, as in playback). The editor
+ * shows `light-heavy` without a repeat at the end of a bar as an end bar line (`final`); playback still goes back to it.
+ */
 const DOUBLE_STYLES = new Set(['light-light', 'light-heavy', 'heavy-light', 'heavy-heavy'])
 const isPlainDouble = (b: Barline | undefined): boolean => !!b && !b.repeat && !!b.style && DOUBLE_STYLES.has(b.style)
+const isFinal = (b: Barline | undefined): boolean => !!b && !b.repeat && b.style === 'light-heavy'
 
 // The bar line setters work on the score's bars (the shared attributes, design D1), not on a view.
 function barAt(score: Score, index: number): Bar {
@@ -1091,7 +1263,8 @@ export function barLinesOf(score: Score, index: number): BarLines {
   const m = barAt(score, index)
   const next = score.bars[index + 1]
   const right = m.rightBarline
-  const end: BarEnd = right?.repeat === 'backward' ? 'repeat' : isPlainDouble(right) || isPlainDouble(next?.leftBarline) ? 'double' : 'normal'
+  const end: BarEnd =
+    right?.repeat === 'backward' ? 'repeat' : isFinal(right) ? 'final' : isPlainDouble(right) || isPlainDouble(next?.leftBarline) ? 'double' : 'normal'
   return {
     start: m.leftBarline?.repeat === 'forward' ? 'repeat' : 'normal',
     end,
@@ -1110,9 +1283,10 @@ export function setBarStart(score: Score, index: number, start: BarStart): void 
 }
 
 /**
- * Sets how the bar `index` ends: a plain bar line, a double bar line `||` or an end-repeat `:||`. The
- * double bar line is always written as this bar's right bar line, so one on the next bar's left goes.
- * An end-repeat that stays an end-repeat keeps its count; an ending on the bar line stays.
+ * Sets how the bar `index` ends: a plain bar line, a double bar line `||`, an end-repeat `:||` or an end bar line (thin
+ * and thick, `light-heavy` without a repeat). The double and the end bar line are always written as this bar's right
+ * bar line, so one on the next bar's left goes. An end-repeat that stays an end-repeat keeps its count; an ending on
+ * the bar line stays.
  */
 export function setBarEnd(score: Score, index: number, end: BarEnd): void {
   const m = barAt(score, index)
@@ -1127,6 +1301,7 @@ export function setBarEnd(score: Score, index: number, end: BarEnd): void {
     const times = old?.repeat === 'backward' && old.times !== undefined && old.times !== MIN_REPEAT_TIMES ? { times: old.times } : {}
     m.rightBarline = { style: 'light-heavy', repeat: 'backward', ...times, ...ending }
   } else if (end === 'double') m.rightBarline = { style: 'light-light', ...ending }
+  else if (end === 'final') m.rightBarline = { style: 'light-heavy', ...ending }
   else if (old?.ending) m.rightBarline = { ...ending }
   else delete m.rightBarline
 }
@@ -1604,6 +1779,8 @@ export function splitBar(score: Score, id: string): string {
   delete first.rightBarline
   const second: Bar = { number: /^\d+$/.test(bar.number) ? String(Number(bar.number) + 1) : bar.number, parts: [] }
   if (bar.rightBarline) second.rightBarline = bar.rightBarline
+  // The second half of an added bar is an added bar too, of the same loaded bar, with an id of its own (D8 of change redesign-score-editor).
+  if (bar.added) second.added = { id: nextAddedBarId(), side: bar.added.side }
   // The bar's stretch of the loaded score is cut where the bar is, in proportion to its length (D10).
   const [lo, hi] = bar.from!
   const cut = lo + ((hi - lo) * point.n * length.d) / (point.d * length.n)
@@ -1720,9 +1897,14 @@ export function joinBars(score: Score, barIndex: number): void {
 
   trackBars(score)
   clearMultiRests(score, barIndex, barIndex + 1)
-  const joined: Bar = { ...a, parts: [], from: [a.from![0], b.from![1]] }
+  // With one of the two bars added, the joined bar holds the other's stretch of the loaded score as it is (D8 of change
+  // redesign-score-editor); two bars of the loaded score hold the stretch from the first's start to the second's end.
+  const from: [number, number] = a.added && !b.added ? b.from! : b.added && !a.added ? a.from! : [a.from![0], b.from![1]]
+  const joined: Bar = { ...a, parts: [], from }
   if (b.rightBarline) joined.rightBarline = b.rightBarline
   else delete joined.rightBarline
+  // A joined bar holds music of the loaded score unless both bars were added (D8 of change redesign-score-editor).
+  if (!b.added) delete joined.added
   a.parts.forEach((pa, pi) => {
     const pb = b.parts[pi]!
     const part: PartBar = { ...pa, staves: [] }
@@ -1746,4 +1928,383 @@ export function joinBars(score: Score, barIndex: number): void {
   }
   renumberFrom(score, barIndex + 1, -1)
   tidyBars(score, barIndex, barIndex)
+}
+
+// ---------------------------------------------------------------- endings and bars (change redesign-score-editor, D5, D7, D8)
+
+/**
+ * Why an ending or a bar edit is refused, for the editor's explanation: `onlyBar` (the only bar of the piece cannot be
+ * deleted), `firstBar` (the first bar has no bar before it to copy), `secondEnding` (a second-time bar comes directly
+ * after a first-time or second-time bar), `otherEnding` (the bar is in an ending with other numbers, which can only be
+ * removed).
+ */
+export type BarEditRefusal = 'onlyBar' | 'firstBar' | 'secondEnding' | 'otherEnding'
+
+/** A refused ending or bar edit: why. The message is a full English sentence. */
+export class BarEditError extends EditError {
+  readonly reason: BarEditRefusal
+
+  constructor(reason: BarEditRefusal, message: string) {
+    super(message)
+    this.reason = reason
+  }
+}
+
+/** One bar in the view of the endings: the number of the ending it lies in, and how that ending closes when it is its last bar. */
+interface EndingPlace {
+  label: string | null
+  close?: 'stop' | 'discontinue'
+}
+
+/** The endings as a view of the bar lines (design D7): per bar, the ending it lies in (`endingLabels`), and the close of each ending's last bar. */
+function endingView(score: Score): EndingPlace[] {
+  const labels = endingLabels(score.bars)
+  return labels.map((label, i) => {
+    const place: EndingPlace = { label }
+    const close = score.bars[i]!.rightBarline?.ending?.type
+    if (label !== null && labels[i + 1] !== label && (close === 'stop' || close === 'discontinue')) place.close = close
+    return place
+  })
+}
+
+/** The runs of neighbouring bars with the same ending: first and last bar, number, and the close of one of its bars. */
+function endingRuns(view: readonly EndingPlace[]): { first: number; last: number; label: string; close?: 'stop' | 'discontinue' }[] {
+  const runs: { first: number; last: number; label: string; close?: 'stop' | 'discontinue' }[] = []
+  view.forEach((place, i) => {
+    if (place.label === null) return
+    const run = runs.at(-1)
+    if (run && run.last === i - 1 && run.label === place.label) run.last = i
+    else runs.push({ first: i, last: i, label: place.label })
+    if (place.close) runs.at(-1)!.close = place.close
+  })
+  return runs
+}
+
+/**
+ * Writes the endings of the bars around `from..to` from the view (design D7): the ending marks of those bars, and of every
+ * run of the view that reaches into them, are written again: `start` on the left bar line of a run's first bar, and on
+ * the right bar line of its last bar the close it had (`stop` for a first ending, `discontinue` for a second one when it
+ * had none). Endings outside are left as they are, so an ending's number ("1, 2") and close stay.
+ */
+function writeEndings(score: Score, view: readonly EndingPlace[], from: number, to: number): void {
+  const runs = endingRuns(view).filter((r) => r.first <= to && r.last >= from)
+  const lo = Math.max(0, Math.min(from, ...runs.map((r) => r.first)))
+  const hi = Math.min(score.bars.length - 1, Math.max(to, ...runs.map((r) => r.last)))
+  for (let i = lo; i <= hi; i++) {
+    const bar = score.bars[i]!
+    if (bar.leftBarline?.ending) delete bar.leftBarline.ending
+    if (bar.rightBarline?.ending) delete bar.rightBarline.ending
+    tidyBarlines(bar)
+  }
+  for (const run of runs) {
+    const first = score.bars[run.first]!
+    const last = score.bars[run.last]!
+    first.leftBarline = { ...first.leftBarline, ending: { number: run.label, type: 'start' } }
+    last.rightBarline = { ...last.rightBarline, ending: { number: run.label, type: run.close ?? (run.label === '2' ? 'discontinue' : 'stop') } }
+  }
+}
+
+/**
+ * Marks bar `index` (from 0) as "1st time only" (1), "2nd time only" (2), or in no ending (undefined), as one edit (design
+ * D7, spec "First and second endings"). Neighbouring bars with the same mark form one ending: the bar lines of the run
+ * are written again. A first ending whose last bar has no end-repeat gets one: the end-repeat of a bar inside the run
+ * moves there (a first ending made longer), else a new one is set. Throws `BarEditError` (nothing changed) for a second
+ * ending that does not come directly after a bar in ending 1 or 2 (`secondEnding`), and for 1 or 2 on a bar in an
+ * ending with other numbers (`otherEnding`), which can only be removed.
+ */
+export function setEnding(score: Score, index: number, ending: 1 | 2 | undefined): void {
+  barAt(score, index)
+  const view = endingView(score)
+  const own = view[index]!.label
+  const label = ending === undefined ? null : String(ending)
+  if (label !== null && own !== null && own !== '1' && own !== '2') {
+    throw new BarEditError('otherEnding', `This bar is in the ending "${own}." as read; it can only be removed`)
+  }
+  if (ending === 2) {
+    const before = view[index - 1]?.label
+    const numbers = before ? parseEndingNumbers(before) : []
+    if (!numbers.some((n) => n === 1 || n === 2)) throw new BarEditError('secondEnding', 'A second-time bar comes directly after a first-time bar')
+  }
+  if (label === own) return
+  // The close of the bar's old ending goes along with the ending's last bar.
+  const close = view[index]!.close
+  view[index] = { label }
+  const shortened = own !== null && view[index - 1]?.label === own && view[index + 1]?.label !== own
+  if (close && shortened) view[index - 1]!.close = close
+  writeEndings(score, view, index - 1, index + 1)
+  // A first ending made shorter at its end: its end-repeat goes back to its new last bar, with its count.
+  const right = score.bars[index]!.rightBarline
+  if (shortened && own === '1' && right?.repeat === 'backward' && score.bars[index - 1]!.rightBarline?.repeat !== 'backward') {
+    const times = right.times
+    setBarEnd(score, index, 'normal')
+    setBarEnd(score, index - 1, 'repeat')
+    if (times !== undefined) setRepeatTimes(score, index - 1, times)
+  }
+  if (ending !== 1) return
+  const run = endingRuns(view).find((r) => r.first <= index && index <= r.last)!
+  if (score.bars[run.last]!.rightBarline?.repeat === 'backward') return
+  let moved: number | undefined
+  for (let i = run.last - 1; i >= run.first && moved === undefined; i--) if (score.bars[i]!.rightBarline?.repeat === 'backward') moved = i
+  const times = moved === undefined ? undefined : score.bars[moved]!.rightBarline!.times
+  if (moved !== undefined) setBarEnd(score, moved, 'normal')
+  setBarEnd(score, run.last, 'repeat')
+  if (times !== undefined) setRepeatTimes(score, run.last, times)
+}
+
+let addedBars = 0
+
+/** An id for an added bar that no other bar of this run of the app has had (design D8: unique in the session, also after undo). */
+function nextAddedBarId(): string {
+  addedBars += 1
+  return `added${addedBars}`
+}
+
+/** The length of a whole-bar rest in a bar added after bar `index` is in force: its time signature, else that bar's longest voice, else a whole note. */
+function addedBarLength(score: Score, index: number, near: Bar): Frac {
+  const time = index >= 0 ? timeAt(score, index) : near.time
+  if (time) return frac(time.beats, time.beatType)
+  let longest = frac(0)
+  for (const pb of near.parts) for (const sb of pb.staves) for (const items of sb.voices) if (cmp(voiceLength(items), longest) > 0) longest = voiceLength(items)
+  return longest.n > 0 ? longest : frac(1)
+}
+
+/**
+ * Adds an empty bar before or after bar `index` (from 0), in every part (design D5, D8, spec "Add a bar"), and returns
+ * the new bar's index. Each staff's first voice holds a whole-bar rest of the time signature in force there; its later
+ * voices are empty. The bars after it are renumbered. A bar added before the first bar takes over the time, the keys
+ * and the clefs of the piece's start, and one added before a bar that starts a line starts the line. It holds no music
+ * of the loaded score: `from` is the empty stretch at its place and `added` names it (see `Bar.added`). A
+ * multi-measure rest it falls inside is cleared.
+ */
+export function addBar(score: Score, index: number, side: 'before' | 'after'): number {
+  const near = barAt(score, index)
+  if (side !== 'before' && side !== 'after') throw new EditError('A bar is added before or after a bar')
+  trackBars(score)
+  const at = side === 'before' ? index : index + 1
+  // A multi-measure rest over the place where the bar goes no longer says what is printed.
+  score.bars.forEach((bar, start) =>
+    bar.parts.forEach((pb) => {
+      const n = pb.multiRest
+      if (n !== undefined && start < at && start + Math.max(n, 1) > at) delete pb.multiRest
+    }),
+  )
+  const newId = idMaker(score)
+  const length = addedBarLength(score, side === 'before' ? index - 1 : index, near)
+  const [lo, hi] = near.from!
+  const bar: Bar = {
+    number: side === 'after' && /^\d+$/.test(near.number) ? String(Number(near.number) + 1) : near.number,
+    parts: near.parts.map((pb) => ({ staves: pb.staves.map((sb) => ({ voices: sb.voices.map((_, vi) => (vi === 0 ? [wholeBarRest(newId(), length)] : [])) })) })),
+    from: near.added ? [lo, hi] : side === 'before' ? [lo, lo] : [hi, hi],
+    added: { id: nextAddedBarId(), side: near.added?.side ?? side },
+  }
+  if (side === 'before') {
+    if (index === 0) {
+      // The piece starts with the new bar: what is in force from the start goes with it.
+      if (near.time) bar.time = near.time
+      delete near.time
+      near.parts.forEach((pb, pi) => {
+        const into = bar.parts[pi]!
+        if (pb.key) into.key = pb.key
+        delete pb.key
+        pb.staves.forEach((sb, si) => {
+          if (sb.clef) into.staves[si]!.clef = sb.clef
+          delete sb.clef
+        })
+      })
+    }
+    if (near.newSystem) bar.newSystem = true
+    delete near.newSystem
+  }
+  renumberFrom(score, at, 1)
+  score.bars.splice(at, 0, bar)
+  return at
+}
+
+/**
+ * Deletes bar `index` (from 0) in every part (design D5, spec "Delete a bar"): it goes with its notes, its marks, its
+ * repeat signs and its endings. A slur, tie, tremolo, crescendo or diminuendo with an end in it goes with its other end;
+ * an ending it was part of ends or starts at its neighbour. What it sets from there on that the next bar does not set
+ * itself (the time, a key, a clef, a tempo marking, the start of a line) moves to the next bar, so the music after it
+ * reads as before. The bars after it are renumbered. A multi-measure rest over it is cleared. Throws `BarEditError` for
+ * the only bar of the piece (`onlyBar`).
+ */
+export function deleteBar(score: Score, index: number): void {
+  const bar = barAt(score, index)
+  if (score.bars.length === 1) throw new BarEditError('onlyBar', 'The only bar of the piece cannot be deleted')
+  trackBars(score)
+  clearMultiRests(score, index, index)
+  // Slurs, ties, tremolos and hairpins with an end in the bar go, with their other ends.
+  const gone = new Set<string>()
+  for (const ref of voices(score)) {
+    const view = voiceView(score, ref)
+    for (const item of [...view.measures[index]!.items]) {
+      if (!isNote(item)) continue
+      gone.add(item.id)
+      dropSlursAndTies(view, item)
+      removeTremolo(view, item.id)
+    }
+  }
+  for (const items of allItemLists(score)) {
+    const kept = items.filter((i) => !(isWedge(i) && (gone.has(i.start) || gone.has(i.stop))))
+    items.splice(0, items.length, ...kept)
+  }
+  // What the bar sets from there on moves to the next bar, unless that bar sets its own.
+  const next = score.bars[index + 1]
+  if (next) {
+    if (bar.time && !next.time) next.time = bar.time
+    if (bar.newSystem) next.newSystem = true
+    bar.parts.forEach((pb, pi) => {
+      const into = next.parts[pi]!
+      if (pb.key && !into.key) into.key = pb.key
+      pb.staves.forEach((sb, si) => {
+        const staff = into.staves[si]!
+        if (sb.clef && !staff.clef) staff.clef = sb.clef
+        sb.voices.forEach((items, vi) => {
+          const tempo = items.filter((i) => i.kind === 'tempo')
+          const target = staff.voices[vi]
+          if (tempo.length > 0 && target && !target.some((i) => i.kind === 'tempo')) target.unshift(...tempo)
+        })
+      })
+    })
+  }
+  // The endings, as a view: the bar's place goes, and the close of an ending it ended moves to the bar before.
+  const view = endingView(score)
+  const [place] = view.splice(index, 1)
+  if (place!.close && view[index - 1]?.label === place!.label && view[index]?.label !== place!.label) view[index - 1]!.close = place!.close
+  score.bars.splice(index, 1)
+  renumberFrom(score, index, -1)
+  writeEndings(score, view, index - 1, index)
+  const after = Math.min(index, score.bars.length - 1)
+  tidyBars(score, after, after)
+}
+
+/**
+ * Makes bar `index` (from 0) the same as the bar before it in the part of `where` (design D5, spec "Same as the bar
+ * before"): in every staff and voice of that part, the bar's notes and rests are replaced by a copy of those of the bar
+ * before, with fresh ids, their accidentals and note marks, and the slurs, ties, crescendos and diminuendos that lie
+ * wholly inside that bar. The bar's own loudness marks, tempo marks and words stay at their place in the bar; its bar
+ * lines, repeat signs and endings, and the other parts, do not change. The slurs, ties and hairpins of the notes that
+ * go, go with their other ends. On a voice view, that voice only. Throws `BarEditError` for the first bar (`firstBar`).
+ */
+export function copyBarBefore(target: Score | VoiceScore, where: { part: string }, index: number): void {
+  const isScore = 'bars' in target
+  const length = isScore ? target.bars.length : target.measures.length
+  if (!Number.isInteger(index) || index < 0 || index >= length) throw new EditError('That bar does not exist')
+  if (index === 0) throw new BarEditError('firstBar', 'The first bar has no bar before it to copy')
+  if (isScore) partOf(target, where)
+  const views = isScore ? voices(target).filter((r) => r.part === where.part).map((r) => voiceView(target, r)) : [target]
+  const newId = isScore ? idMaker(target) : target.of ? idMaker(target.of.score) : localIds(target)
+
+  // The copies: each source note with a fresh id, and the old ids of the notes the copies replace.
+  const ids = new Map<string, string>()
+  for (const view of views) for (const item of view.measures[index - 1]!.items) if (isNote(item)) ids.set(item.id, newId())
+  const leaving = new Set<string>()
+  for (const view of views) for (const item of view.measures[index]!.items) if (isNote(item)) leaving.add(item.id)
+
+  // The notes that go lose their slurs, ties, tremolos and hairpins, with the other ends.
+  for (const view of views) {
+    for (const item of [...view.measures[index]!.items]) {
+      if (!isNote(item)) continue
+      dropSlursAndTies(view, item)
+      removeTremolo(view, item.id)
+    }
+  }
+  for (const items of wedgeLists(target)) {
+    const kept = items.filter((i) => !(isWedge(i) && (leaving.has(i.start) || leaving.has(i.stop))))
+    items.splice(0, items.length, ...kept)
+  }
+
+  for (const view of views) {
+    const source = view.measures[index - 1]!.items
+    const into = view.measures[index]!.items
+    const copies = copyItems(view, source, ids, openSlurNumbers(view, index))
+    // The bar's own directions keep their place in time: each goes before the first copied note at or after its start.
+    const directions = into.flatMap((item, k) => (isDirection(item) ? [{ item, at: onsetIn(into, k) }] : []))
+    for (const { item, at } of directions) {
+      let k = copies.findIndex((c, j) => isNote(c) && cmp(onsetIn(copies, j), at) >= 0)
+      if (k < 0) k = copies.length
+      while (k > 0 && isWedge(copies[k - 1]!)) k--
+      copies.splice(k, 0, item)
+    }
+    into.splice(0, into.length, ...copies)
+  }
+  for (const view of views) {
+    normaliseTuplets(view.measures[index]!)
+    resolveAlters(view, index, Math.min(index + 1, view.measures.length - 1))
+  }
+}
+
+/** Fresh note ids for a bare voice view (one not made from a score). */
+function localIds(view: VoiceScore): () => string {
+  const used = usedIds(view)
+  let n = allNotes(view).length + 1
+  return () => {
+    while (used.has(`e${n}`)) n++
+    const id = `e${n}`
+    used.add(id)
+    return id
+  }
+}
+
+/** The slur numbers of the voice that are open across the start of bar `index`: a slur copied into the bar must not take one. */
+function openSlurNumbers(view: VoiceScore, index: number): Set<number> {
+  const open = new Set<number>()
+  for (let b = 0; b < index; b++) {
+    for (const item of view.measures[b]!.items) {
+      if (!isNote(item)) continue
+      for (const s of item.slurs) if (s.type === 'stop') open.delete(s.number)
+      for (const s of item.slurs) if (s.type === 'start') open.add(s.number)
+    }
+  }
+  return open
+}
+
+/**
+ * Copies of the notes, rests and hairpins of one voice's items in one bar of `view` (`source`), for `copyBarBefore`: with
+ * the ids of `ids`, and only the slurs, ties and hairpins that lie wholly inside the bar. Slurs get numbers that are not
+ * in `taken`. Directions are not copied.
+ */
+function copyItems(view: VoiceScore, source: readonly MeasureItem[], ids: ReadonlyMap<string, string>, taken: ReadonlySet<number>): MeasureItem[] {
+  // The slurs that start and stop in the bar: their marks by note id and number.
+  const inner = new Set<string>()
+  const open = new Map<number, string[]>()
+  for (const item of source) {
+    if (!isNote(item)) continue
+    for (const s of item.slurs) {
+      if (s.type === 'start') open.set(s.number, [`${item.id}/${s.number}`])
+      else if (s.type === 'continue') open.get(s.number)?.push(`${item.id}/${s.number}`)
+      else {
+        const marks = open.get(s.number)
+        if (marks) for (const mark of [...marks, `${item.id}/${s.number}`]) inner.add(mark)
+        open.delete(s.number)
+      }
+    }
+  }
+  const numbers = new Map<number, number>()
+  const numberFor = (n: number): number => {
+    if (!numbers.has(n)) {
+      let free = 1
+      while (taken.has(free) || [...numbers.values()].includes(free)) free++
+      numbers.set(n, free)
+    }
+    return numbers.get(n)!
+  }
+  const inBar = (n: Note | undefined): boolean => !!n && source.includes(n)
+  const out: MeasureItem[] = []
+  for (const item of source) {
+    if (isWedge(item)) {
+      const start = ids.get(item.start)
+      const stop = ids.get(item.stop)
+      if (start && stop) out.push({ ...item, start, stop })
+      continue
+    }
+    if (!isNote(item)) continue
+    const copy: Note = structuredClone(item)
+    copy.id = ids.get(item.id)!
+    copy.slurs = item.slurs.filter((s) => inner.has(`${item.id}/${s.number}`)).map((s) => ({ type: s.type, number: numberFor(s.number) }))
+    if (copy.tieStart && !inBar(tiePartner(view, item.id, 1))) delete copy.tieStart
+    if (copy.tieStop && !inBar(tiePartner(view, item.id, -1))) delete copy.tieStop
+    out.push(copy)
+  }
+  return out
 }
