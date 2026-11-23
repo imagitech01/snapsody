@@ -12,7 +12,7 @@ import { noteIdsByBar, tab, textOf } from './journey.ts'
 import { BUILD_DIR } from './paths.ts'
 import { ID } from './pieces.ts'
 import { barsScore, elementsScore } from './scores.ts'
-import { MELODY_PIANO_FIXTURE, firstLine } from '../helpers.ts'
+import { MELODY_PIANO_FIXTURE, firstLine, note as noteXml, score as scoreXml } from '../helpers.ts'
 
 // The edit journey (practice-app design D15, "edit: note, mark, preview, save & practice"; tasks 15.1 to
 // 15.4; specs `score-editing`, `score-capture` "Add pages to a piece", `piece-library` "Rename"; change
@@ -1168,6 +1168,230 @@ test('edit: a slide in Notes joins three notes with a slur and changes no pitch;
     assert.deepEqual(storedBar(score, 1), ['C5 quarter', 'D5 quarter', 'E5 quarter', 'F5 quarter'], 'no pitch changed')
     assert.deepEqual([ODE[0]![0]!, ODE[0]![1]!, ODE[0]![2]!].map((id) => noteOf(score, id).slurs.map((x) => x.type)), [['start'], [], ['stop']], 'the slid slur')
     assert.deepEqual([ODE[1]![1]!, ODE[4]![2]!].map((id) => noteOf(score, id).slurs.map((x) => x.type)), [['start'], ['stop']], 'the slur from bar 2 to bar 5')
+  })
+})
+
+// ---- Grid (change redesign-score-editor, tasks 8.1 to 8.3) ----------------------------------------------------
+
+/**
+ * The Grid: one voice of the bar as blocks (design D3). It is drawn by the app, not by Verovio, and has no accessible
+ * structure of its own (like the engraved score), so a journey finds a block by its note's id (`data-note`) and a cell by
+ * the name of its row and the lines of its columns.
+ */
+const GRID = '.editor-blocks'
+const view = (page: Page, name: 'Notes' | 'Grid') => page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name })
+const block = (page: Page, id: string) => page.locator(`${GRID} g.editor-blocks-block[data-note="${id}"]`)
+/** What the editor's message row says. */
+const said = (page: Page) => textOf(page.locator('.editor-say'))
+
+/** Waits until the Grid shows bar `bar`; to measure in it, until the frame around it (the overview's line) is laid out too. */
+async function onGridBar(page: Page, bar: number, measure = true): Promise<void> {
+  await page.locator('.editor-bar-position').filter({ hasText: new RegExp(`^Bar ${bar} of `) }).waitFor()
+  await page.locator(`${GRID}[data-bar="${bar}"]`).waitFor()
+  if (measure) await laidOut(page)
+}
+
+/** The centre of the cell of the row named `row`, in column `col` (sixteenths from 0), and the height of a row. */
+async function cellOf(page: Page, row: string, col: number): Promise<{ x: number; y: number; rowH: number }> {
+  return page.evaluate(
+    ([css, name, k]) => {
+      const names = [...document.querySelectorAll(`${css} .editor-blocks-name`)]
+      const label = names.find((t) => t.textContent === name)!.getBoundingClientRect()
+      const next = names[1]!.getBoundingClientRect().top - names[0]!.getBoundingClientRect().top
+      const xs = [...document.querySelectorAll(`${css} line.editor-blocks-column`)].map((l) => l.getBoundingClientRect().left).sort((a, b) => a - b)
+      return { x: (xs[k as number]! + xs[(k as number) + 1]!) / 2, y: label.top + label.height / 2, rowH: next }
+    },
+    [GRID, row, col] as const,
+  )
+}
+
+/** The left edge of column `col` (its line). */
+const columnX = (page: Page, col: number) =>
+  page.evaluate(([css, k]) => [...document.querySelectorAll(`${css} line.editor-blocks-column`)].map((l) => l.getBoundingClientRect().left).sort((a, b) => a - b)[k as number]!, [GRID, col] as const)
+
+/** A block's box (the whole note, a staccato one too), once it is still: the Grid is drawn again when a row above it comes or goes. */
+async function blockBox(page: Page, id: string): Promise<{ x: number; y: number; width: number; height: number }> {
+  const rect = block(page, id).locator('rect').first()
+  let last = await rect.boundingBox()
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(50)
+    const box = await rect.boundingBox()
+    if (box && last && box.x === last.x && box.y === last.y && box.width === last.width && box.height === last.height) return box
+    last = box
+  }
+  assert.ok(last, `block ${id} drawn`)
+  return last
+}
+
+/** Where a block is: its left edge and the name of its row ("E5 at 56"); a message row above the Grid may change the rows' height. */
+async function blockPlace(page: Page, id: string): Promise<string> {
+  return page.evaluate(
+    ([css, note]) => {
+      const r = document.querySelector(`${css} g.editor-blocks-block[data-note="${note}"] rect`)!.getBoundingClientRect()
+      const mid = r.top + r.height / 2
+      const names = [...document.querySelectorAll(`${css} .editor-blocks-name`)].map((t) => ({ name: t.textContent, d: Math.abs(t.getBoundingClientRect().top + t.getBoundingClientRect().height / 2 - mid) }))
+      return `${names.sort((a, b) => a.d - b.d)[0]!.name} at ${Math.round(r.left)}`
+    },
+    [GRID, id] as const,
+  )
+}
+
+/** A finger dragged from one point to another in small steps, past the 8 px that decide a drag. */
+async function dragFinger(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+  const touch = await finger(page)
+  await touch.down(from.x, from.y)
+  for (let k = 1; k <= 6; k++) await touch.move(from.x + ((to.x - from.x) * k) / 6, from.y + ((to.y - from.y) * k) / 6)
+  await touch.up()
+}
+
+/** Bar 1: C5 D5 E5 F5; bar 2: a half note C5 and a half rest; bar 3: an eighth-note triplet E5 F5 G5 and C5 D5 E5. */
+const GRID_SCORE = scoreXml(
+  [
+    ['C', 'D', 'E', 'F'].map((step) => noteXml({ step, type: 'quarter' })).join(''),
+    noteXml({ step: 'C', type: 'half' }) + noteXml({ type: 'half', rest: true }),
+    ['E', 'F', 'G'].map((step) => noteXml({ step, type: 'eighth', triplet: true })).join('') + ['C', 'D', 'E'].map((step) => noteXml({ step, type: 'quarter' })).join(''),
+  ],
+  [4, 4],
+)
+const GRID_IDS = noteIdsByBar(GRID_SCORE)
+
+test('edit: Grid adds a note on beat 3 and lengthens it by its end, refuses to drag a triplet and moves the note beside it, and the loudness strip gives an mf and a crescendo; all stored', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await page.evaluate(
+      async ({ xml }) => {
+        const { platform, shell } = window.__test!
+        platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+        const info = await shell.library.create({ name: 'Grid', musicxml: xml, bars: 3, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 3 }] })
+        return info.id
+      },
+      { xml: GRID_SCORE },
+    )
+    await openEditor(page, id)
+    await view(page, 'Grid').click()
+    await onGridBar(page, 1)
+    assert.equal(await page.locator(`${GRID} g.editor-blocks-block`).count(), 4)
+    assert.equal(await page.locator(`${GRID} .editor-blocks-head text`).allTextContents().then((t) => t.join(' ')), '1 2 3 4', 'four beats over sixteen columns')
+
+    // The loudness strip (task 8.2, spec "Loudness strip in Grid"): two taps under D5 give an mf; a slide from under the
+    // first note to under the last a crescendo between them.
+    const [c5, d5, , f5] = GRID_IDS[0]!
+    const strip = (await page.locator(`${GRID} .editor-blocks-strip`).boundingBox())!
+    const under = async (note: string) => {
+      const b = await blockBox(page, note)
+      return { x: b.x + b.width / 2, y: strip.y + strip.height / 2 }
+    }
+    const atD5 = await under(d5!)
+    await page.touchscreen.tap(atD5.x, atD5.y)
+    await page.locator(`${GRID} .editor-blocks-dynamic`).filter({ hasText: /^p$/ }).waitFor()
+    await page.touchscreen.tap(atD5.x, atD5.y)
+    await page.locator(`${GRID} .editor-blocks-dynamic`).filter({ hasText: /^mf$/ }).waitFor()
+    await dragFinger(page, await under(c5!), await under(f5!))
+    await page.locator(`${GRID} path[data-hairpin="crescendo"]`).waitFor()
+
+    // Bar 2, a half note and a half rest; with a quarter chosen, a tap on G4 at beat 3 (spec "Add a note on beat 3").
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onGridBar(page, 2)
+    assert.equal(await page.getByRole('button', { name: 'Quarter', exact: true }).getAttribute('aria-pressed'), 'true', 'a quarter is what a tap adds')
+    const g4 = await cellOf(page, 'G4', 8)
+    await page.touchscreen.tap(g4.x, g4.y)
+    await page.waitForFunction(() => document.querySelector('.editor-selection')?.textContent === 'Bar 2 · Note 2')
+    assert.equal(await pitch(page), 'G4')
+    assert.equal(await textOf(page.locator('.editor-beats')), '4 of 4 beats')
+    const added = await page.locator(`${GRID} g.editor-blocks-block.is-selected`).getAttribute('data-note')
+    assert.ok(added)
+    assert.equal(await page.locator(`${GRID} g.editor-blocks-block`).count(), 2)
+
+    // Its end dragged to the end of the bar (spec "Lengthen by dragging the end"): a half note.
+    const box = await blockBox(page, added)
+    await dragFinger(page, { x: box.x + box.width - 3, y: box.y + box.height / 2 }, { x: (await columnX(page, 16)) + 2, y: box.y + box.height / 2 })
+    await page.waitForFunction(() => document.querySelector('.editor-selection')?.textContent === 'Bar 2 · Note 2')
+    await page.getByRole('group', { name: 'Length' }).getByRole('status').filter({ hasText: /^half$/ }).waitFor()
+    assert.equal(await textOf(page.locator('.editor-beats')), '4 of 4 beats')
+
+    // Bar 3: a triplet block does not follow the finger, and the Grid says where triplets are edited (spec "Try to drag
+    // a locked block"); the last quarter goes a step up and the triplet stays (spec "A triplet in the bar").
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onGridBar(page, 3)
+    const triplet = GRID_IDS[2]!
+    assert.equal(await page.locator(`${GRID} g.editor-blocks-block.is-locked`).count(), 3, 'the triplet is locked')
+    const places = () => Promise.all(triplet.slice(0, 3).map((n) => blockPlace(page, n)))
+    const before = await places()
+    assert.deepEqual(before.map((p) => p.split(' ')[0]), ['E5', 'F5', 'G5'])
+    const first = await blockBox(page, triplet[0]!)
+    await dragFinger(page, { x: first.x + first.width / 2, y: first.y + first.height / 2 }, { x: first.x + first.width / 2 + 60, y: first.y + first.height / 2 })
+    await page.locator('.editor-say').filter({ hasText: 'Edit triplets and grace notes in Notes.' }).waitFor()
+    assert.deepEqual(await places(), before, 'the triplet blocks are where they were')
+    const last = await blockBox(page, triplet[5]!)
+    const { rowH } = await cellOf(page, 'E5', 0)
+    const touch = await finger(page)
+    await touch.down(last.x + last.width / 2, last.y + last.height / 2)
+    await touch.move(last.x + last.width / 2, last.y + last.height / 2 - 9)
+    await touch.move(last.x + last.width / 2, last.y + last.height / 2 - rowH - 1)
+    await page.locator(`${GRID} .editor-blocks-ghost`).filter({ hasText: /^F5$/ }).waitFor()
+    await touch.up()
+    await page.locator(`${GRID} .editor-blocks-ghost`).waitFor({ state: 'detached' })
+    await page.waitForFunction(() => document.querySelector('.editor-selection')?.textContent === 'Bar 3 · Note 6')
+    assert.equal(await pitch(page), 'F5')
+    assert.equal(await said(page), '', 'the refusal went with the next change')
+
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const score = await stored(app, id)
+    assert.equal(dynamicOf(score, d5!)?.mark, 'mf')
+    const wedge = firstLine(score).measures[0]!.items.find(isWedge)
+    assert.deepEqual([wedge?.type, wedge?.start, wedge?.stop], ['crescendo', c5, f5])
+    assert.deepEqual(storedBar(score, 2), ['C5 half', 'G4 half'])
+    assert.deepEqual(storedBar(score, 3), ['E5 eighth', 'F5 eighth', 'G5 eighth', 'C5 quarter', 'D5 quarter', 'F5 quarter'])
+    assert.deepEqual(
+      firstLine(score).measures[2]!.items.filter(isNote).slice(0, 3).map((n) => [n.id, n.timeMod?.actual, n.timeMod?.normal]),
+      triplet.slice(0, 3).map((n) => [n, 3, 2]),
+      'the triplet is unchanged',
+    )
+  })
+})
+
+test('edit: Notes and Grid show the same bar and selection; a staccato put on in Notes stays when the block is dragged up in Grid; the editor of another piece opens in Grid', async () => {
+  await withApp({ seed: 'library' }, async (app) => {
+    const { page } = app
+    await openEditor(page, ID.ode)
+    // Spec "Switch with a note selected": the second note of bar 2, then Grid, shows bar 2 with its block selected.
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, 2)
+    const second = ODE[1]![1]!
+    await tapNote(page, second)
+    assert.equal(await selection(page), 'Bar 2 · Note 2')
+    await view(page, 'Grid').click()
+    await onGridBar(page, 2, false)
+    assert.equal(await block(page, second).getAttribute('class'), 'editor-blocks-block is-selected')
+    assert.equal(await selection(page), 'Bar 2 · Note 2')
+    // And back: Notes shows the same bar and note.
+    await view(page, 'Notes').click()
+    await onBar(page, 2)
+    await page.locator(`${BIG} g.note.mk-sel[id="${second}"]`).waitFor()
+
+    // Spec "A mark survives the other view": Staccato on the note in Notes, then its block one step up in Grid.
+    await tabs(page, 'Marks').click()
+    await page.getByRole('button', { name: 'Staccato', exact: true }).click()
+    await drawn(page, `${BIG} g.artic`, 1)
+    await view(page, 'Grid').click()
+    await onGridBar(page, 2)
+    assert.equal(await block(page, second).locator('rect.editor-blocks-block-faint').count(), 1, 'drawn as a staccato block')
+    const box = await blockBox(page, second)
+    const { rowH } = await cellOf(page, 'D5', 0)
+    await dragFinger(page, { x: box.x + box.width / 2, y: box.y + box.height / 2 }, { x: box.x + box.width / 2, y: box.y + box.height / 2 - rowH - 1 })
+    await page.waitForFunction(([css, id]) => document.querySelector(`${css} g.editor-blocks-block[data-note="${id}"] text`)?.textContent === 'E5', [GRID, second] as const)
+
+    // Spec "The view is remembered": saved in Grid, the editor of another piece opens in Grid.
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const score = await stored(app, ID.ode)
+    assert.deepEqual([noteOf(score, second).pitch, noteOf(score, second).staccato], [{ step: 'E', octave: 5 }, true])
+    await page.evaluate((pieceId) => window.__test!.shell.router.push({ name: 'editor', pieceId }), ID.warmUp)
+    await page.getByRole('heading', { name: 'Edit score', level: 1 }).waitFor()
+    await onGridBar(page, 1, false)
+    assert.equal(await view(page, 'Grid').getAttribute('aria-checked'), 'true')
+    assert.equal(await page.locator(BIG).count(), 0, 'no bar in Notes')
   })
 })
 

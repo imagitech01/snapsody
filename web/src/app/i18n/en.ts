@@ -298,7 +298,6 @@ export const en = {
   'editor.view': 'View',
   'editor.view.notes': 'Notes',
   'editor.view.grid': 'Grid',
-  'editor.grid.soon': 'The grid view is not ready yet. Switch to Notes to edit this bar.',
   'editor.full.hint': 'Tap a bar to go there.',
 
   // The Note tab
@@ -358,6 +357,12 @@ export const en = {
   'grid.error.chord': 'That note is already in the chord.',
   'grid.error.rest': 'Rests follow from the notes. Move a note instead.',
   'grid.error.gap': 'That would leave a gap that rests cannot fill.',
+  'grid.error.strip': 'Loudness goes under a note.',
+  'grid.hint': 'Tap a square to add a note. Drag a block to move it, or its end to change its length.',
+  'grid.marks.hint': 'Tap a block, then a mark. Loudness: tap the strip under a note, or slide along it.',
+  'grid.voice': 'Shown in the grid',
+  'grid.voice.handVoice': '{hand}, voice {voice}',
+  'grid.strip': 'Loud',
 
   // Suggested repairs (change redesign-score-editor, D6): built by `I18n.suggestion`, notes named in the settings' style
   'suggest.lead': 'Did you mean',

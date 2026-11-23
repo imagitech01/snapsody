@@ -1520,9 +1520,37 @@ test('actions (task 5.3): adding notes by a tap, with the drag that follows, and
   assert.equal(editor.message.value, 'That goes past the end of the bar.')
   oneStep(editor, 'grid resize', () => editor.gridResize(g, frac(1, 8)))
   assert.equal(editor.message.value, null, 'a done action clears the message')
-  oneStep(editor, 'grid pitch', () => editor.dragPitch(g, 1))
+  oneStep(editor, 'grid pitch', () => editor.gridPitch(g, 1))
   assert.deepEqual(barText(editor, 3), ['rest quarter', 'E5 quarter', 'A5 eighth', 'rest eighth'])
   oneStep(editor, 'grid delete', () => editor.deleteNote(g))
+})
+
+test('Grid pitch (task 8.1): a block dragged up or down is one undo step, also right after a tap added it; a triplet block is refused with where it is edited, and a rest is no block', async () => {
+  const triplet = note({ step: 'E', type: 'eighth', triplet: true })
+  const { editor } = await openPages([score([quarters(4), triplet + triplet + triplet + quarters(3), quarters(4)], [4, 4])])
+  editor.goToBar(2)
+  const ids = idsOf(editor, 2)
+  const before = editor.score.value
+  assert.equal(editor.gridPitch(ids[0]!, 1), false, 'a triplet note')
+  assert.equal(editor.message.value, 'Edit triplets and grace notes in Notes.')
+  assert.equal(editor.score.value, before, 'nothing changed')
+  oneStep(editor, 'the last quarter one step up', () => editor.gridPitch(ids[5]!, 1))
+  assert.equal(editor.message.value, null)
+  assert.deepEqual(barText(editor, 2).slice(3), ['G5 quarter', 'G5 quarter', 'A5 quarter'])
+  // A note a tap just added is a step of its own; its drag is another.
+  editor.goToBar(1)
+  editor.deleteNote(idsOf(editor, 1)[3]!)
+  editor.clearSelection()
+  const added = editor.gridAdd(frac(3, 4), { step: 'C', octave: 5 })!
+  oneStep(editor, 'the added note down', () => editor.gridPitch(added, -1))
+  editor.undo()
+  assert.deepEqual(barText(editor, 1).at(-1), 'C5 quarter', 'the undo took the drag only')
+  // A rest is not a block.
+  editor.select(idsOf(editor, 3)[0]!)
+  editor.chooseRest(true)
+  const rest = notesOf(firstLine(editor.score.value).measures[2]!).find((n) => n.rest)!
+  assert.equal(editor.gridPitch(rest.id, 1), false)
+  assert.equal(editor.message.value, 'Rests follow from the notes. Move a note instead.')
 })
 
 test('actions (task 5.3): marks, loudness, endings, bar lines, bars and suggestions are one undo step each, and a refusal says why', async () => {

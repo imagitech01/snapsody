@@ -13,6 +13,7 @@ import { Button, IconButton, SegmentedControl } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
 import { BarSurface } from './BarSurface.tsx'
 import { ElementPanel } from './ElementPanel.tsx'
+import { GridSurface } from './GridSurface.tsx'
 import { frameLayout } from './frame.ts'
 import type { FrameLayout } from './frame.ts'
 import { BarLineGroup } from './MarksTab.tsx'
@@ -37,8 +38,10 @@ import { ScoreTab } from './ScoreTab.tsx'
  * 5. One row for what the editor has to say (design D13): the notice of a slur, tie or hairpin that waits for its last
  *    note, with Cancel (design D14), which says a refused change in its place until the next action; else a refused
  *    change; else what the bar's warning says.
- * 6. The large bar (`BarSurface`: a tap selects a note or an element or adds a note, a drag changes a pitch); Grid is
- *    drawn in a later step, so it shows a placeholder for now.
+ * 6. The large bar: in Notes `BarSurface` (a tap selects a note or an element or adds a note, a drag changes a pitch),
+ *    in Grid `GridSurface` (the voice as blocks: a tap on a cell adds a note, a block is dragged to move it, change its
+ *    pitch or by its end its length, and the loudness strip under it). Both show the same bar and the same selection,
+ *    which are the session's, so switching keeps them (spec "Notes and Grid views").
  * 7. The tools: the tabs Notes · Marks · Bars · Score and the tray of the open one, with the selection and the selected
  *    element (`ElementPanel`) at its top. Notes is the Notes tray (`NotesTray`) and Marks the Marks tray (`MarksTray`);
  *    Bars is still today's bar-line group (`MarksTab`'s `BarLineGroup`) until its new tray replaces it (task 9.1). With
@@ -79,7 +82,7 @@ export function Editor({ session }: { session: EditorSession }) {
   const { router, i18n } = useShell()
   const { t } = i18n
   /** Why the last change of today's tools did not happen: a fixed text, or one already made from the refusal. */
-  const [message, setMessage] = useState<FailureKey | 'mark.error.slide' | { text: string } | null>(null)
+  const [message, setMessage] = useState<FailureKey | 'mark.error.slide' | 'grid.error.strip' | { text: string } | null>(null)
   const [saveError, setSaveError] = useState<'empty-name' | 'conflict' | 'failed' | null>(null)
   const [layout, setLayout] = useState<FrameLayout>({ overview: 'line', scroll: false })
   const frame = useRef<HTMLDivElement>(null)
@@ -285,9 +288,9 @@ export function Editor({ session }: { session: EditorSession }) {
       : selection && note && label
         ? label
         : tools !== 'marks'
-          ? t('editor.selection.none')
+          ? t(view === 'grid' && tools === 'notes' ? 'grid.hint' : 'editor.selection.none')
           : armed === null
-            ? t('marks.hint')
+            ? t(view === 'grid' ? 'grid.marks.hint' : 'marks.hint')
             : isSpanMark(armed)
               ? t('marks.armed.span')
               : t('marks.armed.note')
@@ -444,7 +447,13 @@ export function Editor({ session }: { session: EditorSession }) {
 
           <div class="editor-surface" role="region" aria-label={t('editor.bar.large', { bar: current })}>
             {view === 'grid' ? (
-              <p class="editor-grid-soon">{t('editor.grid.soon')}</p>
+              <GridSurface
+                session={session}
+                onTapNote={tapNote}
+                onTapEmpty={() => tapElement(undefined)}
+                onQuiet={quiet}
+                onStripNowhere={() => setMessage('grid.error.strip')}
+              />
             ) : (
               <BarSurface
                 session={session}

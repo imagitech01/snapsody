@@ -451,12 +451,186 @@
   width: 100%;
   height: 100%;
 }
-.editor-grid-soon {
-  margin: auto;
-  padding: var(--space-4);
-  color: var(--ink-muted);
-  font-size: var(--fs-12);
-  text-align: center;
+/* The Grid (task 8.1, design D3, D4): the voice chip, the beat numbers, the rows (which scroll inside when they do not fit,
+   by the row names: the cells take every touch) and the loudness strip. Drawn from `grid.ts` with `ui/gridSurface.ts`. */
+.editor-blocks {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.editor-blocks-chip {
+  flex: none;
+  display: flex;
+  padding: var(--space-1) var(--space-1) 0;
+}
+.editor-blocks-chip .editor-select {
+  min-width: 9rem;
+}
+.editor-blocks-head,
+.editor-blocks-strip {
+  flex: none;
+  display: block;
+  touch-action: none;
+}
+.editor-blocks-head text {
+  fill: var(--ink-muted);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+}
+.editor-blocks-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+.editor-blocks-scroll.is-scrolling {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.editor-blocks-rows {
+  position: relative;
+}
+.editor-blocks-cells {
+  display: block;
+  touch-action: none;
+}
+.editor-blocks-names {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  touch-action: pan-y;
+}
+.editor-blocks-band {
+  fill: var(--surface);
+}
+.editor-blocks-band.is-odd {
+  fill: var(--bg);
+}
+.editor-blocks-staffline {
+  stroke: var(--line-control);
+  stroke-width: 1;
+}
+.editor-blocks-name,
+.editor-blocks-strip-name {
+  fill: var(--ink-muted);
+  font-size: var(--fs-10);
+  text-anchor: end;
+  dominant-baseline: central;
+}
+.editor-blocks-row.is-line .editor-blocks-name {
+  fill: var(--ink);
+  font-weight: var(--fw-semibold);
+}
+.editor-blocks-column {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.editor-blocks-column.is-beat {
+  stroke: var(--line-control);
+}
+.editor-blocks-column.is-bar {
+  stroke: var(--ink-muted);
+  stroke-width: 1.5;
+}
+/* A voice longer than its bar: the time past the bar's end. */
+.editor-blocks-over {
+  fill: var(--mark-flagbar);
+  fill-opacity: 0.18;
+}
+.editor-blocks-hatch-back {
+  fill: var(--primary-tint);
+}
+.editor-blocks-hatch-line {
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-opacity: 0.55;
+}
+.editor-blocks-locked-rest {
+  fill: url(#editor-blocks-hatch);
+  fill-opacity: 0.45;
+}
+.editor-blocks-other {
+  fill: var(--ink-muted);
+  fill-opacity: 0.22;
+}
+.editor-blocks-block-body {
+  fill: var(--primary);
+}
+.editor-blocks-block-faint {
+  fill: var(--primary);
+  fill-opacity: 0.3;
+}
+.editor-blocks-block-accent {
+  fill: var(--ink);
+}
+.editor-blocks-block-end {
+  stroke: var(--on-primary);
+  stroke-width: 2;
+  stroke-opacity: 0.7;
+  stroke-linecap: round;
+}
+.editor-blocks-block-name {
+  fill: var(--on-primary);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+  dominant-baseline: central;
+}
+.editor-blocks-block.is-selected .editor-blocks-block-body,
+.editor-blocks-block.is-selected .editor-blocks-block-faint {
+  fill: var(--ink);
+}
+.editor-blocks-block.is-locked .editor-blocks-block-body {
+  fill: url(#editor-blocks-hatch);
+  stroke: var(--primary);
+  stroke-width: 1;
+}
+.editor-blocks-block.is-locked .editor-blocks-block-name {
+  fill: var(--ink);
+}
+.editor-blocks-block.is-locked.is-selected .editor-blocks-block-body {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+.editor-blocks-block.is-picked .editor-blocks-block-body {
+  stroke: var(--mark-start);
+  stroke-width: 2;
+}
+.editor-blocks-block.is-dragged {
+  opacity: 0.3;
+}
+.editor-blocks-ghost .editor-blocks-block-body,
+.editor-blocks-ghost .editor-blocks-block-faint {
+  fill: var(--ink);
+  fill-opacity: 0.85;
+}
+.editor-blocks-strip-back {
+  fill: var(--surface-muted);
+}
+.editor-blocks-dynamic {
+  fill: var(--ink);
+  font-size: var(--fs-15);
+  font-style: italic;
+  font-weight: var(--fw-bold);
+  dominant-baseline: central;
+  /* Readable over a hairpin that starts under it. */
+  paint-order: stroke;
+  stroke: var(--surface-muted);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.editor-blocks-hairpin {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+.editor-blocks-hairpin.is-sliding {
+  stroke: var(--primary);
+  stroke-dasharray: 4 3;
 }
 
 /* The selected note is blue also when it is flagged (the flag is in the text above the bar). */

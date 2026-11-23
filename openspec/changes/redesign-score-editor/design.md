@@ -111,6 +111,15 @@ The rule that makes this safe: Grid never rewrites a bar. Every Grid gesture is 
 
 *Alternative considered:* a finer grid when the bar has triplets. Rejected for now: twelve and sixteen do not share a grid without 48 columns, which is too fine to touch.
 
+**Decided while applying (2026-11-23), for the Grid (group 8):**
+
+- A cell is one sixteenth wide (the width after the row names, shared by the columns: about 18 px in 4/4 on a phone) and one staff step high, between 16 and 26 px, as the mock's 16 px rows. When the rows do not fit at 16 px (a piano bar), they scroll inside the Grid, by the row names at the left, which take no Grid gesture; the beat numbers and the loudness strip stay. The cells take every touch, so a vertical drag on them is never a scroll. This replaces "there is no vertical scrolling" in D3.
+- A drag on a block decides its way after 8 px by the larger axis, as in Notes (D2): up or down is a pitch change, sideways a move. Not both in one gesture, so each gesture stays one operation (D4). A drag from the block's end changes its length to the longest note value that ends at or before the column line nearest the finger.
+- The block is drawn where it would go while the finger is down; the session makes the change on release, or refuses it and the block is drawn where it was, with the reason on the message line. A locked block does not follow the finger; the release says "Edit triplets and grace notes in Notes."
+- A tap on a block selects its note, a locked one too, so the Notes tools can change it; with a mark armed it paints it, as in Notes. A tap on an empty cell adds what a tap adds only with the Notes tools open and no mark armed; else it puts the selection away. Drags work with any tools open.
+- The voice chip is a native choice ("Left hand", "Left hand, voice 2", "Voice 2") above the beat numbers, shown only when the part has more than one staff or voice.
+- A tap or slide on the strip under no note says "Loudness goes under a note." A slide that ends between two notes ends on the nearest one.
+
 ### D5. New operations in `edit.ts`
 
 All pure, all on `Score | VoiceScore` like the existing ones, all throwing `EditError` with a reason the screen can explain:

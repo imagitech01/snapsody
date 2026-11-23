@@ -974,6 +974,25 @@ export class EditorSession {
     return this.tryApply((s) => moveNote(s, id, start))
   }
 
+  /**
+   * A block dragged up or down by `steps` staff steps (up is positive; spec "Edit notes in Grid"): that note's pitch, a
+   * chord's note on its own, as one undo step, as `stepPitch` makes it. A locked block (a triplet, a grace note, a note
+   * off the sixteenths: design D4) and a rest are refused with what the Grid says about them, and nothing changes.
+   */
+  gridPitch(id: string, steps: number): boolean {
+    const score = this.session.score
+    const place = placeOfNote(score, id)
+    if (!place || !Number.isInteger(steps)) return false
+    const block = gridOf(score, place.ref, place.barIndex).blocks.find((b) => b.id === id)
+    if (!block) return this.refuse('grid.error.rest')
+    if (block.locked) return this.refuse('grid.error.locked')
+    this.added = null
+    if (steps === 0) return true
+    return this.tryApply((s) => {
+      for (let k = 0; k < Math.abs(steps); k++) stepPitch(s, id, steps > 0 ? 1 : -1)
+    })
+  }
+
   /** A block's end dragged to make it `length` long (`resizeNote`). False when refused. */
   gridResize(id: string, length: Frac): boolean {
     return this.tryApply((s) => resizeNote(s, id, length))

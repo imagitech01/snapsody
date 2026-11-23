@@ -58,9 +58,9 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 
 ## 8. Grid
 
-- [ ] 8.1 The Grid surface drawn from `grid.ts`: rows with note names, beat columns, blocks, locked blocks, the faint other voices, the staff and voice chip. Tap a cell to add, drag a block up, down and sideways, drag its end, tap to select; a refused gesture puts the block back and shows why. Verify (browser): a journey in `web/test/ui/edit.test.ts` adds a note on beat 3, lengthens it by its end, fails to drag a triplet block, and finds the stored bar as expected with the triplet unchanged.
-- [ ] 8.2 The loudness strip: the marks and hairpins of the bar, tap to step *p*, *mf*, *f*, none, slide forward for a crescendo and back for a diminuendo. Verify (browser): a journey taps the strip twice under a note and slides from the first to the last note, and finds an *mf* and a crescendo stored.
-- [ ] 8.3 Switching between Notes and Grid keeps the bar and the selection, and the view is remembered. Verify (browser): a journey proves the three scenarios of the spec's "Notes and Grid views".
+- [x] 8.1 The Grid surface drawn from `grid.ts`: rows with note names, beat columns, blocks, locked blocks, the faint other voices, the staff and voice chip. Tap a cell to add, drag a block up, down and sideways, drag its end, tap to select; a refused gesture puts the block back and shows why. Verify (browser): a journey in `web/test/ui/edit.test.ts` adds a note on beat 3, lengthens it by its end, fails to drag a triplet block, and finds the stored bar as expected with the triplet unchanged.
+- [x] 8.2 The loudness strip: the marks and hairpins of the bar, tap to step *p*, *mf*, *f*, none, slide forward for a crescendo and back for a diminuendo. Verify (browser): a journey taps the strip twice under a note and slides from the first to the last note, and finds an *mf* and a crescendo stored.
+- [x] 8.3 Switching between Notes and Grid keeps the bar and the selection, and the view is remembered. Verify (browser): a journey proves the three scenarios of the spec's "Notes and Grid views".
 - [ ] 8.4 Check Grid by eye in browser-dev at 360 × 780 in 4/4, 3/4 and 6/8, with a triplet bar and a left hand, in both note-name styles. Manual.
 
 ## 9. Bars
