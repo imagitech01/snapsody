@@ -149,6 +149,15 @@ It does not guess beyond one change. That keeps it predictable, and a wrong gues
 - 2 is refused unless the bar before lies in ending 1 or 2.
 - An ending whose number is not "1" or "2" (for example "1, 2") is shown with its number and can only be removed.
 
+**Decided while applying (2026-11-23), for the Marks tools:**
+
+- A lit Slur, Tie, Cresc. or Dim. key on a selected note removes that mark from the note (spec: "Tapping an active mark SHALL remove it"); it does not arm. So a note that already ends a slur starts a new one mark first, or by a slide.
+- A mark stays armed after its slur or hairpin is added, until it is tapped again or another tab is opened.
+- While a slur or hairpin waits for its last note, a refusal takes the notice's place for that moment, beside Cancel. A second row would push Save & practice off the screen on a piano bar (D13).
+- The hints of an armed mark are the first line of the tray, not the message line.
+- The marks of a note are five keys across, so the words fit; Arpeggio has a key, off for a single note.
+- The slide with an armed tie, crescendo or diminuendo is proven in the quick layer; the browser journey slides a slur.
+
 ### D8. Bar numbers after added and deleted bars
 
 `Bar.from` (the stretch of the loaded score a bar holds) stays the basis. Two additions:

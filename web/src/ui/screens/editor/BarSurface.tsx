@@ -7,8 +7,8 @@ import { partIndex } from '../../../core/score/model.ts'
 import type { Pitch, Score } from '../../../core/score/model.ts'
 import { createScoreView } from '../../scoreView.ts'
 import type { ScoreView } from '../../scoreView.ts'
-import { dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, STAFF_REACH_STEPS, stepAt, yOfStep } from '../../notesSurface.ts'
-import type { SlotGeometry, StaffGeometry } from '../../notesSurface.ts'
+import { dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, slideTarget, spanShapes, STAFF_REACH_STEPS, stepAt, yOfStep } from '../../notesSurface.ts'
+import type { SlotGeometry, SpanShape, StaffGeometry } from '../../notesSurface.ts'
 import { useShell } from '../../ShellContext.ts'
 import { drawnNote, readBarLayout } from './barLayout.ts'
 import { fromExcerpt, toExcerpt } from './frame.ts'
@@ -29,13 +29,19 @@ import { fromExcerpt, toExcerpt } from './frame.ts'
  *   of the gesture. Up or down, with the Notes tools open, is a pitch drag of that note (a chord's note on its own): the
  *   note is selected, a ghost notehead follows the finger from staff step to staff step, counted from where the drag was
  *   decided, with the note's name beside it, and each new step sounds (`soundPitch`). On release the steps are applied
- *   once (`dragPitch`, one undo step), and the bar is drawn again. Sideways is the slide of a slur (task 7.2), not here yet.
+ *   once (`dragPitch`, one undo step), and the bar is drawn again.
+ * - Sideways, with any tools open, is a slide to another note (task 7.2, spec "Slide between two notes"): a dashed arc
+ *   follows the finger from the note, and on release the note of the same staff nearest the finger (`slideTarget`) is the
+ *   slur's other end, or the armed tie, crescendo or diminuendo's (`slide`, one undo step; the session refuses what does
+ *   not join). A release on no note says how a slide is made (`onSlideNowhere`). A slide from a rest does nothing.
  * - Where a tap may add a note (`canAddByTap`), a touch in the slot or on the staff adds one at once, at the staff step
  *   under the finger (`addAtSlot`, `addOnStaff`), and it sounds; while the finger stays down it is dragged to its pitch
  *   by the steps from where it came down, with the ghost and its name, and the release is part of the same undo step.
  *
  * What it draws is one bar as a score of its own, so the elements it finds are named in the score through `fromExcerpt`
- * before the editor sees them.
+ * before the editor sees them. That drawing leaves out the slurs, ties and hairpins that reach another bar (`barForEditing`),
+ * so the overlay draws them as hints, in from the start of the notes or out to the bar line (`spanShapes`, design D14); and
+ * the first note of a span that waits for its last note is marked as picked.
  */
 export interface BarSurfaceProps {
   session: EditorSession
@@ -47,13 +53,15 @@ export interface BarSurfaceProps {
   onTapElement: (ref: ElementRef | undefined) => void
   /** Before a note is added or dragged: what the editor says goes. */
   onQuiet: () => void
+  /** A slide that ended on no note. */
+  onSlideNowhere: () => void
 }
 
 /** A gesture on the large bar, from the touch to the release. */
 type Gesture =
   | { kind: 'element'; ref: ElementRef; x0: number; y0: number; moved: boolean }
   | { kind: 'empty'; x0: number; y0: number; moved: boolean }
-  | { kind: 'note'; id: string; x0: number; y0: number; axis: 'none' | 'vertical' | 'horizontal'; drag?: PitchDrag }
+  | { kind: 'note'; id: string; x0: number; y0: number; axis: 'none' | 'vertical' | 'horizontal'; drag?: PitchDrag; slide?: Slide }
   /** A note added by the touch, dragged to its pitch while the finger stays down. */
   | { kind: 'added'; id: string; drag: PitchDrag; y0: number }
   | { kind: 'done' }
@@ -67,15 +75,29 @@ interface PitchDrag {
   steps: number
 }
 
+/** A slide from a note: where its arc starts (over the note's head), and where the finger is now, in screen coordinates. */
+interface Slide {
+  x1: number
+  y1: number
+  x: number
+  y: number
+  /** A staff step, for the arc's bow. */
+  gap: number
+}
+
 /** What the overlay draws, in the box's own coordinates. */
 interface Overlay {
   slots: readonly SlotGeometry[]
   /** The two staff-line heights of each slot's staff, for its height. */
   slotStaves: ReadonlyMap<number, { top: number; bottom: number }>
+  /** The hints of the spans that reach outside the bar. */
+  spans: readonly SpanShape[]
   ghost?: { x: number; y: number; rx: number; ry: number; ledgers: readonly number[]; lineHalf: number; name: string; nameLeft: boolean }
+  /** The arc of a slide, as a path. */
+  slide?: string
 }
 
-const EMPTY: Overlay = { slots: [], slotStaves: new Map() }
+const EMPTY: Overlay = { slots: [], slotStaves: new Map(), spans: [] }
 
 /** The pitch on the middle line of each staff of the part `part` in a one-bar score (its clef in force). */
 function middlesOf(excerpt: Score, part: string): number[] {
@@ -84,7 +106,7 @@ function middlesOf(excerpt: Score, part: string): number[] {
   return staves.map((s) => middleLine(s.clef ?? { sign: 'G', line: 2 }))
 }
 
-export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElement, onQuiet }: BarSurfaceProps) {
+export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElement, onQuiet, onSlideNowhere }: BarSurfaceProps) {
   const { i18n } = useShell()
   const box = useRef<HTMLDivElement>(null)
   const host = useRef<HTMLDivElement>(null)
@@ -92,8 +114,8 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
   /** The excerpt given to the view last, and the bar (from 1) it is. */
   const drawn = useRef<{ excerpt: Score; bar: number } | undefined>(undefined)
   const gesture = useRef<Gesture>({ kind: 'done' })
-  const latest = useRef({ onTapNote, onTapElement, onQuiet, i18n })
-  latest.current = { onTapNote, onTapElement, onQuiet, i18n }
+  const latest = useRef({ onTapNote, onTapElement, onQuiet, onSlideNowhere, i18n })
+  latest.current = { onTapNote, onTapElement, onQuiet, onSlideNowhere, i18n }
   const [overlay, setOverlay] = useState<Overlay>(EMPTY)
 
   const score = session.score.value
@@ -102,6 +124,7 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
   const excerpt = useMemo(() => barForEditing(score, bar - 1), [score, bar])
   const selectedId = session.selection.value?.noteId ?? null
   const element = session.selectedElement.value?.ref
+  const picked = session.pending.value?.from ?? null
 
   /** The layout of the drawn bar, measured now. */
   const layoutNow = () => {
@@ -111,14 +134,23 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
     return readBarLayout(root, middlesOf(shown.excerpt, session.part.peek()), session.slots.peek())
   }
 
-  /** The overlay's slots, measured again after the bar is drawn. */
+  /** The overlay's slots and the hints of the spans that reach outside the bar, measured again after the bar is drawn. */
   const measureSlots = () => {
     const origin = box.current?.getBoundingClientRect()
     if (!origin) return
     const layout = layoutNow()
     const slots = layout.slots.map((s) => ({ ...s, left: s.left - origin.left, right: s.right - origin.left }))
     const slotStaves = new Map(layout.staves.map((s) => [s.staff, { top: s.top - origin.top, bottom: s.bottom - origin.top }]))
-    setOverlay((now) => ({ ...now, slots, slotStaves }))
+    const shifted = {
+      staves: layout.staves.map((s) => ({ ...s, left: s.left - origin.left, right: s.right - origin.left, top: s.top - origin.top, bottom: s.bottom - origin.top })),
+      notes: layout.notes.map((n) => ({ ...n, head: shift(n.head, origin), box: shift(n.box, origin) })),
+      slots: [],
+    }
+    const spans = spanShapes(
+      shifted,
+      session.spans.peek().map((x) => ({ kind: x.kind, fromId: x.fromId, toId: x.toId, staff: x.voice.staff, startsHere: x.startsHere, endsHere: x.endsHere })),
+    )
+    setOverlay((now) => ({ ...now, slots, slotStaves, spans }))
   }
 
   useLayoutEffect(() => {
@@ -162,6 +194,10 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
   }, [selectedId])
 
   useLayoutEffect(() => {
+    view.current?.mark('pick', picked ? [picked] : [])
+  }, [picked])
+
+  useLayoutEffect(() => {
     view.current?.mark('flag', [...flagged])
     view.current?.mark('flagbar', [...flaggedBars])
   }, [flagged, flaggedBars])
@@ -176,7 +212,7 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
     const origin = box.current?.getBoundingClientRect()
     for (const g of root?.querySelectorAll('.is-dragged') ?? []) if (!drag || g.id !== drag.id) g.classList.remove('is-dragged')
     if (!drag || !root || !origin || !pitch) {
-      setOverlay((now) => (now.ghost ? { slots: now.slots, slotStaves: now.slotStaves } : now))
+      setOverlay((now) => (now.ghost ? { slots: now.slots, slotStaves: now.slotStaves, spans: now.spans } : now))
       return
     }
     drawnNote(root, drag.id)?.classList.add('is-dragged')
@@ -202,6 +238,21 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
         nameLeft: x > origin.width - 84,
       },
     }))
+  }
+
+  /** Draws the arc of a slide to where the finger is, or (undefined) takes it away. */
+  const showSlide = (slide: Slide | undefined) => {
+    const origin = box.current?.getBoundingClientRect()
+    if (!slide || !origin) {
+      setOverlay((now) => (now.slide ? { ...now, slide: undefined } : now))
+      return
+    }
+    const x1 = slide.x1 - origin.left
+    const y1 = slide.y1 - origin.top
+    const x2 = slide.x - origin.left
+    const y2 = slide.y - origin.top
+    const d = `M${x1} ${y1} Q${(x1 + x2) / 2} ${Math.min(y1, y2) - 3 * slide.gap} ${x2} ${y2}`
+    setOverlay((now) => ({ ...now, slide: d }))
   }
 
   /** The drag has gone to `y`: its steps, and when they changed the ghost, the name and the sound. */
@@ -269,14 +320,28 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
     }
     if (g.axis === 'none') {
       g.axis = dragAxis(x - g.x0, y - g.y0)
-      if (g.axis !== 'vertical' || session.tools.peek() !== 'notes') return
+      if (g.axis === 'none') return
       const root = view.current?.element
       const layout = layoutNow()
       const note = layout.notes.find((n) => n.id === g.id)
       const staff = note && layout.staves.find((s) => s.staff === note.staff)
       if (!root || !note || note.rest || !staff) return
-      latest.current.onTapNote(g.id)
+      if (g.axis === 'horizontal') {
+        // A slide (design D2): in any tools, from over the note's head.
+        g.slide = { x1: (note.head.left + note.head.right) / 2, y1: Math.min(note.box.top, note.head.top) - halfGap(staff), x, y, gap: halfGap(staff) }
+        showSlide(g.slide)
+        return
+      }
+      if (session.tools.peek() !== 'notes') return
+      latest.current.onQuiet()
+      session.select(g.id)
       g.drag = { id: g.id, staff, step: stepAt(staff, (note.head.top + note.head.bottom) / 2), fromY: y, steps: 0 }
+      return
+    }
+    if (g.slide) {
+      g.slide.x = x
+      g.slide.y = y
+      showSlide(g.slide)
       return
     }
     if (g.drag) follow(g.drag, dragSteps(halfGap(g.drag.staff), g.drag.fromY, y))
@@ -287,6 +352,7 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
     const g = gesture.current
     gesture.current = { kind: 'done' }
     showGhost(undefined, undefined)
+    showSlide(undefined)
     if (g.kind === 'done' || cancelled) {
       // The note a touch added stays where it was added; the drag that follows it is over.
       if (g.kind === 'added') session.dragPitch(g.id, 0)
@@ -301,6 +367,11 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
       session.dragPitch(g.id, g.drag.steps)
     } else if (g.axis === 'none') {
       tapNote(g.id)
+    } else if (g.slide) {
+      quiet()
+      const target = slideTarget(layoutNow(), g.id, g.slide.x, g.slide.y)
+      if (target) session.slide(g.id, target.id)
+      else latest.current.onSlideNowhere()
     } else if (g.drag && g.drag.steps !== 0) {
       quiet()
       session.dragPitch(g.id, g.drag.steps)
@@ -319,6 +390,10 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
     >
       <div ref={host} class="editor-bar-host" />
       <svg class="editor-bar-overlay" aria-hidden="true">
+        {overlay.spans.map((span, k) => (
+          <path key={k} class={`editor-span-hint editor-span-hint--${span.kind}`} d={span.d} />
+        ))}
+        {overlay.slide ? <path class="editor-slide" d={overlay.slide} /> : null}
         {overlay.slots.map((slot) => {
           const lines = overlay.slotStaves.get(slot.staff)
           if (!lines) return null
@@ -355,4 +430,9 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
       ) : null}
     </div>
   )
+}
+
+/** A box moved into the coordinates of `origin`. */
+function shift(b: { left: number; right: number; top: number; bottom: number }, origin: DOMRect) {
+  return { left: b.left - origin.left, right: b.right - origin.left, top: b.top - origin.top, bottom: b.bottom - origin.top }
 }

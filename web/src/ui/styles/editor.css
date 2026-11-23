@@ -286,6 +286,8 @@
 /* ---- What the editor says: one row (design D13) ------------------------------------------------ */
 
 .editor-say {
+  display: grid;
+  gap: var(--space-1);
   min-height: 1rem;
 }
 .editor-say p {
@@ -301,6 +303,37 @@
 }
 .editor-say .editor-message {
   padding: 0.125rem var(--space-2);
+}
+/* A slur, tie or hairpin that waits for its last note (design D14): the row, with Cancel; a refusal meanwhile takes its text. */
+.editor-waiting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 0 0 var(--space-3);
+  border-radius: var(--radius);
+  background: var(--primary-tint);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.editor-say p.editor-waiting-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--primary);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+}
+.editor-waiting--refused {
+  background: var(--danger-tint);
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+.editor-say .editor-waiting--refused p.editor-waiting-text {
+  color: var(--danger);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+}
+.editor-waiting .editor-waiting-cancel {
+  flex: none;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-12);
 }
 
 /* ---- The large bar ----------------------------------------------------------------------------- */
@@ -358,6 +391,28 @@
   text-anchor: middle;
   dominant-baseline: central;
 }
+/* The slurs, ties and hairpins that reach outside the bar (design D14): a hint in the selection's muted tone, not tappable. */
+.editor-span-hint {
+  fill: none;
+  stroke: var(--primary);
+  stroke-opacity: 0.55;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 6 4;
+}
+.editor-span-hint--crescendo,
+.editor-span-hint--diminuendo {
+  stroke-dasharray: none;
+  stroke-width: 1.5;
+}
+/* A slide from one note to another (task 7.2): the arc follows the finger. */
+.editor-slide {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 5 4;
+}
 /* A pitch drag: the ghost notehead on the staff step under the finger, with its ledger lines, and the note's name. */
 .editor-ghost ellipse {
   fill: var(--primary);
@@ -411,6 +466,17 @@
 .editor .score-view g.rest.mk-sel * {
   fill: var(--primary);
   stroke: var(--primary);
+}
+
+/* The first note of a slur, tie or hairpin that waits for its last note (design D14): in the large bar, the overview and
+   the full score, in the accent colour with a glow, so it reads as picked and not only selected. */
+.editor .score-view g.note.mk-pick,
+.editor .score-view g.note.mk-pick * {
+  fill: var(--primary);
+  stroke: var(--primary);
+}
+.editor .score-view g.note.mk-pick {
+  filter: drop-shadow(0 0 4px var(--primary)) drop-shadow(0 0 2px var(--primary));
 }
 
 /* The selected element (a clef, a dynamic, a slur, ...): all of its drawing in the accent colour. */
@@ -652,6 +718,11 @@
   box-shadow: inset 0 0 0 1px var(--primary);
   color: var(--primary);
 }
+/* An armed mark (the Marks tray): it goes on every note tapped. */
+.editor-chip.is-armed {
+  outline: 2px dashed var(--primary);
+  outline-offset: -4px;
+}
 /* Waiting for the notes of a slur, a tie or a hairpin. */
 .editor-chip.is-picking {
   outline: 2px dashed var(--primary);
@@ -688,6 +759,84 @@
 .editor-marks-grid .editor-chip {
   font-size: var(--fs-10);
 }
+/* The Marks tray (task 7.1): the marks of a note five across, the marks that join two notes four across, the loudness
+   marks six across, then the slurs and hairpins of the bar. Every key is at least 44 x 44. */
+.editor-marks-tray {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) 0;
+}
+.editor-marks-keys {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+.editor-marks-keys--span {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.editor-marks-keys--loudness {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+.editor-marks-tray .editor-chip {
+  padding: 0 0.125rem;
+}
+.editor-mark-face {
+  display: grid;
+  justify-items: center;
+  gap: 0.0625rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.editor-mark-sign {
+  font-size: var(--fs-15);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+}
+.editor-mark-name {
+  max-width: 100%;
+  font-size: var(--fs-10);
+  font-weight: var(--fw-medium);
+  line-height: 1.1;
+}
+.editor-mark-face--loudness {
+  font-size: var(--fs-16);
+  font-style: italic;
+  font-weight: var(--fw-bold);
+}
+/* The slurs, ties and hairpins that touch the bar, each with its bars, the keys to its ends and Remove. */
+.editor-spans {
+  display: grid;
+  gap: var(--space-1);
+}
+.editor-span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-left: var(--space-3);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.editor-span-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+}
+.editor-span-key {
+  flex: none;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  color: var(--primary);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.editor-span-key--remove {
+  color: var(--danger);
+  font-size: var(--fs-14);
+}
+
 /* The "Bar N" group, the temporary Bars tray (change edit-bar-lines, D2): the Score tab's grid. */
 .editor-barlines {
   padding: var(--space-1) var(--space-3) 0;

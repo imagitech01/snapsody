@@ -221,3 +221,84 @@ export function ledgerSteps(step: number): number[] {
   for (let s = -6; s >= step; s -= 2) out.push(s)
   return out
 }
+
+/**
+ * The note a slide that started on the note `fromId` ends on (spec "Slide between two notes"): of the notes and rests of
+ * that note's staff, the one whose head is nearest to `x` (the height counts only between the notes of a chord, which
+ * stand at one place); undefined when the finger is outside the staff's notes or ends where it started. A rest is
+ * returned as it is: the caller says that a slur joins notes.
+ *
+ *   slideTarget(ODE, 'c', 182) // 'e'
+ */
+export function slideTarget(layout: BarLayout, fromId: string, x: number, y: number): DrawnNote | undefined {
+  const from = layout.notes.find((n) => n.id === fromId)
+  const staff = from && layout.staves.find((s) => s.staff === from.staff)
+  if (!from || !staff || x < staff.left - NOTE_SLOP_PX || x > staff.right) return undefined
+  const own = layout.notes.filter((n) => n.staff === from.staff)
+  let nearest = Infinity
+  for (const n of own) nearest = Math.min(nearest, Math.abs(centreX(n.head) - x))
+  const column = own.filter((n) => Math.abs(centreX(n.head) - x) <= nearest + (n.head.right - n.head.left))
+  let best: DrawnNote | undefined
+  let distance = Infinity
+  for (const n of column) {
+    const d = Math.abs((n.head.top + n.head.bottom) / 2 - y)
+    if (d < distance) {
+      best = n
+      distance = d
+    }
+  }
+  return best && best.id !== fromId ? best : undefined
+}
+
+/** A slur, tie or hairpin of the bar as the overlay needs it (`spansOfBar`): its kind, its notes, the staff of its first note, and whether it begins and ends in this bar. */
+export interface SpanInBar {
+  kind: 'slur' | 'tie' | 'crescendo' | 'diminuendo'
+  fromId: string
+  toId: string
+  staff: number
+  startsHere: boolean
+  endsHere: boolean
+}
+
+/** What the overlay draws for a span: an SVG path, in the coordinates of the layout. */
+export interface SpanShape {
+  kind: SpanInBar['kind']
+  d: string
+}
+
+const round = (v: number): string => (Math.round(v * 10) / 10).toString()
+
+/**
+ * The hints the large bar draws for the slurs, ties and hairpins that reach outside it (design D14; spec "Slurs and hairpins
+ * of the bar", "A slur that passes through"), which the one-bar drawing leaves out: an arc over the staff, or a hairpin's
+ * two lines under it, from the note where it starts or from the start of the bar's notes, to the note where it ends or to
+ * the bar line. A span wholly in the bar is drawn by the engraver and gets none; neither does one whose staff is not drawn.
+ * A cut hairpin keeps a little of its opening at the cut, so it reads as going on.
+ */
+export function spanShapes(layout: BarLayout, spans: readonly SpanInBar[]): SpanShape[] {
+  const out: SpanShape[] = []
+  for (const span of spans) {
+    if (span.startsHere && span.endsHere) continue
+    const staff = layout.staves.find((s) => s.staff === span.staff)
+    if (!staff) continue
+    const gap = halfGap(staff)
+    const from = span.startsHere ? layout.notes.find((n) => n.id === span.fromId) : undefined
+    const to = span.endsHere ? layout.notes.find((n) => n.id === span.toId) : undefined
+    const x1 = from ? centreX(from.head) : staff.left - 2 * gap
+    const x2 = to ? centreX(to.head) : staff.right
+    if (span.kind === 'slur' || span.kind === 'tie') {
+      const edge = staff.top - 3 * gap
+      const y1 = from ? Math.min(from.box.top, staff.top) - 1.5 * gap : edge
+      const y2 = to ? Math.min(to.box.top, staff.top) - 1.5 * gap : edge
+      const bow = (span.kind === 'tie' ? 1.5 : 2.5) * gap
+      out.push({ kind: span.kind, d: `M${round(x1)} ${round(y1)} Q${round((x1 + x2) / 2)} ${round(Math.min(y1, y2) - bow)} ${round(x2)} ${round(y2)}` })
+    } else {
+      const y = staff.bottom + 4 * gap
+      const h = 1.2 * gap
+      const narrow = span.kind === 'crescendo' ? (from ? 0 : 0.4 * h) : to ? 0 : 0.4 * h
+      const [s1, s2] = span.kind === 'crescendo' ? [narrow, h] : [h, narrow]
+      out.push({ kind: span.kind, d: `M${round(x2)} ${round(y - s2)} L${round(x1)} ${round(y - s1)} M${round(x1)} ${round(y + s1)} L${round(x2)} ${round(y + s2)}` })
+    }
+  }
+  return out
+}

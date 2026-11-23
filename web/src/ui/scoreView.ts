@@ -32,9 +32,12 @@ export interface TappedNote {
   fraction: string;
 }
 
-/** Persistent mark kinds: playback start, loop, a flagged note, the notes of a flagged bar, the edit selection. */
-export type MarkKind = "start" | "loop" | "flag" | "flagbar" | "sel";
-const MARK_KINDS: MarkKind[] = ["start", "loop", "flagbar", "flag", "sel"];
+/**
+ * Persistent mark kinds: playback start, loop, a flagged note, the notes of a flagged bar, the edit selection, and the
+ * first note of a slur, tie or hairpin that waits for its last note (the editor, design D14).
+ */
+export type MarkKind = "start" | "loop" | "flag" | "flagbar" | "sel" | "pick";
+const MARK_KINDS: MarkKind[] = ["start", "loop", "flagbar", "flag", "sel", "pick"];
 
 export interface ScoreView {
   readonly element: HTMLElement;

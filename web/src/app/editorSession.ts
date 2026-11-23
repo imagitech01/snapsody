@@ -44,6 +44,7 @@ import {
   setRepeatTimes,
   spansOfBar,
   stepPitch,
+  wedgeAt,
 } from '../core/score/edit.ts'
 import type { BarEnd, BarLines, BarSpan, BarStart, LoudnessMark, NoteChoice } from '../core/score/edit.ts'
 import { EditSession } from '../core/score/editSession.ts'
@@ -1003,9 +1004,11 @@ export class EditorSession {
 
   /**
    * A mark tapped in the Marks tools. Tapping the armed mark again disarms it (and ends a span that waits). A slur, tie,
-   * crescendo or diminuendo is armed; with a note selected, that note is its first (it then waits for its last). Any
-   * other mark, with a note selected and nothing armed, is turned on or off on that note (one undo step); with nothing
-   * selected it is armed, and every note tapped then gets it or loses it. False when refused.
+   * crescendo or diminuendo that the selected note has (it is active, `activeMarks`) is removed with nothing armed, as
+   * every active mark is (spec "Articulation marks": a slur or tie that starts or stops on the note, the hairpin over
+   * it; one undo step). Else a slur, tie, crescendo or diminuendo is armed; with a note selected, that note is its first
+   * (it then waits for its last). Any other mark, with a note selected and nothing armed, is turned on or off on that note
+   * (one undo step); with nothing selected it is armed, and every note tapped then gets it or loses it. False when refused.
    */
   tapMark(kind: MarkKind): boolean {
     const armed = this.armedMark.peek()
@@ -1014,6 +1017,7 @@ export class EditorSession {
       return true
     }
     const note = this.selectedNote.peek()
+    if (isSpanMark(kind) && note && armed === null && this.activeMarks.peek().has(kind)) return this.removeSpansOn(kind, note.id)
     if (isSpanMark(kind)) {
       batch(() => {
         this.armedMark.value = kind
@@ -1540,6 +1544,24 @@ export class EditorSession {
     if (!place) return false
     if (place.note.rest && kind !== 'fermata') return this.refuse('mark.error.rest')
     return this.tryApply(markEdit(kind, id))
+  }
+
+  /** Removes the slurs or ties of `kind` that start or stop on the note `id`, or the hairpin of `kind` over it, as one undo step. */
+  private removeSpansOn(kind: SpanMark, id: string): boolean {
+    const score = this.session.score
+    const place = placeOfNote(score, id)
+    if (!place) return false
+    const refs: ElementRef[] = []
+    if (kind === 'slur' || kind === 'tie') {
+      for (const span of spansOfBar(score, place.ref.part, place.barIndex)) if (span.kind === kind && (span.fromId === id || span.toId === id)) refs.push(span.ref)
+    } else {
+      const wedge = wedgeAt(score, id)
+      if (wedge?.type === kind) refs.push({ kind: 'wedge', startId: wedge.start })
+    }
+    if (refs.length === 0) return false
+    return this.tryApply((s) => {
+      for (const ref of refs) deleteElement(s, ref)
+    })
   }
 
   /** Adds a slur, tie or hairpin between two notes, the earlier one first, as one undo step: a slur or tie in one voice, a hairpin in one staff. */

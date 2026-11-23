@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import type { Page } from 'playwright'
+import { dynamicOf } from '../../src/core/score/edit.ts'
 import { parseMusicXml, serializeMusicXml } from '../../src/core/score/musicxml.ts'
 import { isNote, isWedge } from '../../src/core/score/model.ts'
 import type { Score } from '../../src/core/score/model.ts'
@@ -471,10 +472,11 @@ test('edit: a slur is picked from the last note of a line to a note of the next,
     await tabs(page, 'Marks').click()
     await page.getByRole('button', { name: 'Slur', exact: true }).click()
     await tapNote(page, ODE[lastBar - 1]![3]!)
-    await page.getByText('Now tap the last note.').waitFor()
+    const waiting = page.locator('.editor-waiting').filter({ hasText: `Slur from bar ${lastBar} · tap the last note` })
+    await waiting.waitFor()
     await overview(page).getByRole('button', { name: 'Next line' }).click()
     await onBar(page, lastBar + 1)
-    await page.getByText('Now tap the last note.').waitFor() // the arrow keeps the pick
+    await waiting.waitFor() // the arrow keeps the pick
     await tapNote(page, ODE[lastBar]![1]!)
     await drawn(page, `${OVERVIEW} g.slur`, 2) // drawn in two pieces, one on each line
     await save(page).click()
@@ -982,7 +984,7 @@ test('edit: Notes: a new note follows the finger to its pitch before it lifts, a
   })
 })
 
-test('edit: the Marks tab turns marks on and off, and chooses a slur and a crescendo by their first and last note; both show after saving', async () => {
+test('edit: the Marks tray: Staccato painted on four notes, marks and a p on a selected note, a slur and a crescendo by their first and last note, a slur across a bar line listed in the next bar and removed there; all stored', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
     const ode = await makeOdePiece(page)
@@ -990,9 +992,22 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     await tabs(page, 'Marks').click()
     const mark = (name: string) => page.getByRole('button', { name, exact: true })
     const on = async (name: string) => (await mark(name).getAttribute('aria-pressed')) === 'true'
+    const armed = async (name: string) => (await mark(name).getAttribute('class'))?.includes('is-armed') === true
+    const notice = (text: string) => page.locator('.editor-waiting').filter({ hasText: text })
 
-    // Staccato on the selected note, and tapping the active mark takes it off.
-    assert.equal(await mark('Staccato').isDisabled(), true, 'no note, no mark')
+    // Mark first (spec "Paint staccato on a line"): with nothing selected, Staccato is armed and goes on every note tapped,
+    // which is not selected; it stays armed until it is tapped again (task 7.1).
+    assert.equal(await mark('Staccato').isDisabled(), false, 'with no note, a mark is armed')
+    await mark('Staccato').click()
+    await page.getByText('Now tap every note that gets it. Tap the mark again to stop.').waitFor()
+    for (const note of ODE[0]!) await tapNote(page, note)
+    await drawn(page, `${BIG} g.artic`, 4)
+    assert.deepEqual([await on('Staccato'), await armed('Staccato')], [true, true], 'still armed')
+    assert.equal(await page.locator(`${BIG} g.note.mk-sel`).count(), 0, 'no note is selected')
+    await mark('Staccato').click()
+    assert.deepEqual([await on('Staccato'), await armed('Staccato')], [false, false], 'a second tap disarms it')
+
+    // Note first: Staccato on the selected note, and tapping the active mark takes it off.
     await tapNote(page, ODE[2]![3]!)
     await mark('Staccato').click()
     assert.equal(await on('Staccato'), true)
@@ -1004,17 +1019,24 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
       await mark(name).click()
       assert.equal(await on(name), false, `${name} off`)
     }
+    // A p on the selected note (spec "Add a missed piano"), drawn under it.
+    await mark('p, soft').click()
+    assert.equal(await on('p, soft'), true)
+    await drawn(page, `${BIG} g.dynam`, 1)
 
-    // A slur: choose it, tap the first note of the phrase and then the last one.
+    // A slur: choose it, tap the first note of the phrase and then the last one. A selected note would be its first, so
+    // the selection is put away first (design D14).
+    await page.touchscreen.tap(...(await emptySpot(page)))
+    await page.getByText('Tap a note, then a mark. Or a mark, then the notes.').waitFor()
     await mark('Slur').click()
-    await page.getByText('Tap the first note.').waitFor()
+    await page.getByText('Tap the first note, then the last. The last one can be in another bar.').waitFor()
     await tapNote(page, ODE[0]![0]!)
-    await page.getByText('Now tap the last note.').waitFor()
+    await notice('Slur from bar 1 · tap the last note').waitFor()
     assert.equal(await page.locator(`${OVERVIEW} g.slur`).count(), 0, 'not before the last note is chosen')
     await tapNote(page, ODE[0]![3]!)
-    assert.equal(await on('Slur'), true, 'the last note has the slur')
+    assert.equal(await on('Slur'), true, 'still armed for the next one')
     await drawn(page, `${OVERVIEW} g.slur`, 1)
-    assert.equal(await page.getByText('Tap the first note.').count(), 0)
+    assert.equal(await page.locator('.editor-waiting').count(), 0, 'the notice is gone')
 
     // A crescendo over bar 3, and a diminuendo that would overlap it is refused with a reason.
     await mark('Crescendo').click()
@@ -1034,12 +1056,33 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     await tapNote(page, ODE[0]![1]!)
     await page.getByText('A tie joins a note to the next note, and both need the same pitch.').waitFor()
 
-    // Saved, the stored score has both, and the editor opened again draws both.
+    // A slur from the last note of bar 1 (where the first slur ends) to the first of bar 2, by two taps with Next between
+    // them (spec "A slur into the next bar"); bar 2 lists it, and Remove there takes it off both notes and leaves the
+    // first slur as it was (spec "A slur from the bar before").
+    await mark('Slur').click()
+    await tapNote(page, ODE[0]![3]!)
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, 2)
+    await notice('Slur from bar 1 · tap the last note').waitFor()
+    await tapNote(page, ODE[1]![0]!)
+    const listed = page.getByRole('region', { name: 'Slurs and hairpins of this bar' }).getByRole('group', { name: 'Slur, bars 1 to 2' })
+    await listed.waitFor()
+    await page.locator('.editor-span-hint--slur').waitFor() // drawn in from the edge of bar 2
+    await listed.getByRole('button', { name: 'Remove' }).click()
+    await drawn(page, `${OVERVIEW} g.slur`, 1)
+    await drawn(page, '.editor-span-hint', 0)
+    assert.equal(await page.getByRole('region', { name: 'Slurs and hairpins of this bar' }).count(), 0, 'nothing left to list')
+
+    // Saved, the stored score has them all, and the editor opened again draws the slur and the crescendo.
     await save(page).click()
     await onScreen(page, 'practice')
     const score = await stored(app, ode)
+    assert.deepEqual(ODE[0]!.map((id) => noteOf(score, id).staccato === true), [true, true, true, true], 'the four painted notes')
+    assert.equal(noteOf(score, ODE[2]![3]!).staccato, undefined)
+    assert.equal(dynamicOf(score, ODE[2]![3]!)?.mark, 'p')
     assert.deepEqual(noteOf(score, ODE[0]![0]!).slurs, [{ type: 'start', number: 1 }])
     assert.deepEqual(noteOf(score, ODE[0]![3]!).slurs, [{ type: 'stop', number: 1 }])
+    assert.deepEqual(noteOf(score, ODE[1]![0]!).slurs, [], 'the removed slur is on neither note')
     const wedge = firstLine(score).measures[2]!.items.find(isWedge)
     assert.deepEqual([wedge?.type, wedge?.start, wedge?.stop], ['crescendo', ODE[2]![0]!, ODE[2]![3]!])
     await openEditor(page, ode)
@@ -1052,6 +1095,79 @@ test('edit: the Marks tab turns marks on and off, and chooses a slur and a cresc
     assert.equal(await on('Crescendo'), true, 'every note under it shows it')
     await mark('Crescendo').click()
     await drawn(page, `${OVERVIEW} g.hairpin`, 0)
+  })
+})
+
+test('edit: a slide in Notes joins three notes with a slur and changes no pitch; a slur from bar 2 waits through "Full score" to bar 5, is drawn to the edge of bar 3, and its key goes to its last bar', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const ode = await makeOdePiece(page)
+    await openEditor(page, ode)
+    const touch = await finger(page)
+
+    // A slide from the first note of bar 1 to its third, with the Notes tools open (spec "Slide a slur", task 7.2): the
+    // first 8 px sideways make it a slide, an arc follows the finger, and a finger that drifts a little up or down on
+    // the way changes no pitch.
+    const first = await headOf(page, ODE[0]![0]!)
+    const third = await headOf(page, ODE[0]![2]!)
+    await touch.down(first.x, first.y)
+    await touch.move(first.x + 12, first.y)
+    await page.locator('.editor-slide').waitFor()
+    await touch.move((first.x + third.x) / 2, first.y - 6)
+    await touch.move(third.x, third.y + 5)
+    assert.equal(await page.locator('.editor-drag-name').count(), 0, 'no pitch drag')
+    await touch.up()
+    await drawn(page, `${BIG} g.slur`, 1)
+    assert.equal(await page.locator('.editor-slide').count(), 0, 'the arc goes with the finger')
+    assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), false)
+
+    // Slur armed, the first note tapped in bar 2: the notice says so above the bar, and the note is drawn as picked
+    // (spec "A mark that waits for its last note", task 7.5).
+    await tabs(page, 'Marks').click()
+    await page.getByRole('button', { name: 'Slur', exact: true }).click()
+    await tapNote(page, ODE[1]![1]!)
+    const notice = page.locator('.editor-waiting').filter({ hasText: 'Slur from bar 2 · tap the last note' })
+    await notice.waitFor()
+    await page.locator(`${BIG} g.note.mk-pick[id="${ODE[1]![1]!}"]`).waitFor()
+    // Through "Full score" to bar 5: the notice stays, and the first note is picked in the full score too.
+    await page.getByRole('button', { name: 'Full score' }).click()
+    await page.locator('.editor[data-layout="full"]').waitFor()
+    await notice.waitFor()
+    assert.equal(await page.locator(`${OVERVIEW} g.note.mk-pick[id="${ODE[1]![1]!}"]`).count(), 1, 'picked in the full score')
+    await pickInFullScore(page, 'g.measure >> nth=4', 5)
+    await notice.waitFor()
+    await tapNote(page, ODE[4]![2]!)
+    await notice.waitFor({ state: 'detached' })
+    await page.locator('.editor-span-hint--slur').waitFor() // drawn in from the edge of bar 5 at once
+    await page.waitForFunction((css) => document.querySelectorAll(`${css} g.note.mk-pick`).length === 0, OVERVIEW)
+
+    // Bar 3 lists it (spec "A slur that passes through"); the large bar draws it from the start of its notes to the bar
+    // line, over the staff.
+    for (const bar of [4, 3]) {
+      await page.getByRole('button', { name: 'Previous bar' }).click()
+      await onBar(page, bar)
+    }
+    const listed = page.getByRole('region', { name: 'Slurs and hairpins of this bar' }).getByRole('group', { name: 'Slur, bars 2 to 5' })
+    await listed.waitFor()
+    await laidOut(page)
+    const hint = (await page.locator('.editor-span-hint--slur').boundingBox())!
+    const heads = await page.locator(`${BIG} g.notehead`).evaluateAll((all) => all.map((h) => h.getBoundingClientRect()).map((r) => [r.left, r.right, r.top]))
+    const lines = await staffLines(page)
+    assert.ok(hint.x < Math.min(...heads.map((h) => h[0]!)), 'in from before the first note')
+    assert.ok(hint.x + hint.width > Math.max(...heads.map((h) => h[1]!)), 'out past the last note')
+    assert.ok(hint.y + hint.height < lines[0]!, 'over the staff')
+    // Its key for the last bar goes to bar 5, with the slur's last note selected (spec "Go to the other end").
+    await listed.getByRole('button', { name: 'Go to its last bar' }).click()
+    await onBar(page, 5)
+    assert.equal(await selection(page), 'Bar 5 · Note 3')
+    await page.locator('.editor-span-hint--slur').waitFor()
+
+    await save(page).click()
+    await onScreen(page, 'practice')
+    const score = await stored(app, ode)
+    assert.deepEqual(storedBar(score, 1), ['C5 quarter', 'D5 quarter', 'E5 quarter', 'F5 quarter'], 'no pitch changed')
+    assert.deepEqual([ODE[0]![0]!, ODE[0]![1]!, ODE[0]![2]!].map((id) => noteOf(score, id).slurs.map((x) => x.type)), [['start'], [], ['stop']], 'the slid slur')
+    assert.deepEqual([ODE[1]![1]!, ODE[4]![2]!].map((id) => noteOf(score, id).slurs.map((x) => x.type)), [['start'], ['stop']], 'the slur from bar 2 to bar 5')
   })
 })
 

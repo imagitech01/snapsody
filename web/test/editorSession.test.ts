@@ -1319,6 +1319,35 @@ test('marks (task 5.2): note first, or mark first and painted on every tapped no
   assert.deepEqual([editor.score.value === unchanged, editor.message.value], [true, 'Marks go on notes, not on rests.'])
 })
 
+test('marks (task 7.1): an active slur, tie or hairpin of the selected note is removed by its mark, one undo step; one it does not have is armed from it', async () => {
+  const { editor } = await setupSix()
+  const [c1, c2, c3] = idsOf(editor, 1)
+  const [d1] = idsOf(editor, 2)
+  editor.openTools('marks')
+  editor.apply((s) => addSlur(s, c3!, d1!))
+  editor.apply((s) => addWedge(s, 'crescendo', c1!, c3!))
+  // The slur stops on d1: its Slur is active, and tapping it takes the slur off both notes.
+  editor.select(d1!)
+  assert.ok(editor.activeMarks.value.has('slur'))
+  oneStep(editor, 'the active slur off', () => editor.tapMark('slur'), () => {
+    assert.deepEqual([placeOfNote(editor.score.value, c3!)!.note.slurs, placeOfNote(editor.score.value, d1!)!.note.slurs], [[], []])
+    assert.deepEqual([editor.armed.value, editor.pending.value], [null, null], 'nothing armed')
+  })
+  // c2 is under the crescendo: its Crescendo is active, and tapping it removes the hairpin.
+  editor.select(c2!)
+  assert.ok(editor.activeMarks.value.has('crescendo'))
+  oneStep(editor, 'the active crescendo off', () => editor.tapMark('crescendo'), () => {
+    assert.equal(allItemLists(editor.score.value).flat().filter(isWedge).length, 0)
+  })
+  // A mark the note does not have is armed from it, as before.
+  assert.ok(editor.tapMark('diminuendo'))
+  assert.deepEqual([editor.armed.value, editor.pending.value?.from], ['diminuendo', c2])
+  // A slide with the diminuendo armed adds a diminuendo, not a slur (spec "Slide between two notes"), and ends the waiting.
+  oneStep(editor, 'armed slide', () => editor.slide(c3!, c1!))
+  assert.deepEqual(allItemLists(editor.score.value).flat().filter(isWedge).map((w) => [w.type, w.start, w.stop]), [['diminuendo', c1, c3]])
+  assert.deepEqual([placeOfNote(editor.score.value, c1!)!.note.slurs, editor.pending.value], [[], null])
+})
+
 // ---- the Notes surface and tray (change redesign-score-editor, tasks 6.2 and 6.3) -----------------------------
 
 test('slots (task 6.2): a short first voice has one after its last note, a whole-bar rest one over the bar, a full bar none', async () => {

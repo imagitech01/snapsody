@@ -8,7 +8,8 @@ import { useShell } from '../../ShellContext.ts'
 
 /**
  * The overview and the full score (change redesign-score-editor, design D1 and D13): one score island of the part being
- * edited, drawn small, with the current bar tinted and the flags on it.
+ * edited, drawn small, with the current bar tinted, the flags on it, and the first note of a span that waits for its last
+ * note marked as picked (design D14).
  *
  * - As the overview it shows the line of music that holds the current bar (the island's `line`): a line is what Verovio
  *   lays out for the width, so it is as many bars as fit. A tap anywhere in a bar makes that bar current and selects
@@ -29,6 +30,7 @@ export interface OverviewProps {
     shownBar: ReadonlySignal<number | null>
     playing: ReadonlySignal<boolean>
     selected: ReadonlySignal<readonly string[]>
+    picked: ReadonlySignal<readonly string[]>
     flagged: ReadonlySignal<readonly string[]>
     flaggedBars: ReadonlySignal<readonly string[]>
     lines: Signal<readonly LineBars[]>
@@ -86,6 +88,7 @@ export function Overview({ session, mode, island, onGoTo, onCloseFull }: Overvie
               shownBar={island.shownBar}
               playing={island.playing}
               selected={island.selected}
+              picked={island.picked}
               flagged={island.flagged}
               flaggedBars={island.flaggedBars}
               heard={noHeard}

@@ -2,10 +2,11 @@ import { computed, signal } from '@preact/signals'
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { EditorSession, ToolsTab } from '../../../app/editorSession.ts'
 import type { EditorView } from '../../../app/settings.ts'
-import { EditError, addSlur, addTie, addWedge, compareInTime } from '../../../core/score/edit.ts'
+import { isSpanMark } from '../../../app/editorRules.ts'
+import { EditError } from '../../../core/score/edit.ts'
 import type { ElementRef } from '../../../core/score/elements.ts'
 import type { LineBars } from '../../../core/score/lines.ts'
-import { isNote, placeOfNote, sameVoice } from '../../../core/score/model.ts'
+import { isNote } from '../../../core/score/model.ts'
 import type { MeasureItem, Note, Score } from '../../../core/score/model.ts'
 import { voiceView, voices } from '../../../core/score/model.ts'
 import { Button, IconButton, SegmentedControl } from '../../components/index.ts'
@@ -14,8 +15,8 @@ import { BarSurface } from './BarSurface.tsx'
 import { ElementPanel } from './ElementPanel.tsx'
 import { frameLayout } from './frame.ts'
 import type { FrameLayout } from './frame.ts'
-import { BarLineGroup, MarksTab } from './MarksTab.tsx'
-import type { PickState, PickKind } from './MarksTab.tsx'
+import { BarLineGroup } from './MarksTab.tsx'
+import { MarksTray } from './MarksTray.tsx'
 import type { Failure, FailureKey } from './NoteTab.tsx'
 import { NotesTray } from './NotesTray.tsx'
 import { Overview } from './Overview.tsx'
@@ -33,12 +34,16 @@ import { ScoreTab } from './ScoreTab.tsx'
  * 3. The overview: the line of music that holds the current bar, or its bar numbers when the screen is too low (`Overview`).
  * 4. The bar row: previous, "Bar 3 of 12" with the beats chip ("3½ of 4 beats", green when it adds up), next, and the
  *    Notes | Grid switch.
- * 5. One row for what the editor has to say: a refused change, else what the bar's warning says.
+ * 5. One row for what the editor has to say (design D13): the notice of a slur, tie or hairpin that waits for its last
+ *    note, with Cancel (design D14), which says a refused change in its place until the next action; else a refused
+ *    change; else what the bar's warning says.
  * 6. The large bar (`BarSurface`: a tap selects a note or an element or adds a note, a drag changes a pitch); Grid is
  *    drawn in a later step, so it shows a placeholder for now.
  * 7. The tools: the tabs Notes · Marks · Bars · Score and the tray of the open one, with the selection and the selected
- *    element (`ElementPanel`) at its top. Notes is the Notes tray (`NotesTray`); Marks and Bars are still today's tools
- *    (`MarksTab` split in two) until their new trays replace them (tasks 7.1 and 9.1).
+ *    element (`ElementPanel`) at its top. Notes is the Notes tray (`NotesTray`) and Marks the Marks tray (`MarksTray`);
+ *    Bars is still today's bar-line group (`MarksTab`'s `BarLineGroup`) until its new tray replaces it (task 9.1). With
+ *    the Marks tools open the line at the top of the tray says what to do next: tap a note or a mark, tap the notes
+ *    that get the armed mark, or tap the first note of the armed slur.
  * 8. Save & practice.
  *
  * Design D13: the screen does not scroll; every row but the large bar has its own height, the tray three rows of keys
@@ -48,9 +53,12 @@ import { ScoreTab } from './ScoreTab.tsx'
  *
  * "Full score" (design D1) shows the whole part in place of everything between the header and Save & practice; a tap in a
  * bar picks it, "Back to bar N" and the back button go back without picking (the session's leave guard closes it first).
+ * The notice of a waiting span stays above it, and its first note is marked as picked there as in the overview.
  *
- * What only the screen keeps, for today's Marks tools: the slur, tie or hairpin whose two notes are being tapped, and why
- * the last of their changes did not happen. Naming a new piece (spec `piece-library` "Default name"): while the session is
+ * Marks (tasks 7.1, 7.2, 7.5): a tap on a note is the session's `tapNote` (it selects, or paints the armed mark, or takes
+ * the first or last note of the armed span); with a mark armed, a tap on an element or on nothing does nothing. What only
+ * the screen keeps: why the last change of today's Bars and Score tools did not happen, or that a slide ended on no
+ * note. Naming a new piece (spec `piece-library` "Default name"): while the session is
  * `naming`, the title is tinted with the caption "Name this piece", and its first focus selects the date name, so typing
  * replaces it; nothing focuses it by itself. Leaving: the header's Back and the back button ask the router, whose leave
  * guard (the session's) asks the discard question while there are unsaved edits. "Add pages", in the Score tray, opens the
@@ -64,23 +72,14 @@ const SAVE_ERROR = {
   failed: 'editor.saveFailed',
 } as const satisfies Readonly<Record<'empty-name' | 'conflict' | 'failed', 'editor.nameEmpty' | 'editor.saveConflict' | 'editor.saveFailed'>>
 
-/** The failure text of each mark that joins two notes. */
-const PICK_ERROR: Readonly<Record<PickKind, FailureKey>> = {
-  slur: 'mark.error.slur',
-  tie: 'mark.error.tie',
-  crescendo: 'mark.error.wedge',
-  diminuendo: 'mark.error.wedge',
-}
-
 /** A note or rest that is drawn: a hidden rest (a `<forward>`) is not there to select or count. */
 const isShown = (item: MeasureItem): item is Note => isNote(item) && !item.hidden
 
 export function Editor({ session }: { session: EditorSession }) {
   const { router, i18n } = useShell()
   const { t } = i18n
-  const [pick, setPick] = useState<PickState | null>(null)
   /** Why the last change of today's tools did not happen: a fixed text, or one already made from the refusal. */
-  const [message, setMessage] = useState<FailureKey | { text: string } | null>(null)
+  const [message, setMessage] = useState<FailureKey | 'mark.error.slide' | { text: string } | null>(null)
   const [saveError, setSaveError] = useState<'empty-name' | 'conflict' | 'failed' | null>(null)
   const [layout, setLayout] = useState<FrameLayout>({ overview: 'line', scroll: false })
   const frame = useRef<HTMLDivElement>(null)
@@ -111,6 +110,11 @@ export function Editor({ session }: { session: EditorSession }) {
       playing: signal(false),
       selected: computed(() => {
         const id = session.selection.value?.noteId
+        return id ? [id] : []
+      }),
+      /** The first note of a span that waits for its last note (design D14). */
+      picked: computed(() => {
+        const id = session.pending.value?.from
         return id ? [id] : []
       }),
       flagged,
@@ -181,40 +185,20 @@ export function Editor({ session }: { session: EditorSession }) {
     session.goToBar(bar)
   }
 
+  /** A tap on a note: it is selected, or it gets the armed mark, or it is the first or last note of the armed span (the session's `tapNote`). */
   const tapNote = (id: string): void => {
     quiet()
-    session.select(id)
-    if (!pick) return
-    if (pick.first === null) {
-      setPick({ ...pick, first: id })
-      return
-    }
-    // The notes may be tapped in either order: the first of them in the score is where the mark starts.
-    const [from, to] = compareInTime(session.score.value, pick.first, id) <= 0 ? [pick.first, id] : [id, pick.first]
-    const { kind } = pick
-    setPick(null)
-    // A slur or tie stays in one voice, a hairpin in one staff (change edit-parts, D7): say so rather than "cannot".
-    const a = placeOfNote(session.score.value, from)?.ref
-    const b = placeOfNote(session.score.value, to)?.ref
-    if (a && b && (kind === 'slur' || kind === 'tie') && !sameVoice(a, b)) {
-      setMessage('mark.error.voice')
-      return
-    }
-    if (a && b && (kind === 'crescendo' || kind === 'diminuendo') && (a.part !== b.part || a.staff !== b.staff)) {
-      setMessage('mark.error.staff')
-      return
-    }
-    run((s) => (kind === 'slur' ? addSlur(s, from, to) : kind === 'tie' ? addTie(s, from, to) : addWedge(s, kind, from, to)), PICK_ERROR[kind])
+    session.tapNote(id)
   }
 
   /**
    * A tap in the large bar that found an element, or (undefined) nothing: an element is selected and shown in its panel; a
    * bar line makes its bar current and opens the Bars tools (spec "Remove a bar line", "From the bar line itself"); an empty
    * tap puts away the element or the note, keeping the bar, so that the Notes tools set what a tap adds again (spec "Notes
-   * tools"). While the notes of a slur, tie or hairpin are being chosen, only notes count.
+   * tools"). While a mark is armed, only notes count.
    */
   const tapElement = (ref: ElementRef | undefined): void => {
-    if (pick) return
+    if (session.armed.peek() !== null) return
     quiet()
     if (!ref) {
       if (session.selectedElement.peek() || session.selectedNote.peek()) session.selectBar(session.currentBar.peek())
@@ -224,21 +208,15 @@ export function Editor({ session }: { session: EditorSession }) {
     if (ref.kind === 'barline') session.openTools('bars')
   }
 
-  const startPick = (kind: PickKind | null): void => {
-    quiet()
-    setPick(kind ? { kind, first: null } : null)
-  }
-
-  /** The part switch (change edit-parts, D1): another part is drawn, and the selection and a mark being chosen go. */
+  /** The part switch (change edit-parts, D1): another part is drawn, and the selection and a span waiting for a note of the other part go. */
   const switchPart = (id: string): void => {
-    setPick(null)
     quiet()
     session.setPart(id)
   }
 
+  /** Another tools tab: the Notes and Bars tools disarm the armed mark and end a waiting span (the session's). */
   const chooseTab = (next: ToolsTab): void => {
     session.openTools(next)
-    setPick(null)
     setMessage(null)
   }
 
@@ -299,13 +277,44 @@ export function Editor({ session }: { session: EditorSession }) {
   const selection = session.selection.value
   const note = session.selectedNote.value
   const label = session.selectionLabel.value
-  const heading = tools === 'score' ? t('score.whole') : selection && note && label ? label : t('editor.selection.none')
+  const armed = session.armed.value
+  const pending = session.pending.value
+  const heading =
+    tools === 'score'
+      ? t('score.whole')
+      : selection && note && label
+        ? label
+        : tools !== 'marks'
+          ? t('editor.selection.none')
+          : armed === null
+            ? t('marks.hint')
+            : isSpanMark(armed)
+              ? t('marks.armed.span')
+              : t('marks.armed.note')
   const previewing = session.previewing.value
   const naming = session.naming.value
   const beats = session.barBeats.value
 
   // The one row of what the editor has to say (design D13): a refused change, else what the current bar's warning says.
   const said = message ? (typeof message === 'string' ? t(message) : message.text) : session.message.value
+  // The notice of a span that waits for its last note (design D14): it takes that row, and stays through "Full score". A
+  // refusal meanwhile (a last note in another voice) is said in the notice, beside Cancel, until the next action: a
+  // second row would push Save & practice off a small screen with a piano bar (design D13).
+  const notice = pending ? (
+    <div class={said ? 'editor-waiting editor-waiting--refused' : 'editor-waiting'} role="status">
+      <p class="editor-waiting-text">{said ?? t('marks.waiting', { mark: t(`mark.${pending.kind}`), bar: pending.bar })}</p>
+      <button
+        type="button"
+        class="editor-text-button editor-waiting-cancel"
+        onClick={() => {
+          quiet()
+          session.cancelPending()
+        }}
+      >
+        {t('common.cancel')}
+      </button>
+    </div>
+  ) : null
   const barWarnings = session.barWarnings.value
   const focused = session.currentWarning.value
   const warning = focused && barWarnings.includes(focused) ? focused : barWarnings[0]
@@ -391,6 +400,8 @@ export function Editor({ session }: { session: EditorSession }) {
         </div>
       ) : null}
 
+      {full && notice ? <div class="editor-say editor-say--full">{notice}</div> : null}
+
       <Overview session={session} mode={layout.overview} island={island} onGoTo={goTo} onCloseFull={(bar) => session.closeFullScore(bar)} />
 
       {full ? null : (
@@ -419,7 +430,8 @@ export function Editor({ session }: { session: EditorSession }) {
           </div>
 
           <div class="editor-say">
-            {said ? (
+            {notice}
+            {notice ? null : said ? (
               <p class="editor-message" role="status">
                 {said}
               </p>
@@ -434,7 +446,15 @@ export function Editor({ session }: { session: EditorSession }) {
             {view === 'grid' ? (
               <p class="editor-grid-soon">{t('editor.grid.soon')}</p>
             ) : (
-              <BarSurface session={session} flagged={island.flagged.value} flaggedBars={island.flaggedBars.value} onTapNote={tapNote} onTapElement={tapElement} onQuiet={quiet} />
+              <BarSurface
+                session={session}
+                flagged={island.flagged.value}
+                flaggedBars={island.flaggedBars.value}
+                onTapNote={tapNote}
+                onTapElement={tapElement}
+                onQuiet={quiet}
+                onSlideNowhere={() => setMessage('mark.error.slide')}
+              />
             )}
           </div>
 
@@ -455,7 +475,7 @@ export function Editor({ session }: { session: EditorSession }) {
               <p class="editor-selection">{heading}</p>
               <ElementPanel session={session} run={run} />
               {tools === 'notes' ? <NotesTray session={session} run={run} onQuiet={quiet} /> : null}
-              {tools === 'marks' ? <MarksTab session={session} run={run} pick={pick} onPick={startPick} /> : null}
+              {tools === 'marks' ? <MarksTray session={session} onQuiet={quiet} /> : null}
               {tools === 'bars' ? <BarLineGroup session={session} run={run} /> : null}
               {tools === 'score' ? <ScoreTab session={session} run={run} onAddPages={() => void addPages()} /> : null}
             </div>

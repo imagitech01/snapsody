@@ -8,7 +8,7 @@ import type { ScoreIslandHandle, ScoreIslandOptions } from './scoreIsland.ts'
  * nothing inside it, so Preact never touches the drawing, and it reads no signal while rendering, so
  * playback never renders it: the island follows the signals itself.
  *
- * The signals (`bar`, `following`, `shownBar`, `playing`, `selected`, `line`) belong to one practice session or
+ * The signals (`bar`, `following`, `shownBar`, `playing`, `selected`, `picked`, `line`) belong to one practice session or
  * editor session: pass new ones and the island is mounted again. The callbacks and `heard` may change
  * between renders; the island always calls the latest. A new `score` is laid out in place.
  */
@@ -31,6 +31,7 @@ export function ScoreIsland(props: ScoreIslandProps) {
       shownBar: props.shownBar,
       playing: props.playing,
       ...(props.selected ? { selected: props.selected } : {}),
+      ...(props.picked ? { picked: props.picked } : {}),
       ...(props.flagged ? { flagged: props.flagged } : {}),
       ...(props.flaggedBars ? { flaggedBars: props.flaggedBars } : {}),
       heard: () => latest.current.heard(),
@@ -51,7 +52,7 @@ export function ScoreIsland(props: ScoreIslandProps) {
       island.dispose()
       handle.current = undefined
     }
-  }, [props.bar, props.following, props.shownBar, props.playing, props.selected, props.flagged, props.flaggedBars, props.selectedElement, props.line, props.multiRests, props.part, props.scale])
+  }, [props.bar, props.following, props.shownBar, props.playing, props.selected, props.picked, props.flagged, props.flaggedBars, props.selectedElement, props.line, props.multiRests, props.part, props.scale])
 
   useEffect(() => {
     void handle.current?.setScore(props.score)

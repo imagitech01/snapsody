@@ -61,6 +61,8 @@ export interface ScoreIslandOptions {
   heard: () => Position | undefined
   /** Notes to show as selected (the editor), by id. */
   selected?: ReadonlySignal<readonly string[]>
+  /** The first note of a slur, tie or hairpin that waits for its last note (the editor, design D14), by id. */
+  picked?: ReadonlySignal<readonly string[]>
   /** Notes to show as flagged (the editor's warnings about a note), by id, and the notes of the bars that are flagged. */
   flagged?: ReadonlySignal<readonly string[]>
   flaggedBars?: ReadonlySignal<readonly string[]>
@@ -371,6 +373,11 @@ export function mountScoreIsland(root: HTMLElement, options: ScoreIslandOptions)
     effect(() => {
       const ids = options.selected?.value ?? []
       view.mark('sel', [...ids])
+    }),
+  )
+  stops.push(
+    effect(() => {
+      view.mark('pick', [...(options.picked?.value ?? [])])
     }),
   )
   stops.push(

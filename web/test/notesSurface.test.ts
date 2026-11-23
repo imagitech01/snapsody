@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { DRAG_START_PX, dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, pitchAtStep, staffAt, stepAt, yOfStep } from '../src/ui/notesSurface.ts'
+import { DRAG_START_PX, dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, pitchAtStep, slideTarget, spanShapes, staffAt, stepAt, yOfStep } from '../src/ui/notesSurface.ts'
 import type { BarLayout, DrawnNote, StaffGeometry } from '../src/ui/notesSurface.ts'
 
 // The geometry of the large bar in Notes (change redesign-score-editor, design D2, task 6.2): what a touch is on, which
@@ -104,4 +104,34 @@ test('a piano bar: a tap on the lower staff adds to the left hand in the bass cl
   assert.deepEqual(hitBar(piano, 160, yOfStep(BASS, 2), true), { kind: 'staff', staff: 1, pitch: { step: 'F', octave: 3 } })
   assert.deepEqual(hitBar(piano, 88, yOfStep(BASS, 0), true), { kind: 'note', id: 'lh' })
   assert.deepEqual(hitBar(piano, 88, yOfStep(BASS, 4), true), { kind: 'note', id: 'lh' }, 'the left hand note\'s column, not the right hand\'s')
+})
+
+test('a slide (task 7.2): it ends on the note of its staff nearest the finger, the height only choosing in a chord; not where it started, nor off the staff', () => {
+  assert.equal(slideTarget(ODE, 'c', 182, 90)?.id, 'e', 'sideways from C5 to over E5')
+  assert.equal(slideTarget(ODE, 'c', 205, 300)?.id, 'e', 'a finger that drifts far down still takes the column')
+  assert.equal(slideTarget(ODE, 'c', 92, 110), undefined, 'back on the note it started on')
+  assert.equal(slideTarget(ODE, 'c', 320, 110), undefined, 'past the bar line')
+  const chord: BarLayout = { staves: [TREBLE], notes: [quarter('a', 80, 0), quarter('low', 176, -2), quarter('high', 176, 2)], slots: [] }
+  assert.equal(slideTarget(chord, 'a', 184, yOfStep(TREBLE, 2))?.id, 'high', 'the chord note nearest the finger')
+  assert.equal(slideTarget(chord, 'a', 184, yOfStep(TREBLE, -3))?.id, 'low')
+  const piano: BarLayout = { staves: [TREBLE, BASS], notes: [quarter('rh', 80, 1), quarter('lh', 176, 0, BASS)], slots: [] }
+  assert.equal(slideTarget(piano, 'rh', 184, yOfStep(BASS, 0)), undefined, 'a note of the other staff is not taken')
+})
+
+test('the hints of spans that reach outside the bar (task 7.5): from a note or the start of the notes, to a note or the bar line; none for a span inside the bar', () => {
+  const base = { staff: 0, fromId: 'c', toId: 'f' } as const
+  const arc = (startsHere: boolean, endsHere: boolean) => spanShapes(ODE, [{ ...base, kind: 'slur', startsHere, endsHere }])
+  assert.deepEqual(arc(true, true), [], 'the engraver draws one inside the bar')
+  const ends = (d: string) => d.match(/^M(\S+) (\S+) Q\S+ \S+ (\S+) (\S+)$/)!.slice(1).map(Number)
+  const [x1, y1, x2] = ends(arc(true, false)[0]!.d)
+  assert.deepEqual([x1, x2], [88, 300], 'out from the head of C5 to the bar line')
+  assert.ok(y1! < TREBLE.top, 'over the staff')
+  assert.deepEqual(ends(arc(false, true)[0]!.d).filter((_, k) => k % 2 === 0), [60 - 2 * halfGap(TREBLE), 232], 'in from the start of the notes to F5')
+  assert.deepEqual(ends(arc(false, false)[0]!.d).filter((_, k) => k % 2 === 0), [60 - 2 * halfGap(TREBLE), 300], 'through, edge to edge')
+  // A crescendo that goes on into the next bar: closed at its start, open at the bar line; under the staff.
+  const [hairpin] = spanShapes(ODE, [{ ...base, kind: 'crescendo', startsHere: true, endsHere: false }])
+  const points = hairpin!.d.match(/-?[\d.]+/g)!.map(Number)
+  assert.deepEqual([points[2], points[3]], [88, TREBLE.bottom + 4 * halfGap(TREBLE)], 'its point on C5, under the staff')
+  assert.ok(points[1]! < points[3]! && points[7]! > points[3]!, 'open at the right')
+  assert.deepEqual(spanShapes(ODE, [{ ...base, staff: 1, kind: 'tie', startsHere: true, endsHere: false }]), [], 'a staff that is not drawn')
 })
