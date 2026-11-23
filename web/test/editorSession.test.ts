@@ -4,6 +4,7 @@ import { effect, signal } from '@preact/signals'
 import { barExcerpt, barForEditing, openEditor } from '../src/app/editorSession.ts'
 import type { EditorDeps, EditorSession } from '../src/app/editorSession.ts'
 import { createI18n } from '../src/app/i18n/index.ts'
+import { photoOfBar } from '../src/app/editorRules.ts'
 import { DEFAULT_PRACTICE, createLibrary } from '../src/app/library.ts'
 import { createRouter } from '../src/app/router.ts'
 import { loadSettings } from '../src/app/settings.ts'
@@ -1872,4 +1873,114 @@ test('actions (task 5.3): a tap on the lower staff of a piano bar adds to the le
   oneStep(editor, 'second voice', () => (added = editor.addOnStaff(1, { step: 'D', octave: 3 }, noteAt(editor, LH2, 3, 0))!))
   assert.deepEqual(items(LH2, 3), [second[0], added, second[1]], 'after the hidden rest that the voice starts with, before its C2')
   editor.close()
+})
+
+// ---- the photo line (change redesign-score-editor, task 11.1; design D8, D10; spec "Line from the photo") -------------
+
+test('photo (task 11.1): the line of the current bar on its page, the whole page where no line is known, and its picture', async () => {
+  const { editor } = await setup()
+  assert.equal(editor.currentBar.value, 1)
+  // Page 1 has no positions for its lines: the whole page, with the bars it holds.
+  assert.deepEqual(editor.photo.value, { page: 1, n: 1, box: null, firstBar: 1, lastBar: 2 })
+  editor.goToBar(2)
+  assert.deepEqual(editor.photo.value, { page: 1, n: 1, box: null, firstBar: 1, lastBar: 2 })
+  // Page 2 has them: the line that holds the bar.
+  editor.goToBar(3)
+  assert.deepEqual(editor.photo.value, { page: 2, n: 2, box: BOX, firstBar: 3, lastBar: 3 })
+  editor.nextBar()
+  assert.deepEqual(editor.photo.value, { page: 2, n: 2, box: { ...BOX, y: 0.5 }, firstBar: 4, lastBar: 4 })
+  assert.equal(await editor.photoUrl(editor.photo.value!), 'fake://image/pieces/piece-1/pages/2/source.jpg')
+  // Selecting a note follows it to its bar's line.
+  editor.select(idsOf(editor, 3)[0]!)
+  assert.deepEqual(editor.photo.value?.box, BOX)
+})
+
+test('photo (task 11.1): shown large and closed again; back closes it first, before "Full score", and changes nothing else', async () => {
+  const { editor, router } = await setup()
+  const [e5] = idsOf(editor, 3)
+  editor.select(e5!)
+  assert.equal(editor.photoLarge.value, false)
+  assert.equal(editor.openPhoto(), true)
+  assert.equal(editor.photoLarge.value, true)
+  editor.closePhoto()
+  assert.equal(editor.photoLarge.value, false)
+
+  editor.openFullScore()
+  editor.openPhoto()
+  router.back()
+  assert.equal(editor.photoLarge.value, false, 'back closed the photo')
+  assert.equal(editor.fullScore.value, true, '"Full score" is still shown')
+  assert.deepEqual(editor.selection.value, { bar: 3, noteId: e5 })
+  assert.equal(editor.currentBar.value, 3)
+  assert.equal(router.screen.value.name, 'editor')
+  router.back()
+  assert.equal(editor.fullScore.value, false)
+  assert.equal(router.screen.value.name, 'editor')
+  router.back()
+  assert.equal(router.screen.value.name, 'library', 'nothing to lose: back leaves')
+
+  editor.openPhoto()
+  editor.close()
+  assert.equal(editor.photoLarge.value, false, 'closing the editor closes it')
+})
+
+test('photo (task 11.1): an added bar shows the line of the bar it was added next to, before and after the save; the bars after it keep theirs', async () => {
+  const { editor, save } = await setupSix()
+  const line1 = { box: BOX, firstBar: 1, lastBar: 1 }
+  const line2 = { box: { ...BOX, y: 0.5 }, firstBar: 2, lastBar: 3 }
+  const where = () => {
+    const photo = editor.photo.value!
+    return { page: photo.page, box: photo.box, firstBar: photo.firstBar, lastBar: photo.lastBar }
+  }
+  editor.goToBar(1)
+  assert.deepEqual(where(), { page: 1, ...line1 })
+  // "+ Bar after" bar 1: the new bar 2 is on the line of bar 1, which now holds bars 1 and 2; the old bar 2 is bar 3.
+  assert.ok(editor.addBar('after'))
+  assert.equal(editor.currentBar.value, 2)
+  assert.equal(editor.score.value.bars[1]!.added !== undefined, true)
+  assert.deepEqual(where(), { page: 1, box: BOX, firstBar: 1, lastBar: 2 })
+  editor.goToBar(3)
+  assert.deepEqual(where(), { page: 1, box: line2.box, firstBar: 3, lastBar: 4 })
+  // "+ Bar before" the old bar 2 (now bar 3): the new bar is on the line of the bar it was added next to, bar 3's.
+  assert.ok(editor.addBar('before'))
+  assert.equal(editor.currentBar.value, 3)
+  assert.deepEqual(where(), { page: 1, box: line2.box, firstBar: 3, lastBar: 5 })
+  editor.goToBar(6)
+  assert.deepEqual(where(), { page: 2, box: BOX, firstBar: 6, lastBar: 8 })
+
+  // Saved, the lines are the same: the photo counted the bars as the save does.
+  const before = [1, 2, 3, 4, 5, 6, 7, 8].map((bar) => (editor.goToBar(bar), where()))
+  assert.deepEqual(await save(), [8, [[1, 5, [[1, 2], [3, 5]]], [6, 8, [[6, 8]]]]])
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8].map((bar) => (editor.goToBar(bar), where())), before)
+})
+
+test('photo (task 11.1): the halves of a split bar keep its line; a deleted bar\'s line goes when it held no other bar; a refused save falls back to the pages as saved', async () => {
+  const split = await setupSix()
+  split.editor.apply((s) => splitBar(s, idsOf(split.editor, 2)[1]!))
+  split.editor.goToBar(3)
+  assert.deepEqual(split.editor.photo.value, { page: 1, n: 1, box: { ...BOX, y: 0.5 }, firstBar: 2, lastBar: 4 }, 'bar 3 is the second half of the old bar 2')
+  split.editor.goToBar(5)
+  assert.deepEqual(split.editor.photo.value, { page: 2, n: 2, box: BOX, firstBar: 5, lastBar: 7 })
+
+  const deleted = await setupSix()
+  deleted.editor.goToBar(1)
+  assert.equal(deleted.editor.canDeleteBar.value, true)
+  assert.ok(deleted.editor.deleteBar())
+  // The old bar 1 was the only bar of the first line of page 1: that line is not shown any more.
+  for (const bar of [1, 2]) {
+    deleted.editor.goToBar(bar)
+    assert.deepEqual(deleted.editor.photo.value, { page: 1, n: 1, box: { ...BOX, y: 0.5 }, firstBar: 1, lastBar: 2 })
+  }
+  deleted.editor.goToBar(3)
+  assert.deepEqual(deleted.editor.photo.value, { page: 2, n: 2, box: BOX, firstBar: 3, lastBar: 5 })
+
+  // Should a save now be refused (design D8's known limit after an undo across a save), the pages as last saved are used,
+  // with the bar kept in range: here a piece.json that counts two bars fewer than the score it saved.
+  const info = deleted.editor.info.value
+  const saved = deleted.editor.score.value
+  const wrong = { ...info, bars: info.bars - 2 }
+  assert.deepEqual(photoOfBar(wrong, saved, saved, 1), { page: 1, n: 1, box: BOX, firstBar: 1, lastBar: 1 }, 'the line of bar 1 as saved, which the score no longer has')
+  assert.deepEqual(photoOfBar(wrong, saved, saved, 2), { page: 1, n: 1, box: { ...BOX, y: 0.5 }, firstBar: 2, lastBar: 3 })
+  assert.deepEqual(photoOfBar(wrong, saved, saved, 99), { page: 2, n: 2, box: BOX, firstBar: 4, lastBar: 6 })
+  assert.equal(photoOfBar({ ...info, pages: [] }, saved, saved, 1), null, 'a piece without pages has no photo')
 })

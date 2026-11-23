@@ -300,6 +300,17 @@ export const en = {
   'editor.view.grid': 'Grid',
   'editor.full.hint': 'Tap a bar to go there.',
 
+  // The photo line (change redesign-score-editor, design D10)
+  'editor.photo.open': 'Photo of bar {bar}, page {page}',
+  'editor.photo.key': 'Photo',
+  'editor.photo.page': 'Page {page}',
+  'editor.photo.bar': 'From your photo · bar {bar}',
+  'editor.photo.bars': 'From your photo · bars {first} to {last}',
+  'editor.photo.whole': 'From your photo · page {page}',
+  'editor.photo.alt': 'Photo of page {page}',
+  'editor.photo.hint': 'Pinch to zoom, drag to move.',
+  'editor.photo.missing': 'This photo cannot be shown.',
+
   // The Note tab
   'note.pitch': 'Pitch',
   'note.pitch.up': 'Pitch up',

@@ -5,7 +5,7 @@ import type { BarMap, Score } from '../core/score/model.ts'
 import { barMap, partIndex, placeOfNote } from '../core/score/model.ts'
 import type { I18n, MessageKey } from './i18n/index.ts'
 import { barsAfterSave } from './library.ts'
-import type { PieceInfo } from './library.ts'
+import type { PieceInfo, StaffBox } from './library.ts'
 
 /*
  * The rules of the editor that are not state (change redesign-score-editor, group 5): the marks a note can have and the
@@ -171,6 +171,45 @@ export function savesWithBars(info: PieceInfo, saved: Score, changed: Score): bo
   const after = barsAfterSave(info, map)
   if (!after.ok) return false
   return info.pages.every((page) => after.owners.some((owner, i) => page.firstBar <= owner && owner <= page.lastBar && !changed.bars[i]!.added))
+}
+
+/**
+ * The photo of a bar (change redesign-score-editor, design D10, spec "Line from the photo"): the page that holds it and,
+ * when the place of its line on that page is known, the box of that line, with the bars of the line (or of the page)
+ * in the working score's numbering.
+ */
+export interface BarPhoto {
+  /** The page in reading order, from 1. */
+  page: number
+  /** The page's folder (`PageInfo.n`), for `Library.pageImageUrl`. */
+  n: number
+  /** Where the line is on the photo, or null when it is not known: then the whole page is shown. */
+  box: StaffBox | null
+  /** The bars (from 1) the line holds, or the page when the line is not known. */
+  firstBar: number
+  lastBar: number
+}
+
+/**
+ * The photo of bar `bar` (from 1) of `score`, the working score, for the piece as last saved (`info`, with its score
+ * `saved`). Bars added, deleted, split or joined since that save are counted as a save now would count them
+ * (`barsAfterSave`, design D8): an added bar is on the line of the bar it was added next to, the halves of a split bar
+ * are on the line of the bar they were, and a line whose bars were all deleted is not shown. Should a save now be
+ * refused (an undo across a save, design D8's known limit), the pages as last saved are used with the bar number kept in
+ * range. Null only for a piece without pages.
+ */
+export function photoOfBar(info: PieceInfo, saved: Score, score: Score, bar: number): BarPhoto | null {
+  const after = barsAfterSave(info, barMap(saved, score) ?? sameBars(score.bars.length))
+  const pages = after.ok ? after.pages : info.pages
+  const last = pages.at(-1)?.lastBar ?? 0
+  const at = Math.max(1, Math.min(bar, last))
+  const index = pages.findIndex((p) => p.firstBar <= at && at <= p.lastBar)
+  const page = pages[index]
+  if (!page) return null
+  const staff = page.staves.find((s) => s.firstBar <= at && at <= s.lastBar)
+  return staff
+    ? { page: index + 1, n: page.n, box: { ...staff.box }, firstBar: staff.firstBar, lastBar: staff.lastBar }
+    : { page: index + 1, n: page.n, box: null, firstBar: page.firstBar, lastBar: page.lastBar }
 }
 
 /** A fresh copy of a score with `change` made to it, or undefined when the change throws an `EditError`. */

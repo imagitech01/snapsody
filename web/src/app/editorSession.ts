@@ -68,8 +68,8 @@ import type { Suggestion } from '../core/score/suggest.ts'
 import { computeScoreWarnings } from '../core/score/warnings.ts'
 import type { ScoreWarning } from '../core/score/warnings.ts'
 import { barMap } from '../core/score/model.ts'
-import { changedCopy, isSpanMark, markEdit, marksOf, nextStripMark, refusalText, savedPlaces, savesWithBars } from './editorRules.ts'
-import type { FallbackKey, MarkKind, SessionMessage, SpanMark } from './editorRules.ts'
+import { changedCopy, isSpanMark, markEdit, marksOf, nextStripMark, photoOfBar, refusalText, savedPlaces, savesWithBars } from './editorRules.ts'
+import type { BarPhoto, FallbackKey, MarkKind, SessionMessage, SpanMark } from './editorRules.ts'
 import type { I18n } from './i18n/index.ts'
 import { LibraryError } from './library.ts'
 import type { Library, PieceInfo } from './library.ts'
@@ -130,8 +130,12 @@ import type { EditorView, Settings } from './settings.ts'
  *   is tried on a copy and checked as the library would check its save, against the piece as last saved
  *   (`editorRules.ts`), so a save after any offered actions, undo and redo included, goes through.
  *
- * Not here: drawing the score and the editor's tabs (the UI); adding pages (addMusic). The page photos
- * stay stored with the piece, but the editor no longer shows them.
+ * The photo line (change redesign-score-editor, group 11; design D10): `photo` is the page photo of the current bar and
+ * the box of its line on it, counted through the bar map of the unsaved bar changes (`photoOfBar`), and `photoUrl` the
+ * picture. Whether it is shown large is session state (`photoLarge`), because the back button closes it first, as it
+ * closes "Full score"; how far it is zoomed and moved is the screen's.
+ *
+ * Not here: drawing the score, the photo and the editor's tabs (the UI); adding pages (addMusic).
  */
 
 /** What is selected: a bar (1-based position in the piece), and a note in it, or none. */
@@ -202,7 +206,7 @@ export interface BarBeats {
 }
 
 export interface EditorDeps {
-  library: Pick<Library, 'load' | 'writeScore' | 'update' | 'readPractice'>
+  library: Pick<Library, 'load' | 'writeScore' | 'update' | 'readPractice' | 'pageImageUrl'>
   /** The default instrument (warnings, preview), the note names the selected note is named in (design D9), and the view the editor opens in. */
   settings: Pick<Settings, 'defaultInstrument' | 'noteNames' | 'editorView' | 'setEditorView'>
   /** The router with the editor screen on top: the leave guard goes on it, and Save & practice goes back to the practice screen under it, or replaces it. */
@@ -358,6 +362,10 @@ export class EditorSession {
    * each staff of the part being edited whose first voice adds up to less than the bar, or holds only a whole-bar rest.
    */
   readonly slots: ReadonlySignal<readonly BarSlot[]>
+  /** The photo of the current bar: its page and the box of its line, or the whole page when that is not known (design D10). Null for a piece without pages. */
+  readonly photo: ReadonlySignal<BarPhoto | null>
+  /** Whether the photo is shown large, over the editor. */
+  readonly photoLarge: ReadonlySignal<boolean>
 
   private readonly deps: EditorDeps
   private readonly session: EditSession
@@ -399,6 +407,7 @@ export class EditorSession {
   private readonly waiting: Signal<{ kind: SpanMark; from: string } | null>
   private readonly gridChoice: Signal<VoiceRef | null>
   private readonly said: Signal<string | null>
+  private readonly large: Signal<boolean>
   /** Where each bar of the working score is in the piece as last saved (`savedPlaces`), or undefined when a save now would be refused. */
   private readonly places: ReadonlySignal<Set<string>[] | undefined>
   /** Counts the changes of the working score (edits, undo, redo), so a pitch drag can tell that the note it moves was added by the step before. */
@@ -503,6 +512,7 @@ export class EditorSession {
     this.waiting = signal(null)
     this.gridChoice = signal(null)
     this.said = signal(null)
+    this.large = signal(false)
     this.currentBar = this.current
     this.barCount = computed(() => this.score.value.bars.length)
     this.view = deps.settings.editorView
@@ -589,6 +599,8 @@ export class EditorSession {
       return barLineCuts(score, refs, this.current.value - 1).filter((c) => this.canAddBarLineBefore(c.noteId))
     })
     this.slots = computed(() => slotsOf(this.score.value, this.editing.value, this.current.value - 1))
+    this.photo = computed(() => photoOfBar(this.saveInfo.value, this.saved.value, this.score.value, this.current.value))
+    this.photoLarge = computed(() => this.large.value && this.photo.value !== null)
   }
 
   // ---- Selection -----------------------------------------------------------------------------
@@ -713,6 +725,25 @@ export class EditorSession {
       if (bar !== undefined) this.goToBar(bar)
       this.full.value = false
     })
+  }
+
+  // ---- The photo line (group 11) -------------------------------------------------------------
+
+  /** Shows the photo of the current bar large, over the editor (design D10); nothing else changes. False for a piece without pages. */
+  openPhoto(): boolean {
+    if (!this.photo.peek()) return false
+    this.large.value = true
+    return true
+  }
+
+  /** Closes the large photo; nothing else changes. */
+  closePhoto(): void {
+    this.large.value = false
+  }
+
+  /** The URL of the picture of `photo`'s page. */
+  photoUrl(photo: BarPhoto): Promise<string> {
+    return this.deps.library.pageImageUrl(this.pieceId, photo.n)
   }
 
   /** Shows another staff or voice of the part being edited in Grid (spec "Choose the other hand"); a selected note of another voice goes. False for a voice the part does not have. */
@@ -1433,10 +1464,15 @@ export class EditorSession {
   }
 
   /**
-   * What back (and the editor's own Back) asks before leaving: with "Full score" shown, it closes that and stays (design
-   * D1); else nothing when there is nothing to lose, else the discard question; true lets the user leave.
+   * What back (and the editor's own Back) asks before leaving: with the photo shown large, it closes that and stays (design
+   * D10); else with "Full score" shown, it closes that and stays (design D1); else nothing when there is nothing to lose,
+   * else the discard question; true lets the user leave.
    */
   confirmLeave(): boolean | Promise<boolean> {
+    if (this.large.peek()) {
+      this.closePhoto()
+      return false
+    }
     if (this.full.peek()) {
       this.closeFullScore()
       return false
@@ -1462,9 +1498,10 @@ export class EditorSession {
     this.dropGuard = router.setLeaveGuard(() => this.confirmLeave())
   }
 
-  /** Stops the preview, drops the leave guard, and ends `naming`. */
+  /** Stops the preview, drops the leave guard, ends `naming` and closes the large photo. */
   close(): void {
     this.askName.value = false
+    this.large.value = false
     this.player?.stop()
     this.dropGuard?.()
     this.dropGuard = undefined

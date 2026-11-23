@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import type { Page } from 'playwright'
 import { dynamicOf } from '../../src/core/score/edit.ts'
 import { parseMusicXml, serializeMusicXml } from '../../src/core/score/musicxml.ts'
@@ -210,7 +211,7 @@ async function makeOdePiece(page: Page): Promise<string> {
   )
 }
 
-test('edit: the frame shows the title, the line of the current bar and the bar large, with no pills or photo; a tap selects, and Preview plays the current bar', async () => {
+test('edit: the frame shows the title, the photo line, the line of the current bar and the bar large, with no pills; a tap selects, and Preview plays the current bar', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await serveSamples(app)
@@ -221,7 +222,11 @@ test('edit: the frame shows the title, the line of the current bar and the bar l
     assert.equal(await barRow(page), 'Bar 1 of 12')
     assert.equal(await selection(page), 'Tap a note to edit it.')
     assert.equal(await page.getByRole('button', { name: /^Pages|Go to bar|Add pages/ }).count(), 0, 'no pills above the score')
-    assert.equal(await page.locator('.editor img, .editor-photo').count(), 0, 'no photo')
+    // The photo line of bar 1 above the overview (task 11.2): the seeded page has no positions for its lines, so it is the
+    // whole page, which the seeded stand-in picture cannot show; it keeps its place and says the page.
+    const photoLine = page.getByRole('button', { name: 'Photo of bar 1, page 1' })
+    assert.equal(await textOf(photoLine), 'Page 1')
+    assert.ok((await photoLine.boundingBox())!.y + 44 <= (await page.locator('.editor-overview').boundingBox())!.y, 'above the overview')
     assert.equal(await warnings(page).count(), 0, 'nothing to check: no warning and no mark')
     assert.equal(await page.locator('.editor .score-view g.note.mk-flag, .editor .score-view g.note.mk-flagbar').count(), 0)
     // There is always a current bar (design D1): Preview plays it, also with nothing selected.
@@ -2247,5 +2252,173 @@ test('edit: a bar of 3½ beats offers "E4 (1) → dotted quarter" under the bar 
     assert.match(await textOf(warnings(page)), /^1 to check · Next$/)
     assert.equal(await chips.getByRole('button').count(), 3)
     assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), true, 'it was one undo step')
+  })
+})
+
+// ---- the photo line (change redesign-score-editor, task 11.2; design D10, D13; spec "Line from the photo") ------------
+
+/** The page photo of the fixtures (1240 x 1754 pixels, drawn, not of a published score): eight lines of four bars. */
+const PAGE_PHOTO = readFileSync(fileURLToPath(new URL('../fixtures/page.jpg', import.meta.url))).toString('base64')
+const PAGE_SIZE = { width: 1240, height: 1754 }
+/** Where line `k` (from 0) of the fixture photo is, as the reader reports a staff: its five staff lines, as fractions of the photo. */
+const photoLine = (k: number) => ({ x: 90 / 1240, y: (220 + 170 * k) / 1754, width: 1062 / 1240, height: 57 / 1754 })
+
+/**
+ * Puts the fixture photo in the fake files, as `source`, and makes the fake files give a picture's own bytes as its URL
+ * (as the add-music journey does): they name it `fake://…`, which a browser cannot show.
+ */
+async function realPhoto(page: Page, source: string): Promise<void> {
+  await page.evaluate(
+    ({ photo, path }) => {
+      const files = window.__test!.platform.files
+      files.imageUrl = async (file) => URL.createObjectURL(new Blob([new Uint8Array(files.bytes(file)!)], { type: 'image/jpeg' }))
+      files.seed(path, Uint8Array.from(atob(photo), (c) => c.charCodeAt(0)))
+    },
+    { photo: PAGE_PHOTO, path: source },
+  )
+}
+
+/** "Ode to Joy" on one page of the fixture photo, with its lines: bars 1-4 on line 1, 5-8 on line 2, 9-12 on line 3. */
+async function makeEtude(page: Page): Promise<string> {
+  await realPhoto(page, 'scans/test/etude.jpg')
+  return page.evaluate(
+    async ({ xml, lines }) => {
+      const staves = lines.map((box, k) => ({ box, firstBar: 4 * k + 1, lastBar: 4 * k + 4 }))
+      const page = { source: 'scans/test/etude.jpg', recognised: xml, firstBar: 1, lastBar: 12, staves }
+      return (await window.__test!.shell.library.create({ name: 'Etude', musicxml: xml, bars: 12, repairs: [], pages: [page] })).id
+    },
+    { xml: barsScore(12, 60), lines: [0, 1, 2].map(photoLine) },
+  )
+}
+
+/** Where a line of the photo (fractions) is drawn on the screen, given where the picture is drawn. */
+const drawnAt = (picture: { x: number; y: number; width: number; height: number }, line: { x: number; y: number; width: number; height: number }) => ({
+  left: picture.x + line.x * picture.width,
+  right: picture.x + (line.x + line.width) * picture.width,
+  top: picture.y + line.y * picture.height,
+  bottom: picture.y + (line.y + line.height) * picture.height,
+})
+
+/** Waits until an image has loaded, and returns its box. */
+async function loadedBox(page: Page, locator: ReturnType<Page['locator']>): Promise<{ x: number; y: number; width: number; height: number }> {
+  await locator.waitFor()
+  await page.waitForFunction((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0, await locator.elementHandle())
+  return (await locator.boundingBox())!
+}
+
+/** Two fingers, or one, put down at `from`, moved in steps to `to`, and lifted (Chrome's touch input, as a phone sends it). */
+async function fingers(page: Page, from: { x: number; y: number }[], to: { x: number; y: number }[]): Promise<void> {
+  const cdp = await page.context().newCDPSession(page)
+  const points = (t: number) => from.map((p, id) => ({ id, x: p.x + (to[id]!.x - p.x) * t, y: p.y + (to[id]!.y - p.y) * t }))
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(0) })
+  for (let step = 1; step <= 6; step++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(step / 6) })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await cdp.detach()
+}
+
+test('edit: the photo line is the line of bar 6\'s staff; it opens large on that line, two fingers zoom and one moves it, and Close and the back button close it; a piano part has the "Photo" key, with the whole page where the lines are not known (task 11.2)', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    await openEditor(page, await makeEtude(page))
+    await goToBar(page, 6)
+
+    // Above the overview, across the width, 44 px high (a control): line 2 of the page, its middle at the line's middle.
+    const strip = page.getByRole('button', { name: 'Photo of bar 6, page 1' })
+    const stripBox = (await strip.boundingBox())!
+    const overviewBox = (await page.locator('.editor-overview').boundingBox())!
+    assert.ok(stripBox.y + stripBox.height <= overviewBox.y, 'above the overview')
+    assert.equal(stripBox.height, 44)
+    assert.equal(Math.round(stripBox.width), Math.round(overviewBox.width), 'as wide as the overview')
+    assert.equal(await page.locator('.editor').getAttribute('data-layout'), 'line', 'with room for the overview as a line')
+    assert.ok((await page.locator('.editor-surface').boundingBox())!.height >= 170, 'the large bar keeps its 170 px')
+    let staff = drawnAt(await loadedBox(page, strip.locator('img')), photoLine(1))
+    assert.ok(Math.abs((staff.top + staff.bottom) / 2 - (stripBox.y + stripBox.height / 2)) < 1, 'the staff of line 2 in the middle')
+    assert.ok(staff.top > stripBox.y && staff.bottom < stripBox.y + stripBox.height, `the whole staff in view (${staff.top} to ${staff.bottom})`)
+    assert.ok(staff.left > stripBox.x && staff.left < stripBox.x + 15 && staff.right < stripBox.x + stripBox.width && staff.right > stripBox.x + stripBox.width - 15, 'from end to end')
+    // Bar 4 is on line 1.
+    await page.getByRole('button', { name: 'Previous bar' }).click()
+    await page.getByRole('button', { name: 'Previous bar' }).click()
+    await onBar(page, 4)
+    staff = drawnAt((await page.getByRole('button', { name: 'Photo of bar 4, page 1' }).locator('img').boundingBox())!, photoLine(0))
+    assert.ok(Math.abs((staff.top + staff.bottom) / 2 - (stripBox.y + stripBox.height / 2)) < 1, 'bar 4: the staff of line 1')
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await page.getByRole('button', { name: 'Next bar' }).click()
+    await onBar(page, 6)
+
+    // Large: over the editor, on line 2, larger than across the width, from its left edge, in the middle.
+    await page.getByRole('button', { name: 'Photo of bar 6, page 1' }).click()
+    const large = page.getByRole('dialog', { name: 'From your photo · bars 5 to 8' })
+    const zoom = large.locator('.editor-photo-zoom')
+    await zoom.locator('img[style*="translate"]').waitFor()
+    const area = (await zoom.boundingBox())!
+    const picture = zoom.getByRole('img', { name: 'Photo of page 1' })
+    staff = drawnAt((await loadedBox(page, picture))!, photoLine(1))
+    // In the middle as far as the page allows: line 2 is high on the page, so the page's top edge is at the top of the view.
+    const pictureTop = (await picture.boundingBox())!.y
+    assert.ok(Math.abs((staff.top + staff.bottom) / 2 - (area.y + area.height / 2)) < 1 || Math.abs(pictureTop - area.y) < 0.5, 'line 2 in the middle, or the page from its top')
+    assert.ok(staff.top > area.y && staff.bottom < area.y + area.height, 'line 2 in view')
+    assert.ok(staff.left >= area.x && staff.left < area.x + 30, 'from its left edge')
+    assert.ok(staff.bottom - staff.top > 40, `the staff is ${staff.bottom - staff.top} px high, against ${(57 / 1754) * ((await picture.boundingBox())!.height) } now`)
+    const scale = Number(await zoom.getAttribute('data-scale'))
+    assert.ok(Math.abs(scale - (await picture.boundingBox())!.width / PAGE_SIZE.width) < 0.001, 'the scale is the picture\'s')
+
+    // Two fingers apart zoom in about them: the point between them stays there.
+    const middle = { x: area.x + area.width / 2, y: area.y + area.height / 2 }
+    const before = (await picture.boundingBox())!
+    const held = { x: (middle.x - before.x) / before.width, y: (middle.y - before.y) / before.height }
+    await fingers(page, [{ x: middle.x - 40, y: middle.y }, { x: middle.x + 40, y: middle.y }], [{ x: middle.x - 80, y: middle.y }, { x: middle.x + 80, y: middle.y }])
+    await page.waitForFunction((s) => Number(document.querySelector('.editor-photo-zoom')!.getAttribute('data-scale')) > s * 1.9, scale)
+    const zoomed = (await picture.boundingBox())!
+    assert.ok(Math.abs(Number(await zoom.getAttribute('data-scale')) / scale - 2) < 0.05, 'twice as large')
+    assert.ok(Math.abs(zoomed.x + held.x * zoomed.width - middle.x) < 2 && Math.abs(zoomed.y + held.y * zoomed.height - middle.y) < 2, 'the point between the fingers stays')
+    // One finger moves it.
+    await fingers(page, [{ x: middle.x + 60, y: middle.y + 50 }], [{ x: middle.x - 40, y: middle.y + 10 }])
+    const moved = (await picture.boundingBox())!
+    assert.ok(Math.abs(moved.x - (zoomed.x - 100)) < 2 && Math.abs(moved.y - (zoomed.y - 40)) < 2, `moved with the finger (${moved.x - zoomed.x}, ${moved.y - zoomed.y})`)
+    assert.equal(moved.width, zoomed.width, 'without zooming')
+
+    // Close closes it, and the editor is as it was.
+    await large.getByRole('button', { name: 'Close' }).click()
+    await large.waitFor({ state: 'detached' })
+    assert.equal(await barRow(page), 'Bar 6 of 12')
+    // The back button closes it first, and stays in the editor.
+    await page.getByRole('button', { name: 'Photo of bar 6, page 1' }).click()
+    await large.waitFor()
+    assert.equal(await app.back(), true)
+    await large.waitFor({ state: 'detached' })
+    assert.deepEqual(await app.screen(), { name: 'editor', pieceId: await page.locator('.editor').getAttribute('data-piece-id') })
+    assert.equal(await barRow(page), 'Bar 6 of 12')
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
+
+    // A duet whose page has no positions for its lines: the melody has the photo line, with the whole page, and the
+    // overview as bar numbers (design D13: the overview gives way first); the piano, with two staves, has the key.
+    await realPhoto(page, 'scans/test/duet.jpg')
+    const duet = await page.evaluate(
+      async ({ xml }) => (await window.__test!.shell.library.create({ name: 'Duet', musicxml: xml, bars: 8, repairs: [], pages: [{ source: 'scans/test/duet.jpg', recognised: xml, firstBar: 1, lastBar: 8 }] })).id,
+      { xml: DUET },
+    )
+    await openEditor(page, duet)
+    const whole = await loadedBox(page, page.getByRole('button', { name: 'Photo of bar 1, page 1' }).locator('img'))
+    assert.ok(Math.abs(whole.height - 42) < 1 && Math.abs(whole.width / whole.height - PAGE_SIZE.width / PAGE_SIZE.height) < 0.02, 'the whole page, small')
+    await page.locator('.editor[data-layout="numbers"]').waitFor()
+    assert.ok((await page.locator('.editor-surface').boundingBox())!.height >= 170, 'the large bar keeps its 170 px')
+    await partSwitch(page).getByRole('radio', { name: 'Piano' }).click()
+    await page.locator(`${BIG} g.note[id="lc1"]`).waitFor()
+    assert.equal(await page.locator('.editor-photo-line').count(), 0, 'no photo line')
+    const key = page.locator('.editor-titlebar').getByRole('button', { name: 'Photo of bar 1, page 1' })
+    assert.equal(await textOf(key), 'Photo')
+    const keyBox = (await key.boundingBox())!
+    assert.ok(keyBox.width >= 44 && keyBox.height >= 44, 'a key to touch')
+    assert.equal(await page.locator('.editor').getAttribute('data-layout'), 'numbers')
+    assert.ok((await page.locator('.editor-surface').boundingBox())!.height >= 170, 'the large bar keeps its 170 px')
+    await key.click()
+    const page1 = page.getByRole('dialog', { name: 'From your photo · page 1' })
+    await page1.locator('img[style*="translate"]').waitFor()
+    const all = (await loadedBox(page, page1.getByRole('img', { name: 'Photo of page 1' })))!
+    const room = (await page1.locator('.editor-photo-zoom').boundingBox())!
+    assert.ok(all.x >= room.x - 0.5 && all.y >= room.y - 0.5 && all.x + all.width <= room.x + room.width + 0.5 && all.y + all.height <= room.y + room.height + 0.5, 'the whole page in view')
+    assert.ok(Math.abs(all.width - room.width) < 1, 'as wide as it fits')
+    await page1.getByRole('button', { name: 'Close' }).click()
+    await page1.waitFor({ state: 'detached' })
   })
 })

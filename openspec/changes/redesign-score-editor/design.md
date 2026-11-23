@@ -224,6 +224,14 @@ This reverses a decision of 2026-11-19 ("the photo strip is too small to read").
 
 It is the last task group, so it can be dropped without touching the rest.
 
+**Decided while applying (2026-11-23), for the photo line:**
+
+- The line is 44 px high, not the 40 px of D13, so it is a full touch target.
+- When room is short the screen gives way in this order: the overview becomes the bar-number row; then the photo line becomes a "Photo" key in the title row, before "Full score"; then the screen scrolls. A two-staff part always gets the key. The key is not in the bar row: that row has 30 px to spare at 360 px.
+- The large view shows the whole page photo, opened on the line with the line framed, so the lines around it can be read too. The mock shows the line alone.
+- An added bar shows the line of the bar it was added next to; both halves of a split bar keep their line. When a save would be refused (D8's known limit), the line is taken from the pages as last saved and can be a neighbouring one.
+- The frame measures only after the overview has drawn its first line, and needs 2 px to spare before it goes back to a fuller layout; without these the layout could flip without end.
+
 ### D11. A pickup bar is not flagged
 
 `voiceWarnings` in `warnings.ts` skips the bar-length warning for bar index 0 when the bar is shorter than the time signature. A first bar that is too long is still flagged. `suggestRepairs` returns nothing for a bar without a warning, so a pickup gets no suggestions.

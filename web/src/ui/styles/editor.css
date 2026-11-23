@@ -138,6 +138,109 @@
   font-size: var(--fs-12);
 }
 
+/* ---- The photo line (design D10) ---------------------------------------------------------------- */
+
+/* 44 px high (`PHOTO_LINE_PX`: design D13's 40 px, raised to the app's smallest touch target), the whole width; the same
+   height while the picture loads or cannot be shown. */
+.editor-photo-line {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: var(--tap); /* 44 */
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+/* The line with its margin across the width, its middle at the middle (`stripLayout`). */
+.editor-photo-crop {
+  position: absolute;
+  top: 50%;
+  max-width: none;
+  height: auto;
+}
+/* The whole page, when the place of the line is not known. */
+.editor-photo-page {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: none;
+  margin: 0 auto;
+}
+.editor-photo-chip {
+  position: absolute;
+  top: 0.125rem;
+  right: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--ink-muted);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+  line-height: 1.4;
+}
+
+/* The photo shown large, over the editor: the title with Close, the photo to pinch and drag, and how. */
+.editor-photo-large {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  background: var(--bg);
+}
+.editor-photo-large:focus {
+  outline: none;
+}
+.editor-photo-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-1) 0 var(--gutter);
+}
+.editor-photo-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.editor-photo-zoom {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-muted);
+  touch-action: none;
+  user-select: none;
+}
+.editor-photo-picture {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+}
+/* The line of the current bar, around the staff with its margin. */
+.editor-photo-mark {
+  position: absolute;
+  border: 2px solid var(--primary);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+.editor-photo-missing {
+  padding: var(--space-4) var(--gutter);
+  color: var(--ink-muted);
+  font-size: var(--fs-13);
+}
+.editor-photo-hint {
+  padding: var(--space-2) var(--gutter);
+  color: var(--ink-muted);
+  font-size: var(--fs-12);
+  text-align: center;
+}
+
 /* ---- The overview and the full score ------------------------------------------------------------ */
 
 .editor-overview {

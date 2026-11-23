@@ -14,13 +14,15 @@ import { useShell } from '../../ShellContext.ts'
 import { BarSurface } from './BarSurface.tsx'
 import { ElementPanel } from './ElementPanel.tsx'
 import { GridSurface } from './GridSurface.tsx'
-import { frameLayout } from './frame.ts'
+import { frameLayout, sameLayout } from './frame.ts'
 import type { FrameLayout } from './frame.ts'
 import { BarsTray } from './BarsTray.tsx'
 import { MarksTray } from './MarksTray.tsx'
 import type { Failure, FailureKey } from './NoteTab.tsx'
 import { NotesTray } from './NotesTray.tsx'
 import { Overview } from './Overview.tsx'
+import { PhotoLarge, PhotoStrip, photoLabel, usePhotoUrl } from './PhotoLine.tsx'
+import { PHOTO_LINE_PX } from './photoView.ts'
 import { ScoreTab } from './ScoreTab.tsx'
 
 /**
@@ -32,6 +34,9 @@ import { ScoreTab } from './ScoreTab.tsx'
  * 1. The header: Back, the title (with "Name this piece" for a new piece) and the "Full score" key; under it the check chip
  *    ("2 to check · Next", with a key for the one before), Preview bar, Undo and Redo.
  * 2. The part switch, where the piece has more than one part (change edit-parts, D1).
+ * 2a. The photo line (design D10, `PhotoLine.tsx`): the line of the page photo that holds the current bar, 44 px high; a tap
+ *    shows it large over the editor, to pinch and drag, until Close or the back button. In a two-staff part, or when the
+ *    frame has no room for it, it is the "Photo" key at the end of the title row instead.
  * 3. The overview: the line of music that holds the current bar, or its bar numbers when the screen is too low (`Overview`).
  * 4. The bar row: previous, "Bar 3 of 12" with the beats chip ("3½ of 4 beats", green when it adds up), next, and the
  *    Notes | Grid switch.
@@ -52,8 +57,8 @@ import { ScoreTab } from './ScoreTab.tsx'
  *
  * Design D13: the screen does not scroll; every row but the large bar has its own height, the tray three rows of keys
  * (it scrolls inside itself), and the large bar gets what is left, at least 170 px. When that does not fit, the overview
- * becomes bar numbers (`frameLayout`, measured after every layout). A screen too low for even that (a phone on its side)
- * scrolls as a whole.
+ * becomes bar numbers (`frameLayout`, measured after every layout); when that is not enough either, the photo line becomes
+ * the "Photo" key. A screen too low for even that (a phone on its side) scrolls as a whole.
  *
  * "Full score" (design D1) shows the whole part in place of everything between the header and Save & practice; a tap in a
  * bar picks it, "Back to bar N" and the back button go back without picking (the session's leave guard closes it first).
@@ -85,7 +90,7 @@ export function Editor({ session }: { session: EditorSession }) {
   /** Why the last change of today's tools did not happen: a fixed text, or one already made from the refusal. */
   const [message, setMessage] = useState<FailureKey | 'mark.error.slide' | 'grid.error.strip' | { text: string } | null>(null)
   const [saveError, setSaveError] = useState<'empty-name' | 'conflict' | 'failed' | null>(null)
-  const [layout, setLayout] = useState<FrameLayout>({ overview: 'line', scroll: false })
+  const [layout, setLayout] = useState<FrameLayout>({ overview: 'line', photo: 'line', scroll: false })
   const frame = useRef<HTMLDivElement>(null)
   /** The title has not had its first focus yet; and that focus selected the date name, which the press's own mouseup must not undo. */
   const firstFocus = useRef(true)
@@ -135,6 +140,10 @@ export function Editor({ session }: { session: EditorSession }) {
   const full = session.fullScore.value
   const view = session.view.value
   const warningCount = session.warningCount.value
+  const photo = session.photo.value
+  const photoUrl = usePhotoUrl(session, photo)
+  // The photo line above the overview, or the "Photo" key in the title row (design D10, D13); neither in "Full score".
+  const photoAs = !photo || full ? null : twoStaves(session) || layout.photo === 'key' ? 'key' : 'line'
 
   // Design D13, measured after every render and whenever a part of the frame changes size.
   useLayoutEffect(() => {
@@ -147,15 +156,26 @@ export function Editor({ session }: { session: EditorSession }) {
       const line = overview?.querySelector<HTMLElement>('.score-island')
       const surface = root.querySelector<HTMLElement>('.editor-surface')
       if (!overview || !row || !line || !surface) return
+      // Until the island has drawn and cut out its line, its height is not the line's: as bar numbers it would measure
+      // nothing, the line would seem to fit, and the frame would switch back and forth without end. Its first line
+      // changes its size, which measures again.
+      if (line.dataset.line === undefined) return
       const chrome = overview.offsetHeight - row.offsetHeight
       const rowMin = row.querySelector<HTMLElement>('.icon-button')?.offsetHeight ?? 0
-      const next = frameLayout({
+      // The photo line is measured apart from the rest, so that it is counted the same whether it is drawn or is the key.
+      const gap = parseFloat(getComputedStyle(root).rowGap) || 0
+      const strip = root.querySelector<HTMLElement>('.editor-photo-line')
+      const sizes = {
         screen: root.clientHeight,
-        fixed: root.scrollHeight - overview.offsetHeight - surface.offsetHeight,
+        fixed: root.scrollHeight - overview.offsetHeight - surface.offsetHeight - (strip ? strip.offsetHeight + gap : 0),
         line: Math.max(line.offsetHeight, rowMin) + chrome,
         numbers: rowMin + chrome,
+        photo: session.photo.peek() && !twoStaves(session) ? PHOTO_LINE_PX + gap : null,
+      }
+      setLayout((now) => {
+        const next = frameLayout(sizes, now)
+        return sameLayout(now, next) ? now : next
       })
-      setLayout((now) => (now.overview === next.overview && now.scroll === next.scroll ? now : next))
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -252,6 +272,11 @@ export function Editor({ session }: { session: EditorSession }) {
     } catch {
       setMessage('practice.error.sound')
     }
+  }
+
+  const openPhoto = (): void => {
+    quiet()
+    session.openPhoto()
   }
 
   const savePieceAndPractice = async (): Promise<void> => {
@@ -395,6 +420,11 @@ export function Editor({ session }: { session: EditorSession }) {
               }}
             />
           </label>
+          {photoAs === 'key' && photo ? (
+            <button type="button" class="editor-text-button editor-full-key editor-photo-key" aria-label={photoLabel(t, photo, current)} onClick={openPhoto}>
+              {t('editor.photo.key')}
+            </button>
+          ) : null}
           <button
             type="button"
             class="editor-text-button editor-full-key"
@@ -440,6 +470,8 @@ export function Editor({ session }: { session: EditorSession }) {
       ) : null}
 
       {full && notice ? <div class="editor-say editor-say--full">{notice}</div> : null}
+
+      {photoAs === 'line' && photo ? <PhotoStrip photo={photo} url={photoUrl} bar={current} onOpen={openPhoto} /> : null}
 
       <Overview session={session} mode={layout.overview} island={island} onGoTo={goTo} onCloseFull={(bar) => session.closeFullScore(bar)} />
 
@@ -542,6 +574,14 @@ export function Editor({ session }: { session: EditorSession }) {
           {t('editor.save')}
         </Button>
       </footer>
+
+      {session.photoLarge.value && photo ? <PhotoLarge photo={photo} url={photoUrl} onClose={() => session.closePhoto()} /> : null}
     </div>
   )
+}
+
+/** Whether the part being edited has two staves: its photo is then the "Photo" key, as its overview needs the room (design D13). */
+function twoStaves(session: EditorSession): boolean {
+  const id = session.part.value
+  return session.score.value.parts.find((p) => p.id === id)?.staves === 2
 }

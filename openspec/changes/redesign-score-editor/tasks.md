@@ -78,7 +78,7 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 
 ## 11. The photo line
 
-- [ ] 11.1 Give `EditorSession` the photo of the current bar back (page, staff box, `photoUrl`), following unsaved bar changes through the bar map. Verify (quick): `web/test/editorSession.test.ts` proves the line for a bar, for an added bar, and the whole page when no staff is known.
+- [x] 11.1 Give `EditorSession` the photo of the current bar back (page, staff box, `photoUrl`), following unsaved bar changes through the bar map. Verify (quick): `web/test/editorSession.test.ts` proves the line for a bar, for an added bar, and the whole page when no staff is known.
 - [ ] 11.2 The photo line above the overview and the large view with pinch and drag (design D10). Verify (browser): a journey in `web/test/ui/edit.test.ts` finds the line of bar 6's staff, opens it large and closes it. Check by eye at 360 × 780 that a line of a real page photo can be read when opened large (manual).
 
 ## 12. Integration
