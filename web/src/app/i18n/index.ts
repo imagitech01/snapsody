@@ -1,8 +1,10 @@
 import { instrumentById } from '../../core/instruments/instruments.ts'
 import type { InstrumentFamily } from '../../core/instruments/instruments.ts'
-import type { Pitch } from '../../core/score/model.ts'
+import type { NoteValue } from '../../core/score/edit.ts'
+import type { NoteType, Pitch } from '../../core/score/model.ts'
 import { midiNoteName, noteName } from '../../core/score/noteNames.ts'
 import type { NoteNameStyle } from '../../core/score/noteNames.ts'
+import type { Suggestion } from '../../core/score/suggest.ts'
 import type { ScoreWarning } from '../../core/score/warnings.ts'
 import { en } from './en.ts'
 import type { MessageKey } from './en.ts'
@@ -80,6 +82,13 @@ export interface I18n {
    * for a kind or a field this does not know.
    */
   warning(warning: ScoreWarning): string
+  /** A note value in words, as a suggestion names it: "quarter", "dotted quarter", "sixteenth". */
+  noteValue(value: NoteValue): string
+  /**
+   * The label of a suggested repair (change redesign-score-editor, D6), from its parts, with the note named in the note
+   * names of the settings: "E4 (1) → dotted quarter", "Add an eighth rest at the end", "Bar line after G4 (3)".
+   */
+  suggestion(suggestion: Suggestion): string
   /** How long ago, in words and without a capital: "today", "yesterday", "3 days ago", "last week". Empty for a time that is not valid. */
   relativeTime(when: Date | string, now?: Date): string
   /** "Practised yesterday". */
@@ -91,6 +100,9 @@ export interface I18n {
   /** The name a new piece gets: the date and time it was added, like "18 Nov, 14:05". */
   defaultPieceName(added: Date): string
 }
+
+/** The words for the note values a suggestion can name. */
+const VALUE_KEYS: Partial<Record<NoteType, `value.${'whole' | 'half' | 'quarter' | 'eighth' | '16th'}`>> = { whole: 'value.whole', half: 'value.half', quarter: 'value.quarter', eighth: 'value.eighth', '16th': 'value.16th' }
 
 const plural = new Intl.PluralRules(LOCALE)
 const numbers = new Intl.NumberFormat(LOCALE, { useGrouping: false })
@@ -160,6 +172,29 @@ export function createI18n(options: I18nOptions = {}): I18n {
     }
   }
 
+  const noteValue: I18n['noteValue'] = ({ type, dots }) => {
+    const key = VALUE_KEYS[type]
+    const name = key ? t(key) : type
+    return dots === 0 ? name : t(dots === 1 ? 'value.dotted' : 'value.doubleDotted', { value: name })
+  }
+
+  const suggestion: I18n['suggestion'] = (s) => {
+    switch (s.kind) {
+      case 'addRest': {
+        const length = noteValue(s.length)
+        return t(/^[aeiou]/i.test(length) ? 'suggest.addRest.an' : 'suggest.addRest', { length })
+      }
+      case 'length':
+        return s.pitch ? t('suggest.length', { note: pitchName(s.pitch), place: s.place, length: noteValue(s.length) }) : t('suggest.length.rest', { place: s.place, length: noteValue(s.length) })
+      case 'removeRest':
+        return t('suggest.removeRest', { place: s.place })
+      case 'barLine':
+        return s.pitch ? t('suggest.barLine', { note: pitchName(s.pitch), place: s.place }) : t('suggest.barLine.rest', { place: s.place })
+      case 'join':
+        return t('suggest.join')
+    }
+  }
+
   return {
     t,
     instrumentName,
@@ -167,6 +202,8 @@ export function createI18n(options: I18nOptions = {}): I18n {
     noteName: pitchName,
     midiNoteName: midiName,
     warning,
+    noteValue,
+    suggestion,
     relativeTime,
     practised,
     added,

@@ -10,6 +10,9 @@ import type { InstrumentFamily } from '../src/core/instruments/instruments.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
 import type { NoteNameStyle } from '../src/core/score/noteNames.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
+import type { GridRefusal, NoteValue } from '../src/core/score/edit.ts'
+import { firstVoice } from '../src/core/score/model.ts'
+import { suggestRepairs } from '../src/core/score/suggest.ts'
 import type { ScoreWarning, ScoreWarningKind } from '../src/core/score/warnings.ts'
 import { eighths, note, quarters, score } from './helpers.ts'
 import { firstLine, warningsFor } from './helpers.ts'
@@ -258,4 +261,37 @@ test('warnings: a warning this cannot build from its fields shows the English me
   assert.equal(i18n.warning({ ...base, kind: 'bar-length', bar: '2' }), base.message, 'no counted length or time signature')
   assert.equal(i18n.warning({ ...base, kind: 'time-signature-inferred' }), base.message, 'no inferred time signature')
   assert.equal(i18n.warning({ ...base, kind: 'from-the-future' as ScoreWarningKind, bar: '1' }), base.message, 'a kind that is not known')
+})
+
+// ---- Suggested repairs and Grid refusals (change redesign-score-editor, D4, D6) -------------------------------------
+
+test('suggestions: each label names the note in the settings\' note names (mock: "E4 (1) → dotted quarter")', () => {
+  // Bar 2: E4 quarter, G4 eighth, C5 half, 3½ beats.
+  const s = parseMusicXml(score([quarters(4), note({ step: 'E', octave: 4, type: 'quarter' }) + note({ step: 'G', octave: 4, type: 'eighth' }) + note({ step: 'C', octave: 5, type: 'half' })], [4, 4]))
+  const found = suggestRepairs(s, firstVoice(s), 1)
+  const style = signal<NoteNameStyle>('letters')
+  const i18n = createI18n({ noteNames: style })
+  assert.deepEqual(found.map(i18n.suggestion), ['Add an eighth rest at the end', 'E4 (1) → dotted quarter', 'G4 (2) → quarter'])
+  style.value = 'solfege'
+  assert.deepEqual(found.map(i18n.suggestion), ['Add an eighth rest at the end', 'Mi4 (1) → dotted quarter', 'Sol4 (2) → quarter'])
+  const short = parseMusicXml(score([quarters(4), quarters(3)], [4, 4]))
+  assert.equal(createI18n().suggestion(suggestRepairs(short, firstVoice(short), 1)[0]!), 'Add a quarter rest at the end')
+  const run = (): void => undefined
+  const english = createI18n()
+  assert.equal(english.suggestion({ kind: 'barLine', noteId: 'a', pitch: { step: 'B', alter: -1, octave: 4 }, place: 3, run }), 'Bar line after B♭4 (3)')
+  assert.equal(english.suggestion({ kind: 'barLine', noteId: 'r', place: 3, run }), 'Bar line after the rest (3)')
+  assert.equal(english.suggestion({ kind: 'length', noteId: 'r', place: 2, length: { type: 'half', dots: 0 }, run }), 'Rest (2) → half')
+  assert.equal(english.suggestion({ kind: 'removeRest', noteId: 'r', place: 4, run }), 'Remove the rest (4)')
+  assert.equal(english.suggestion({ kind: 'join', run }), 'Join with the next bar')
+  assert.deepEqual(
+    [{ type: '16th', dots: 0 }, { type: 'half', dots: 1 }, { type: 'quarter', dots: 2 }, { type: 'whole', dots: 0 }].map((v) => english.noteValue(v as NoteValue)),
+    ['sixteenth', 'dotted half', 'double-dotted quarter', 'whole'],
+  )
+})
+
+test('grid refusals: every reason has a text, and a locked block says where it is edited', () => {
+  const reasons: GridRefusal[] = ['overlap', 'end', 'locked', 'length', 'room', 'chord', 'rest', 'gap']
+  const i18n = createI18n()
+  for (const reason of reasons) assert.ok(i18n.t(`grid.error.${reason}`).endsWith('.'), reason)
+  assert.equal(i18n.t('grid.error.locked'), 'Edit triplets and grace notes in Notes.')
 })

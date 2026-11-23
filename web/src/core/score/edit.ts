@@ -4,7 +4,8 @@ import { allItemLists, firstVoice, freshDirectionId, isDirection, isNote, isWedg
 import { endingLabels, parseEndingNumbers } from './endings.ts'
 import { noteDuration } from './musicxml.ts'
 import type { Frac } from './rational.ts'
-import { add, cmp, eq, frac, sub } from './rational.ts'
+import { add, cmp, div, eq, frac, mul, sub } from './rational.ts'
+import { beatLength } from './beams.ts'
 
 /*
  * Editing the score model (task group 13, design D6). Every function mutates the score it is given
@@ -793,7 +794,7 @@ export function deleteNote(target: Score | VoiceScore, id: string): string | und
  * The length of a whole-bar rest in bar `index` of a view: the time signature in force there; without one, the longest
  * voice of the bar in the view's score, else a whole note.
  */
-function barLengthAt(view: VoiceScore, index: number): Frac {
+export function barLengthAt(view: VoiceScore, index: number): Frac {
   for (let b = index; b >= 0; b--) {
     const time = view.measures[b]?.time
     if (time) return frac(time.beats, time.beatType)
@@ -930,7 +931,7 @@ export function addChordNote(target: Score | VoiceScore, id: string): string {
 }
 
 /** Where an item starts in its bar: the length of the notes and rests before it, chord notes and grace notes not counted. */
-function onsetIn(items: readonly MeasureItem[], at: number): Frac {
+export function onsetIn(items: readonly MeasureItem[], at: number): Frac {
   let t = frac(0)
   for (let k = 0; k < at; k++) {
     const item = items[k]!
@@ -1023,6 +1024,429 @@ export function moveToOtherStaff(score: Score, id: string): string {
   resolveAlters(view, place.barIndex, place.barIndex + 1)
   resolveAlters(other, place.barIndex, place.barIndex + 1)
   return id
+}
+
+// ---------------------------------------------------------------- Grid: add, move and change length (change redesign-score-editor, D4, D5)
+
+/**
+ * Why a Grid edit is refused, for the editor's explanation (spec "Grid keeps the bar in order", "Grid leaves alone what
+ * it cannot draw"): `overlap` (another note of the voice, or a locked one, is in the way), `end` (past the end of the
+ * bar), `locked` (a triplet, a grace note or a note off the sixteenths, edited in Notes), `length` (no single note has
+ * that length), `room` (less than a sixteenth free where a note is added), `chord` (the chord already has that note),
+ * `rest` (a rest is not a block: it follows from the notes), `gap` (the time left over cannot be written as rests).
+ */
+export type GridRefusal = 'overlap' | 'end' | 'locked' | 'length' | 'room' | 'chord' | 'rest' | 'gap'
+
+/** A refused Grid edit: why. Nothing was changed. The message is a full English sentence. */
+export class GridError extends EditError {
+  readonly reason: GridRefusal
+
+  constructor(reason: GridRefusal, message: string) {
+    super(message)
+    this.reason = reason
+  }
+}
+
+/** A note value as printed: its type and dots. */
+export interface NoteValue {
+  type: NoteType
+  dots: number
+}
+
+/** The lengths a note can have in Grid, longest first: whole to sixteenth, plain or dotted, on the sixteenths (no dotted sixteenth). */
+export const GRID_VALUES: readonly NoteValue[] = (['whole', 'half', 'quarter', 'eighth', '16th'] as NoteType[]).flatMap((type): NoteValue[] =>
+  type === '16th' ? [{ type, dots: 0 }] : [{ type, dots: 1 }, { type, dots: 0 }],
+)
+
+/** The Grid value that has exactly this length, if one has. */
+export function gridValue(length: Frac): NoteValue | undefined {
+  return GRID_VALUES.find((v) => eq(noteDuration(v.type, v.dots), length))
+}
+
+/** The longest Grid value that is not longer than `max`. */
+function longestValue(max: Frac): NoteValue | undefined {
+  return GRID_VALUES.find((v) => cmp(noteDuration(v.type, v.dots), max) <= 0)
+}
+
+/** Why a note cannot be edited in Grid (D4): it is a triplet (or another tuplet), a grace note, or not on the sixteenths. */
+export type GridLock = 'triplet' | 'grace' | 'offGrid'
+
+/** Whether a time in the bar is on the sixteenth grid. */
+export const onSixteenths = (t: Frac): boolean => div(t, frac(1, 16)).d === 1
+
+/**
+ * One place in time of a voice's bar: a note, chord or rest with the items that belong to it. `lead..at` are the items
+ * before it that stand at its start (directions, hairpins, grace notes), `at` is its note or rest, `at + 1..end` its
+ * chord notes. Every item of the bar up to `GridBar.tail` is in exactly one slot.
+ */
+interface Slot {
+  lead: number
+  at: number
+  end: number
+  start: Frac
+  length: Frac
+  note: Note
+  /** A rest that is not locked: time without a block, which a Grid edit may fill or write again. */
+  free: boolean
+  locked?: GridLock
+}
+
+const slotEnd = (s: Slot): Frac => add(s.start, s.length)
+
+/** Why the note or chord at `at` (with its chord notes up to `end`) is locked in Grid, if it is. */
+export function gridLock(items: readonly MeasureItem[], at: number, end: number, start: Frac): GridLock | undefined {
+  const note = items[at] as Note
+  if (note.grace) return 'grace'
+  if (items.slice(at, end).some((i) => isNote(i) && !!i.timeMod)) return 'triplet'
+  if (!onSixteenths(start) || !onSixteenths(add(start, note.duration))) return 'offGrid'
+  return undefined
+}
+
+/** One voice's bar as Grid edits see it. */
+interface GridBar {
+  view: VoiceScore
+  bar: number
+  items: MeasureItem[]
+  slots: Slot[]
+  /** Index after the last slot: what follows are the voice's trailing directions, which stay at the end. */
+  tail: number
+  voiceEnd: Frac
+  /** The time signature's bar length (`barLengthAt`). */
+  barLength: Frac
+  /** No note may end after this: the bar length, or the voice's end in a bar that is too long. */
+  limit: Frac
+  firstVoice: boolean
+}
+
+function gridBar(view: VoiceScore, bar: number): GridBar {
+  const items = view.measures[bar]!.items
+  const barLength = barLengthAt(view, bar)
+  // A whole-bar rest stands for the whole bar, whatever length it was read with.
+  const barRest = wholeBarRestOf(items)
+  const slots: Slot[] = []
+  let lead = 0
+  let t = frac(0)
+  for (let at = 0; at < items.length; at++) {
+    const item = items[at]!
+    if (!isNote(item) || item.grace || item.chord) continue
+    let end = at + 1
+    while (end < items.length && isNote(items[end]!) && (items[end] as Note).chord) end++
+    const length = item === barRest ? barLength : item.duration
+    const locked = gridLock(items, at, end, t)
+    slots.push({ lead, at, end, start: t, length, note: item, free: !!item.rest && !locked, ...(locked ? { locked } : {}) })
+    t = add(t, length)
+    lead = end
+    at = end - 1
+  }
+  return { view, bar, items, slots, tail: lead, voiceEnd: t, barLength, limit: cmp(t, barLength) > 0 ? t : barLength, firstVoice: (view.of?.ref.voice ?? 0) === 0 }
+}
+
+/** The beat of the bar for writing rests (as `beams.ts` groups notes), and whether it is a dotted one (compound time). */
+function restBeat(view: VoiceScore, bar: number): Frac {
+  for (let b = bar; b >= 0; b--) {
+    const time = view.measures[b]?.time
+    if (time) return beatLength(time)
+  }
+  return frac(1, 4)
+}
+
+/** Rest values for a gap, longest first; the dotted ones are only used in compound time (`restsFor`). */
+const GAP_VALUES: readonly NoteValue[] = [
+  { type: 'whole', dots: 1 },
+  { type: 'whole', dots: 0 },
+  { type: 'half', dots: 1 },
+  { type: 'half', dots: 0 },
+  { type: 'quarter', dots: 1 },
+  { type: 'quarter', dots: 0 },
+  { type: 'eighth', dots: 1 },
+  { type: 'eighth', dots: 0 },
+  { type: '16th', dots: 0 },
+  { type: '32nd', dots: 0 },
+  { type: '64th', dots: 0 },
+]
+
+const isMultiple = (a: Frac, b: Frac): boolean => div(a, b).d === 1
+
+/**
+ * The rests that write the time from `from` to `to` of a bar (D5: standard lengths, split at the beats), each with its
+ * start. From each place, the longest value that fits the rule:
+ *
+ * - A rest of a beat or longer starts on a beat, is a whole number of beats long, and starts at a multiple of its own
+ *   length from the start of the bar: in 4/4 a half rest on beat 1 or 3, never on beat 2. It is dotted only in compound
+ *   time, where the beat itself is dotted: in 6/8 a dotted quarter rest on either beat, or a dotted half from the start,
+ *   never a half.
+ * - A shorter rest stays inside its beat, plain, at a multiple of its length from the beat's start.
+ *
+ * The beat is `beatLength` of `beams.ts` (a quarter in simple time, a dotted quarter in 6/8). Time that no value fits
+ * that way (next to a note off the sixteenths) takes the longest plain value that fits at all; throws `GridError` when
+ * nothing does.
+ */
+function restsFor(from: Frac, to: Frac, beat: Frac): { start: Frac; value: NoteValue; duration: Frac }[] {
+  const compound = beat.n % 3 === 0
+  const out: { start: Frac; value: NoteValue; duration: Frac }[] = []
+  let pos = from
+  while (cmp(pos, to) < 0) {
+    const fits = (v: NoteValue, aligned: boolean): boolean => {
+      const d = noteDuration(v.type, v.dots)
+      if (cmp(add(pos, d), to) > 0) return false
+      if (!aligned) return v.dots === 0
+      if (cmp(d, beat) >= 0) return (v.dots === 0 || compound) && isMultiple(d, beat) && isMultiple(pos, d)
+      if (v.dots > 0) return false
+      const inBeat = sub(pos, mul(frac(Math.floor((pos.n * beat.d) / (pos.d * beat.n))), beat))
+      return cmp(add(inBeat, d), beat) <= 0 && isMultiple(inBeat, d)
+    }
+    const value = GAP_VALUES.find((v) => fits(v, true)) ?? GAP_VALUES.find((v) => fits(v, false))
+    if (!value) throw new GridError('gap', 'That would leave a gap that rests cannot fill')
+    const duration = noteDuration(value.type, value.dots)
+    out.push({ start: pos, value, duration })
+    pos = add(pos, duration)
+  }
+  return out
+}
+
+/** The note Grid puts in place: its items (what stands before it, the note, its chord notes), its start and its length. */
+interface Placed {
+  items: MeasureItem[]
+  note: Note
+  start: Frac
+  length: Frac
+}
+
+/**
+ * Writes the time from `from` to `to` of a Grid bar again (D4: only the gaps an edit touched): the free slots
+ * `first..last` (none when both are undefined: the time after the voice's last slot) are replaced by `placed` and the rests
+ * of the time around it. A rest that starts where a new rest starts is kept as that rest, with its id and its fermata,
+ * and only its length is written again. What stood before a rest that is written again (a direction, a hairpin, a grace
+ * note) goes before the rest or note that now holds its time; a hairpin that started or stopped on a rest that went now
+ * does so on that rest or note (`lists`: where hairpins are kept), so no mark is lost. In a later voice, a gap that held
+ * hidden rests only is one hidden rest again; any other gap gets rests of standard lengths (`restsFor`).
+ */
+function rewriteRun(g: GridBar, first: number | undefined, last: number | undefined, from: Frac, to: Frac, placed: Placed, lists: MeasureItem[][], newId: () => string): void {
+  const run = first === undefined || last === undefined ? [] : g.slots.slice(first, last + 1)
+  const i0 = run[0]?.lead ?? g.tail
+  const i1 = run.at(-1)?.end ?? g.tail
+  const rests = run.filter((s) => s.free)
+  const kept = new Set(placed.items)
+  // What stood before a rest that is written again, with its time.
+  const anchored: { t: Frac; item: MeasureItem }[] = []
+  for (const s of rests) for (let k = s.lead; k < s.at; k++) if (!kept.has(g.items[k]!)) anchored.push({ t: s.start, item: g.items[k]! })
+  const hidden = !g.firstVoice && rests.length > 0 && rests.every((s) => s.note.hidden)
+  const reusable = new Map(rests.map((s) => [`${s.start.n}/${s.start.d}`, s.note]))
+  const used = new Set<Note>()
+  const restAt = (start: Frac, duration: Frac, value?: NoteValue): Note => {
+    const old = reusable.get(`${start.n}/${start.d}`)
+    const rest: Note = old ?? { kind: 'note', id: newId(), rest: true, dots: 0, duration, slurs: [], tuplets: [] }
+    used.add(rest)
+    rest.duration = duration
+    delete rest.measureRest
+    if (value) {
+      rest.type = value.type
+      rest.dots = value.dots
+      delete rest.hidden
+    } else {
+      rest.hidden = true
+      rest.dots = 0
+      delete rest.type
+    }
+    return rest
+  }
+  const gap = (a: Frac, b: Frac): { start: Frac; items: MeasureItem[]; main: Note }[] => {
+    if (cmp(a, b) >= 0) return []
+    if (hidden) {
+      const rest = restAt(a, sub(b, a))
+      return [{ start: a, items: [rest], main: rest }]
+    }
+    return restsFor(a, b, restBeat(g.view, g.bar)).map((r) => {
+      const rest = restAt(r.start, r.duration, r.value)
+      return { start: r.start, items: [rest], main: rest }
+    })
+  }
+  const end = add(placed.start, placed.length)
+  const mains = [...gap(from, placed.start), { start: placed.start, items: placed.items, main: placed.note }, ...gap(end, to)]
+  /** The rest or note that holds the time `t` now: the last one that starts at or before it. */
+  const holder = (t: Frac): number => {
+    let i = 0
+    while (i + 1 < mains.length && cmp(mains[i + 1]!.start, t) <= 0) i++
+    return i
+  }
+  const before = mains.map((): MeasureItem[] => [])
+  for (const { t, item } of anchored) before[holder(t)]!.push(item)
+  const written = mains.flatMap((m, i) => [...before[i]!, ...m.items])
+  // A hairpin on a rest that went now starts or stops on what holds its time.
+  const moved = new Map(rests.filter((s) => !used.has(s.note)).map((s) => [s.note.id, mains[holder(s.start)]!.main.id]))
+  if (moved.size > 0) {
+    for (const items of lists) {
+      for (const item of items) {
+        if (!isWedge(item)) continue
+        item.start = moved.get(item.start) ?? item.start
+        item.stop = moved.get(item.stop) ?? item.stop
+      }
+    }
+  }
+  g.items.splice(i0, i1 - i0, ...written)
+}
+
+/** Fresh note ids for a Grid edit, unique in the whole score the view was made from. */
+const gridIds = (view: VoiceScore): (() => string) => (view.of ? idMaker(view.of.score) : localIds(view))
+
+/** The free slots around slot `k` (not itself): back to the last note before it, on to the first note after it. */
+function freeAround(g: GridBar, k: number): { first: number; last: number } {
+  let first = k
+  while (first > 0 && g.slots[first - 1]!.free) first--
+  let last = k
+  while (last + 1 < g.slots.length && g.slots[last + 1]!.free) last++
+  return { first, last }
+}
+
+/**
+ * Where a run of the voice that ends at slot `last` lets a note end, and to where the rewrite goes. A run that is the end
+ * of the voice reaches the limit of the bar; the first voice is then written up to the bar's length, as time without a
+ * block is rest (spec "Grid keeps the bar in order"); a later voice and a pickup (a short first bar, D11) only up to the
+ * note, as they may stay short.
+ */
+function runEnd(g: GridBar, last: number | undefined, noteEnd: Frac): { hi: Frac; to: Frac; atEnd: boolean } {
+  const atEnd = last === undefined || last === g.slots.length - 1
+  const end = last === undefined ? g.voiceEnd : slotEnd(g.slots[last]!)
+  if (!atEnd) return { hi: end, to: end, atEnd }
+  const max = (...fs: Frac[]): Frac => fs.reduce((x, y) => (cmp(y, x) > 0 ? y : x))
+  const pickup = g.bar === 0 && cmp(g.voiceEnd, g.barLength) < 0
+  return { hi: g.limit, to: g.firstVoice && !pickup ? max(end, noteEnd, g.barLength) : max(end, noteEnd), atEnd }
+}
+
+/**
+ * Takes a two-note tremolo off a moved or shortened chord whose end (`end`) or start (`start`) moved, from both of its
+ * notes: a rest between them would make playback join the pair across it. The one mark a Grid edit takes away. A tie
+ * stays, as `insertNote` leaves it: playback ends a tie at a rest, and the tie is the user's to remove.
+ */
+function splitTremolo(view: VoiceScore, members: Note[], start: boolean, end: boolean): void {
+  for (const n of members) if ((end && n.tremolo?.kind === 'start') || (start && n.tremolo?.kind === 'stop')) removeTremolo(view, n.id)
+}
+
+/** The slot of the note `id` for a move or a length change, refused for a rest, a grace note or a locked note. */
+function blockSlot(g: GridBar, note: Note): number {
+  if (note.grace) throw new GridError('locked', 'Edit triplets and grace notes in Notes')
+  const k = g.slots.findIndex((s) => g.items.slice(s.at, s.end).includes(note))
+  const slot = g.slots[k]!
+  if (slot.note.rest) throw new GridError('rest', 'A rest follows from the notes: move a note instead')
+  if (slot.locked) throw new GridError('locked', 'Edit triplets and grace notes in Notes')
+  return k
+}
+
+const overlap = (): GridError => new GridError('overlap', 'Another note is in the way')
+const pastEnd = (): GridError => new GridError('end', 'That goes past the end of the bar')
+
+/**
+ * Adds a note in Grid (D5, spec "Edit notes in Grid") to the voice `where` in bar `bar` (from 0), at `start` (a sixteenth
+ * of the bar) and on the written step and octave `pitch`, with no accidental of its own: the key and the bar's
+ * accidentals give its alter. Returns its id.
+ *
+ * - In free time (a rest, or after the voice's last note), the note takes the longest Grid value that is not longer than
+ *   `length` and ends before the next note or the end of the bar. The rests it lands in are written again around it
+ *   (`rewriteRun`); in the first voice up to the bar's length when it is at the end of the voice (not in a pickup).
+ * - Where a note or chord starts, it is a chord note of that chord's length (spec "A chord note"): the Grid's tap in the
+ *   column where a note starts. `length` is then not used.
+ *
+ * Throws `GridError` (nothing changed): `end` outside the bar, `overlap` inside a note that starts earlier, `locked` on a
+ * locked note or rest, `chord` when the chord has that note, `room` when less than a sixteenth is free.
+ */
+export function placeNote(target: Score | VoiceScore, where: VoiceRef, bar: number, start: Frac, length: Frac, pitch: { step: Step; octave: number }): string {
+  const view = 'bars' in target ? voiceAt(target, where) : target
+  if (!Number.isInteger(bar) || !view.measures[bar]) throw new EditError('That bar does not exist')
+  if (!STEPS.includes(pitch.step) || !Number.isInteger(pitch.octave)) throw new EditError('That is not a pitch')
+  if (!onSixteenths(start)) throw new EditError('A note in Grid starts on a sixteenth')
+  const g = gridBar(view, bar)
+  if (cmp(start, frac(0)) < 0 || cmp(start, g.limit) >= 0) throw pastEnd()
+  const newId = gridIds(view)
+  const k = g.slots.findIndex((s) => cmp(s.start, start) <= 0 && cmp(start, slotEnd(s)) < 0)
+  const hit = g.slots[k]
+  if (hit && !hit.free) {
+    if (hit.locked) throw new GridError('locked', 'Edit triplets and grace notes in Notes')
+    if (!eq(hit.start, start)) throw overlap()
+    const chord = g.items.slice(hit.at, hit.end) as Note[]
+    if (chord.some((n) => n.pitch?.step === pitch.step && n.pitch.octave === pitch.octave)) throw new GridError('chord', 'That note is already in the chord')
+    const base = hit.note
+    const fresh: Note = { kind: 'note', id: newId(), pitch: { step: pitch.step, octave: pitch.octave }, dots: base.dots, duration: { ...base.duration }, chord: true, slurs: [], tuplets: [] }
+    if (base.type) fresh.type = base.type
+    g.items.splice(hit.end, 0, fresh)
+    resolveAlters(view, bar, bar)
+    return fresh.id
+  }
+  // The free run the note lands in: the rests around the one it is in, or the rests at the end of the voice.
+  let first: number | undefined
+  let last: number | undefined
+  if (hit) ({ first, last } = freeAround(g, k))
+  else if (g.slots.at(-1)?.free) ({ first, last } = freeAround(g, g.slots.length - 1))
+  const from = first === undefined ? g.voiceEnd : g.slots[first]!.start
+  const { hi } = runEnd(g, last, start)
+  const value = cmp(length, frac(0)) > 0 ? longestValue(cmp(length, sub(hi, start)) < 0 ? length : sub(hi, start)) : undefined
+  if (!value) throw new GridError('room', 'There is no room for a note there')
+  const duration = noteDuration(value.type, value.dots)
+  const fresh: Note = { kind: 'note', id: newId(), pitch: { step: pitch.step, octave: pitch.octave }, type: value.type, dots: value.dots, duration, slurs: [], tuplets: [] }
+  const { to } = runEnd(g, last, add(start, duration))
+  rewriteRun(g, first, last, from, to, { items: [fresh], note: fresh, start, length: duration }, wedgeLists(target), newId)
+  resolveAlters(view, bar, bar)
+  return fresh.id
+}
+
+/**
+ * Moves the note `id` (its whole chord, with what stands before it: its loudness mark, a hairpin that starts on it, its
+ * grace notes) to `start` in its bar, in Grid (D5, spec "Edit notes in Grid"). It may only move through free time: not
+ * over another note of the voice or a locked one, nor past the end of the bar, so the notes keep their order and every
+ * slur and hairpin of the voice stays as it is. The rests on both sides are written again (`rewriteRun`). A two-note
+ * tremolo goes (`splitTremolo`); a tie stays.
+ *
+ * Throws `GridError` (nothing changed): `overlap`, `end`, `locked` for a triplet, grace note or note off the sixteenths,
+ * `rest` for a rest.
+ */
+export function moveNote(target: Score | VoiceScore, id: string, start: Frac): void {
+  const view = viewFor(target, id)
+  const { barIndex: bar, note } = locate(view, id)
+  const g = gridBar(view, bar)
+  const k = blockSlot(g, note)
+  const slot = g.slots[k]!
+  if (!onSixteenths(start)) throw new EditError('A note in Grid starts on a sixteenth')
+  if (eq(start, slot.start)) return
+  const { first, last } = freeAround(g, k)
+  const end = add(start, slot.length)
+  const { hi, to, atEnd } = runEnd(g, last, end)
+  if (cmp(start, frac(0)) < 0) throw pastEnd()
+  if (cmp(start, g.slots[first]!.start) < 0) throw overlap()
+  if (cmp(end, hi) > 0) throw atEnd ? pastEnd() : overlap()
+  splitTremolo(view, g.items.slice(slot.at, slot.end) as Note[], true, true)
+  const items = g.items.slice(slot.lead, slot.end)
+  rewriteRun(g, first, last, g.slots[first]!.start, to, { items, note: slot.note, start, length: slot.length }, wedgeLists(target), gridIds(view))
+}
+
+/**
+ * Changes the length of the note `id` (its whole chord, as `setDuration`) in Grid (D5, spec "Edit notes in Grid"): to
+ * `length`, which must be a Grid value (`GRID_VALUES`). The note keeps its start; it may not grow over the next note of
+ * the voice or a locked one, nor past the end of the bar. The rests after it are written again (`rewriteRun`). A
+ * two-note tremolo that starts on it goes when the end moved (`splitTremolo`); a tie stays.
+ *
+ * Throws `GridError` (nothing changed): `length`, `overlap`, `end`, `locked`, `rest`.
+ */
+export function resizeNote(target: Score | VoiceScore, id: string, length: Frac): void {
+  const view = viewFor(target, id)
+  const { barIndex: bar, note } = locate(view, id)
+  const g = gridBar(view, bar)
+  const k = blockSlot(g, note)
+  const slot = g.slots[k]!
+  const value = gridValue(length)
+  if (!value) throw new GridError('length', 'No single note has that length')
+  const members = g.items.slice(slot.at, slot.end) as Note[]
+  if (eq(length, slot.length) && members.every((n) => n.type === value.type && n.dots === value.dots)) return
+  const { last } = freeAround(g, k)
+  const end = add(slot.start, length)
+  const { hi, to, atEnd } = runEnd(g, last, end)
+  if (cmp(end, hi) > 0) throw atEnd ? pastEnd() : overlap()
+  if (!eq(length, slot.length)) splitTremolo(view, members, false, true)
+  for (const n of members) {
+    n.type = value.type
+    n.dots = value.dots
+    n.duration = noteDuration(value.type, value.dots)
+  }
+  const items = g.items.slice(slot.lead, slot.end)
+  rewriteRun(g, k, last, slot.start, to, { items, note: slot.note, start: slot.start, length }, wedgeLists(target), gridIds(view))
 }
 
 // ---------------------------------------------------------------- note <-> rest
@@ -1321,14 +1745,14 @@ export function setRepeatTimes(score: Score, index: number, times: number): void
 const CLEF_SIGNS = new Set(['G', 'F', 'C'])
 
 /** A pitch as a number of diatonic steps from C0 (C4 is 28, B4 is 34). */
-const diatonic = (p: Pitch): number => p.octave * 7 + STEPS.indexOf(p.step)
+export const diatonic = (p: { step: Step; octave: number }): number => p.octave * 7 + STEPS.indexOf(p.step)
 
 /**
  * The pitch on the middle line of the staff under a clef, in diatonic steps: B4 for a treble clef, D3 for a
  * bass clef, C4 for an alto clef. The clef's own note is on its line (G4, F3 or C4), each line two steps
  * from the next, and an octave change moves it seven.
  */
-function middleLine(clef: Clef): number {
+export function middleLine(clef: Clef): number {
   const sign = CLEF_SIGNS.has(clef.sign) ? clef.sign : 'G'
   const line = clef.line ?? (sign === 'G' ? 2 : sign === 'F' ? 4 : 3)
   const own = sign === 'G' ? 4 * 7 + 4 : sign === 'F' ? 3 * 7 + 3 : 4 * 7

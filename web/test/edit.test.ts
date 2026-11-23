@@ -10,7 +10,7 @@ import { computeScoreWarnings } from '../src/core/score/warnings.ts'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import { frac } from '../src/core/score/rational.ts'
 import { startingTempo, tempoSetup } from '../src/core/playback/tempo.ts'
-import { barOf, scoreOf } from './playbackHelpers.ts'
+import { backup, barOf, dyn, inVoice, n, onLeftHand, partsOf, scoreOf } from './playbackHelpers.ts'
 import { describeElement } from '../src/core/score/elements.ts'
 import type { ElementRef } from '../src/core/score/elements.ts'
 import { buildTimeline } from '../src/core/playback/timeline.ts'
@@ -2181,4 +2181,225 @@ test('join: an added bar joined with a bar of the piece holds that bar\'s stretc
   ed.joinBars(s, 1)
   assert.deepEqual(froms(s), [[0, 1], [2, 3]])
   assert.equal(s.bars[1]!.added, undefined)
+})
+
+// ---- Grid: add, move and change length (change redesign-score-editor, task 4.1) ----
+
+/** A one-staff 4/4 score from bar bodies built with `n` (ids given), through MusicXML like the others. */
+const gridScore = (bodies: string[], time: [number, number] = [4, 4]): Score => scoreOf(bodies.map((body) => ({ body })), time)
+/** Every note of the first voice of bar `bar` as "pitch:type" or "rest:type" (dotted with a dot), chord notes with `+`. */
+const gridBar = (s: Score, bar = 0, ref: VoiceRef = firstVoice(s)): string[] =>
+  voiceView(s, ref).measures[bar]!.items.filter(isNote).filter((x) => !x.hidden).map((x) =>
+    `${x.chord ? '+' : ''}${x.rest ? 'rest' : `${x.pitch!.step}${x.pitch!.octave}`}:${x.measureRest ? 'bar' : `${x.type}${'.'.repeat(x.dots)}`}`,
+  )
+/** What a Grid edit must leave alone: every item of the voice that is not a rest, and every other voice, as JSON. */
+const notRests = (s: Score, ref: VoiceRef, skip: string[] = []): string =>
+  JSON.stringify(voiceView(s, ref).measures.map((m) => m.items.filter((i) => !(isNote(i) && (i.rest || skip.includes(i.id))))))
+const otherVoices = (s: Score, ref: VoiceRef): string => JSON.stringify(voices(s).filter((r) => !sameVoice(r, ref)).map((r) => voiceView(s, r).measures.map((m) => m.items)))
+const refusedGrid = (s: Score, edit: (s: Score) => unknown, reason: ed.GridRefusal): void => {
+  const session = new EditSession(s)
+  const before = serializeMusicXml(session.score)
+  assert.throws(() => session.apply(edit), (e: unknown) => e instanceof ed.GridError && e.reason === reason)
+  assert.equal(session.canUndo, false)
+  assert.equal(serializeMusicXml(session.score), before)
+}
+const G4 = { step: 'G', octave: 4 } as const
+
+/** A full 4/4 bar to put before the bar under test, so that one is not a pickup. */
+const fullBar = n({ type: 'whole', step: 'B' })
+
+test('grid: add a note on beat 3, after a half note with a half rest or with nothing after it (spec "Add a note on beat 3")', () => {
+  for (const body of [n({ id: 'a', step: 'C', type: 'half' }) + n({ id: 'r', rest: true, type: 'half' }), n({ id: 'a', step: 'C', type: 'half' })]) {
+    const start = gridScore([fullBar, body])
+    const { before, after } = throughSession(start, (s) => ed.placeNote(s, firstVoice(s), 1, frac(1, 2), frac(1, 4), G4))
+    assert.deepEqual(gridBar(after, 1), ['C4:half', 'G4:quarter', 'rest:quarter'])
+    assert.deepEqual(byId(after, 'a'), byId(before, 'a'), 'the half note is as it was')
+    assert.deepEqual(gridBar(after, 0), gridBar(before, 0), 'the bar before is as it was')
+  }
+  // In a bar that holds only a whole-bar rest, on beat 2 and on beat 3.
+  const empty = gridScore([fullBar, n({ id: 'r', rest: true, type: 'whole' }).replace('<rest/>', '<rest measure="yes"/>')])
+  const two = structuredClone(empty)
+  ed.placeNote(two, firstVoice(two), 1, frac(1, 4), frac(1, 4), G4)
+  assert.deepEqual(gridBar(two, 1), ['rest:quarter', 'G4:quarter', 'rest:half'])
+  const three = structuredClone(empty)
+  ed.placeNote(three, firstVoice(three), 1, frac(1, 2), frac(1, 4), G4)
+  assert.deepEqual(gridBar(three, 1), ['rest:half', 'G4:quarter', 'rest:quarter'])
+})
+
+test('grid: a pickup bar stays short: rests are written up to the note only (design D11)', () => {
+  const placed = gridScore([n({ id: 'a', step: 'C', type: 'half' }), fullBar])
+  ed.placeNote(placed, firstVoice(placed), 0, frac(1, 2), frac(1, 4), G4)
+  assert.deepEqual(gridBar(placed, 0), ['C4:half', 'G4:quarter'])
+  const moved = gridScore([n({ id: 'a' }), fullBar])
+  ed.moveNote(moved, 'a', frac(1, 4))
+  assert.deepEqual(gridBar(moved, 0), ['rest:quarter', 'G4:quarter'])
+  const resized = gridScore([n({ id: 'a' }), fullBar])
+  ed.resizeNote(resized, 'a', frac(1, 2))
+  assert.deepEqual(gridBar(resized, 0), ['G4:half'])
+  assert.deepEqual(warningsFor(resized, TENOR_SAX), [], 'still a pickup, not flagged')
+})
+
+test('grid: a new note is shortened when the next note or the end of the bar comes sooner, and takes the key\'s alter', () => {
+  const s = gridScore([n({ id: 'a', type: 'quarter' }) + n({ id: 'r', rest: true, type: 'quarter' }) + n({ id: 'b', type: 'half' })])
+  const id = ed.placeNote(s, firstVoice(s), 0, frac(1, 4), frac(1, 1), { step: 'E', octave: 5 })
+  assert.deepEqual(gridBar(s), ['G4:quarter', 'E5:quarter', 'G4:half'], 'a whole chosen, a quarter of room')
+  assert.equal(byId(s, id).accidental, undefined)
+  const end = gridScore([n({ id: 'a', type: 'half' }) + n({ id: 'b', type: 'quarter' })])
+  ed.placeNote(end, firstVoice(end), 0, frac(3, 4), frac(1, 2), G4)
+  assert.deepEqual(gridBar(end), ['G4:half', 'G4:quarter', 'G4:quarter'], 'the end of the bar comes sooner')
+  const dotted = gridScore([n({ id: 'r', rest: true, type: 'whole' })])
+  ed.placeNote(dotted, firstVoice(dotted), 0, frac(0), frac(3, 8), G4)
+  assert.deepEqual(gridBar(dotted), ['G4:quarter.', 'rest:eighth', 'rest:half'], 'a dotted quarter, then rests on the beats')
+  const sharp = gridScore([n({ id: 'r', rest: true, type: 'whole' })])
+  sharp.bars[0]!.parts[0]!.key = { fifths: 1 }
+  const f = ed.placeNote(sharp, firstVoice(sharp), 0, frac(0), frac(1, 4), { step: 'F', octave: 5 })
+  assert.equal(byId(sharp, f).pitch!.alter, 1, 'F♯ in G major')
+})
+
+test('grid: a tap where a note starts adds a chord note of that note\'s length (spec "A chord note")', () => {
+  const start = gridScore([n({ id: 'c', step: 'C', type: 'half' }) + n({ id: 'r', rest: true, type: 'half' })])
+  const { after } = throughSession(start, (s) => ed.placeNote(s, firstVoice(s), 0, frac(0), frac(1, 4), { step: 'E', octave: 4 }))
+  assert.deepEqual(gridBar(after), ['C4:half', '+E4:half', 'rest:half'])
+  refusedGrid(after, (s) => ed.placeNote(s, firstVoice(s), 0, frac(0), frac(1, 4), { step: 'E', octave: 4 }), 'chord')
+  refusedGrid(after, (s) => ed.placeNote(s, firstVoice(s), 0, frac(1, 4), frac(1, 4), G4), 'overlap')
+  refusedGrid(after, (s) => ed.placeNote(s, firstVoice(s), 0, frac(1, 1), frac(1, 4), G4), 'end')
+})
+
+test('grid: lengthen by dragging the end (spec "Lengthen by dragging the end")', () => {
+  const start = gridScore([n({ id: 'a', type: 'quarter' }) + n({ id: 'r1', rest: true, type: 'quarter' }) + n({ id: 'r2', rest: true, type: 'half' })])
+  const { after } = throughSession(start, (s) => ed.resizeNote(s, 'a', frac(1, 2)))
+  assert.deepEqual(gridBar(after), ['G4:half', 'rest:half'])
+  // And back: the rests after it are written again, the half rest keeps its id.
+  const back = structuredClone(after)
+  ed.resizeNote(back, 'a', frac(1, 4))
+  assert.deepEqual(gridBar(back), ['G4:quarter', 'rest:quarter', 'rest:half'])
+  assert.ok(firstLine(back).measures[0]!.items.some((i) => isNote(i) && i.id === 'r2'), 'the rest that starts on beat 3 is still r2')
+  refusedGrid(start, (s) => ed.resizeNote(s, 'a', frac(5, 16)), 'length')
+  refusedGrid(start, (s) => ed.resizeNote(s, 'a', frac(3, 2)), 'end')
+  refusedGrid(start, (s) => ed.resizeNote(s, 'r1', frac(1, 2)), 'rest')
+})
+
+test('grid: something in the way, and the end of the bar (spec "Something in the way")', () => {
+  const start = gridScore([n({ id: 'a', type: 'quarter' }) + n({ id: 'b', type: 'quarter' }) + n({ id: 'r', rest: true, type: 'half' })])
+  refusedGrid(start, (s) => ed.resizeNote(s, 'a', frac(1, 2)), 'overlap')
+  refusedGrid(start, (s) => ed.moveNote(s, 'b', frac(0)), 'overlap')
+  refusedGrid(start, (s) => ed.moveNote(s, 'a', frac(3, 4)), 'overlap')
+  refusedGrid(start, (s) => ed.moveNote(s, 'b', frac(7, 8)), 'end')
+  refusedGrid(start, (s) => ed.resizeNote(s, 'b', frac(1, 1)), 'end')
+})
+
+test('grid: rests follow a move (spec "Rests follow a move")', () => {
+  const start = gridScore([n({ id: 'a', type: 'quarter' }) + n({ id: 'r1', rest: true }) + n({ id: 'r2', rest: true }) + n({ id: 'r3', rest: true })])
+  const { before, after } = throughSession(start, (s) => ed.moveNote(s, 'a', frac(1, 4)))
+  assert.deepEqual(gridBar(after), ['rest:quarter', 'G4:quarter', 'rest:half'])
+  assert.equal(notRests(after, firstVoice(after)), notRests(before, firstVoice(before)), 'the note is the same note')
+  // A short bar without rests (not a pickup): the first voice is written up to the bar's length.
+  const short = gridScore([fullBar, n({ id: 'a', type: 'quarter' })])
+  ed.moveNote(short, 'a', frac(1, 4))
+  assert.deepEqual(gridBar(short, 1), ['rest:quarter', 'G4:quarter', 'rest:half'])
+  // In 3/4 and 6/8 the rests follow the beats.
+  const waltz = gridScore([n({ id: 'a', type: 'quarter' }) + n({ id: 'r', rest: true, type: 'half' })], [3, 4])
+  ed.moveNote(waltz, 'a', frac(1, 2))
+  assert.deepEqual(gridBar(waltz), ['rest:half', 'G4:quarter'])
+  const jig = gridScore([n({ id: 'a', type: 'eighth' }) + n({ id: 'r', rest: true, type: 'quarter' }) + n({ id: 'r2', rest: true, type: 'quarter' }) + n({ id: 'r3', rest: true, type: 'eighth' })], [6, 8])
+  ed.moveNote(jig, 'a', frac(1, 8))
+  assert.deepEqual(gridBar(jig), ['rest:eighth', 'G4:eighth', 'rest:eighth', 'rest:quarter.'])
+})
+
+test('grid: a move carries the note\'s loudness mark and hairpin, and a dynamic on a rest stays at its time', () => {
+  const start = scoreOf([{ body: dyn('p') + n({ id: 'a' }) + n({ id: 'r1', rest: true }) + dyn('f') + n({ id: 'r2', rest: true }) + n({ id: 'b' }) }])
+  ed.addWedge(start, 'crescendo', 'a', 'b')
+  const { after } = throughSession(start, (s) => ed.moveNote(s, 'a', frac(1, 4)))
+  const items = firstLine(after).measures[0]!.items.map((i) => (isNote(i) ? (i.rest ? 'rest' : i.id) : i.kind === 'dynamic' ? i.mark : i.kind))
+  assert.deepEqual(items, ['rest', 'p', 'wedge', 'a', 'f', 'rest', 'b'])
+  assert.deepEqual(ed.dynamicOf(after, 'a')?.mark, 'p')
+  assert.deepEqual(wedges(after), [['crescendo', 'a', 'b']])
+})
+
+test('grid: a triplet in the bar is locked, and edits next to it leave it as it was (spec "A triplet in the bar", "Try to drag a locked block")', () => {
+  const trip = (id: string, slur?: 'start' | 'stop') => n({ id, type: 'eighth', triplet: true, step: 'E', ...(slur ? { slur } : {}) })
+  const start = gridScore([trip('t1') + trip('t2') + trip('t3') + n({ id: 'b' }) + n({ id: 'c', step: 'A' }) + n({ id: 'r', rest: true })])
+  const triplet = (s: Score): string => JSON.stringify(firstLine(s).measures[0]!.items.slice(0, 3))
+  // The last quarter note one step up, as Grid's vertical drag does it.
+  const up = edited(start, (s) => ed.stepPitch(s, 'c', 1)).after
+  assert.equal(byId(up, 'c').pitch!.step, 'B')
+  assert.equal(triplet(up), triplet(start))
+  // Lengthen it over the rest; move the other one: the triplet stays.
+  const { after } = throughSession(start, (s) => ed.resizeNote(s, 'c', frac(1, 2)))
+  assert.deepEqual(gridBar(after), ['E4:eighth', 'E4:eighth', 'E4:eighth', 'G4:quarter', 'A4:half'])
+  assert.equal(triplet(after), triplet(start))
+  for (const id of ['t1', 't2', 't3']) {
+    refusedGrid(start, (s) => ed.moveNote(s, id, frac(1, 2)), 'locked')
+    refusedGrid(start, (s) => ed.resizeNote(s, id, frac(1, 4)), 'locked')
+  }
+  refusedGrid(start, (s) => ed.placeNote(s, firstVoice(s), 0, frac(1, 16), frac(1, 4), G4), 'locked')
+  // Nothing may move into it.
+  const gap = gridScore([trip('t1') + trip('t2') + trip('t3') + n({ id: 'r', rest: true }) + n({ id: 'b' }) + n({ id: 'r2', rest: true })])
+  refusedGrid(gap, (s) => ed.moveNote(s, 'b', frac(1, 8)), 'overlap')
+  ed.moveNote(gap, 'b', frac(1, 4))
+  assert.equal(triplet(gap), triplet(start))
+  assert.deepEqual(gridBar(gap), ['E4:eighth', 'E4:eighth', 'E4:eighth', 'G4:quarter', 'rest:half'])
+})
+
+test('grid: a grace note is locked and stays with its note (spec "Grid leaves alone what it cannot draw")', () => {
+  const grace = n({ id: 'g', type: 'eighth', step: 'A' }).replace('<note id="g">', '<note id="g"><grace/>').replace(/<duration>\d+<\/duration>/, '')
+  const start = gridScore([grace + n({ id: 'a' }) + n({ id: 'r', rest: true }) + n({ id: 'r2', rest: true, type: 'half' })])
+  refusedGrid(start, (s) => ed.moveNote(s, 'g', frac(1, 4)), 'locked')
+  const { after } = throughSession(start, (s) => ed.moveNote(s, 'a', frac(1, 4)))
+  assert.deepEqual(firstLine(after).measures[0]!.items.filter(isNote).map((x) => (x.rest ? 'rest' : x.id)), ['rest', 'g', 'a', 'rest'])
+})
+
+test('grid: marks stay when a note is lengthened (spec "Marks stay")', () => {
+  const start = scoreOf([{ body: dyn('p') + n({ id: 'a', slur: 'start', stac: true }) + n({ id: 'b', slur: 'stop', accent: true }) + n({ id: 'c' }) + n({ id: 'r', rest: true }) }])
+  const { before, after } = throughSession(start, (s) => ed.resizeNote(s, 'c', frac(1, 2)))
+  assert.deepEqual(gridBar(after), ['G4:quarter', 'G4:quarter', 'G4:half'])
+  assert.equal(notRests(after, firstVoice(after), ['c']), notRests(before, firstVoice(before), ['c']), 'the slur, the p and the marks are where they were')
+  assert.deepEqual(slurs(after), slurs(before))
+  assert.equal(ed.dynamicOf(after, 'a')?.mark, 'p')
+})
+
+test('grid: no mark goes: a tie stays, a hairpin on a rest that goes moves to what holds its time; only a two-note tremolo that is pulled apart goes', () => {
+  const tied = scoreOf([{ body: n({ id: 'a', tie: 'start' }) + n({ id: 'b', tie: 'stop' }) + n({ id: 'r', rest: true, type: 'half' }) }])
+  ed.moveNote(tied, 'b', frac(1, 2))
+  assert.deepEqual([byId(tied, 'a').tieStart, byId(tied, 'b').tieStop], [true, true])
+  const pin = scoreOf([{ body: n({ id: 'a' }) + n({ id: 'r', rest: true }) + n({ id: 'b', type: 'half' }) }])
+  firstLine(pin).measures[0]!.items.unshift({ kind: 'wedge', type: 'diminuendo', start: 'a', stop: 'r' })
+  const id = ed.placeNote(pin, firstVoice(pin), 0, frac(1, 4), frac(1, 4), G4)
+  assert.deepEqual(wedges(pin), [['diminuendo', 'a', id]])
+  const tremolo = scoreOf([{ body: n({ id: 'a', type: 'eighth' }) + n({ id: 'b', type: 'eighth' }) + n({ id: 'r', rest: true }) + n({ id: 'c', type: 'half' }) }])
+  byId(tremolo, 'a').tremolo = { kind: 'start', strokes: 2 }
+  byId(tremolo, 'b').tremolo = { kind: 'stop', strokes: 2 }
+  ed.moveNote(tremolo, 'b', frac(1, 4))
+  assert.deepEqual([byId(tremolo, 'a').tremolo, byId(tremolo, 'b').tremolo], [undefined, undefined])
+})
+
+test('grid: other voices and parts are left alone; a later voice is not filled up', () => {
+  const s = partsOf([
+    { id: 'P1', bars: [n({ id: 'm1', type: 'half' }) + n({ id: 'm2', type: 'half' })] },
+    { id: 'P2', staves: 2, bars: [n({ id: 'p1', type: 'whole', step: 'C', octave: 5 }) + backup(4) + inVoice(n({ id: 'v2', type: 'quarter', step: 'E' }), 2) + backup(1) + onLeftHand(n({ id: 'l1', type: 'whole', step: 'C', octave: 3 }))] },
+  ])
+  const second: VoiceRef = { part: 'P2', staff: 0, voice: 1 }
+  const before = structuredClone(s)
+  const { after } = throughSession(s, (sc) => ed.moveNote(sc, 'v2', frac(1, 2)))
+  assert.deepEqual(gridBar(after, 0, second), ['rest:half', 'E4:quarter'], 'voice 2 starts at beat 3 and stays short')
+  assert.equal(otherVoices(after, second), otherVoices(before, second))
+  const placed = edited(before, (sc) => ed.placeNote(sc, second, 0, frac(1, 4), frac(1, 4), { step: 'D', octave: 4 })).after
+  assert.equal(otherVoices(placed, second), otherVoices(before, second))
+  assert.deepEqual(gridBar(placed, 0, second), ['E4:quarter', 'D4:quarter'])
+  const resized = edited(before, (sc) => ed.resizeNote(sc, 'v2', frac(1, 2))).after
+  assert.equal(otherVoices(resized, second), otherVoices(before, second))
+  assert.deepEqual(gridBar(resized, 0, second), ['E4:half'])
+  const chord = edited(before, (sc) => ed.placeNote(sc, second, 0, frac(0), frac(1, 4), { step: 'G', octave: 4 })).after
+  assert.equal(otherVoices(chord, second), otherVoices(before, second))
+  assert.equal(notRests(chord, second, [voiceView(chord, second).measures[0]!.items.filter(isNote)[1]!.id]), notRests(before, second))
+  assert.deepEqual(gridBar(chord, 0, second), ['E4:quarter', '+G4:quarter'])
+  // In the first voice too: the right hand's note lengthened leaves voice 2, the left hand and the melody as they were.
+  const right: VoiceRef = { part: 'P2', staff: 0, voice: 0 }
+  const melody = edited(before, (sc) => ed.resizeNote(sc, 'm1', frac(1, 4))).after
+  assert.equal(otherVoices(melody, firstVoice(melody)), otherVoices(before, firstVoice(before)))
+  assert.equal(notRests(melody, firstVoice(melody), ['m1']), notRests(before, firstVoice(before), ['m1']))
+  assert.deepEqual(gridBar(melody), ['G4:quarter', 'rest:quarter', 'G4:half'])
+  const hand = edited(before, (sc) => ed.resizeNote(sc, 'p1', frac(1, 2))).after
+  assert.deepEqual(gridBar(hand, 0, right), ['C5:half', 'rest:half'])
+  assert.equal(otherVoices(hand, right), otherVoices(before, right))
 })

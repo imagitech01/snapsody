@@ -27,9 +27,9 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 
 ## 4. Grid model and suggested repairs
 
-- [ ] 4.1 `placeNote`, `moveNote` and `resizeNote` in `edit.ts`, refusing overlaps and filling gaps with rests of standard lengths split at the beats. Verify (quick): `web/test/edit.test.ts` proves the scenarios of the spec's "Edit notes in Grid" and "Grid keeps the bar in order", and that marks and other voices are unchanged after each.
-- [ ] 4.2 `core/score/grid.ts`: the description of a voice's bar (rows, columns, blocks, locked blocks, the loudness strip). Verify (quick): new `web/test/grid.test.ts` proves 16 columns in 4/4 and 12 in 6/8 with their beats, the rows around the notes, a triplet and a grace note as locked blocks, staccato and accent on the blocks, and the strip's marks and hairpins.
-- [ ] 4.3 `core/score/suggest.ts` (design D6). Verify (quick): new `web/test/suggest.test.ts` proves the four scenarios of the spec's "Suggested repairs", the order and the limit of four from design D6, none for a bar that adds up, and none for a pickup bar.
+- [x] 4.1 `placeNote`, `moveNote` and `resizeNote` in `edit.ts`, refusing overlaps and filling gaps with rests of standard lengths split at the beats. Verify (quick): `web/test/edit.test.ts` proves the scenarios of the spec's "Edit notes in Grid" and "Grid keeps the bar in order", and that marks and other voices are unchanged after each.
+- [x] 4.2 `core/score/grid.ts`: the description of a voice's bar (rows, columns, blocks, locked blocks, the loudness strip). Verify (quick): new `web/test/grid.test.ts` proves 16 columns in 4/4 and 12 in 6/8 with their beats, the rows around the notes, a triplet and a grace note as locked blocks, staccato and accent on the blocks, and the strip's marks and hairpins.
+- [x] 4.3 `core/score/suggest.ts` (design D6). Verify (quick): new `web/test/suggest.test.ts` proves the four scenarios of the spec's "Suggested repairs", the order and the limit of four from design D6, none for a bar that adds up, and none for a pickup bar.
 
 ## 5. Editor session
 

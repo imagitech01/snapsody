@@ -1,6 +1,7 @@
 import type { Instrument, InstrumentId } from '../instruments/instruments.ts'
 import { instrumentOfPart } from '../instruments/instruments.ts'
-import type { Pitch, Score, VoiceScore } from './model.ts'
+import type { Pitch, Score, TimeSignature, VoiceScore } from './model.ts'
+import type { Frac } from './rational.ts'
 import { isNote, partIndex, voiceView, voices } from './model.ts'
 import { cmp, eq, frac, mul } from './rational.ts'
 import { midiNoteName, noteName } from './noteNames.ts'
@@ -76,6 +77,18 @@ function placeFields(where?: Where): Partial<ScoreWarning> {
   return { part: where.part, staff: where.staff, voice: where.voice, ...(where.hand ? { hand: where.hand } : {}), ...(where.voiceNumber ? { voiceNumber: where.voiceNumber } : {}) }
 }
 
+/**
+ * Whether a voice's bar of this length gets the bar-length warning, in bar `index` (from 0) under `time`. A voice after the
+ * first (`laterVoice`) is flagged only when it is too long: a short one is simply not full. A short first bar is a pickup,
+ * as playback counts it (change redesign-score-editor, D11); a first bar that is too long is flagged. Suggested repairs
+ * (suggest.ts) are offered for exactly these bars.
+ */
+export function barLengthFlagged(length: Frac, time: TimeSignature, index: number, laterVoice: boolean): boolean {
+  const expected = expectedLength(time)
+  const short = cmp(length, expected) < 0
+  return !eq(length, expected) && !(laterVoice && short) && !(index === 0 && short)
+}
+
 /** The bar and range warnings of one voice, by bar (index from 0). A voice without an instrument gets the bar check only. */
 function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, laterVoice = false, whereIn?: (bar: number) => Where): ScoreWarning[][] {
   const times = effectiveTimes(score)
@@ -86,11 +99,7 @@ function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, la
     const time = times[index]
     if (time && hasNotes(m)) {
       const length = barLength(m)
-      // A voice after the first is flagged only when it is too long: a short one is simply not full. A short first bar
-      // is a pickup, as playback counts it (change redesign-score-editor, D11); a first bar that is too long is flagged.
-      const expected = expectedLength(time)
-      const short = cmp(length, expected) < 0
-      if (!eq(length, expected) && !(laterVoice && short) && !(index === 0 && short)) {
+      if (barLengthFlagged(length, time, index, laterVoice)) {
         const counted = beatsText(mul(length, frac(time.beatType)))
         found.push({
           kind: 'bar-length',
