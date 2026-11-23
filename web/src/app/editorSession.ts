@@ -19,6 +19,7 @@ import {
   addWedge,
   appendNote,
   barLengthAt,
+  barLineCuts,
   barLinesOf,
   canSplitBefore,
   compareInTime,
@@ -43,10 +44,11 @@ import {
   setEnding,
   setRepeatTimes,
   spansOfBar,
+  splitBar,
   stepPitch,
   wedgeAt,
 } from '../core/score/edit.ts'
-import type { BarEnd, BarLines, BarSpan, BarStart, LoudnessMark, NoteChoice } from '../core/score/edit.ts'
+import type { BarEnd, BarLineCut, BarLines, BarSpan, BarStart, LoudnessMark, NoteChoice } from '../core/score/edit.ts'
 import { EditSession } from '../core/score/editSession.ts'
 import { describeElement } from '../core/score/elements.ts'
 import type { ElementInfo, ElementRef } from '../core/score/elements.ts'
@@ -346,6 +348,12 @@ export class EditorSession {
   /** Whether "Join with next" is offered for the current bar (`canRemoveBarLineAfter`). */
   readonly canJoinNext: ReadonlySignal<boolean>
   /**
+   * The places in the current bar where a bar line can be added (the scissors of the Bars tools, spec "Add a bar line"),
+   * in the order of the bar: in Notes for every voice of the part being edited, in Grid for the voice it shows. Each is
+   * offered where `canAddBarLineBefore` allows; one where a note sounds across is refused when tapped, with where.
+   */
+  readonly barLineCuts: ReadonlySignal<readonly BarLineCut[]>
+  /**
    * Where Notes shows the slot for the next note in the current bar (design D2, spec "A bar always takes a note"): for
    * each staff of the part being edited whose first voice adds up to less than the bar, or holds only a whole-bar rest.
    */
@@ -575,6 +583,11 @@ export class EditorSession {
     this.canDeleteBar = computed(() => this.canDeleteBarAt(this.current.value - 1))
     this.canCopyBarBefore = computed(() => this.current.value > 1 && this.current.value <= this.score.value.bars.length)
     this.canJoinNext = computed(() => this.canRemoveBarLineAfter(this.current.value - 1))
+    this.barLineCuts = computed(() => {
+      const score = this.score.value
+      const refs = this.view.value === 'grid' ? [this.gridVoice.value] : this.gridVoices.value
+      return barLineCuts(score, refs, this.current.value - 1).filter((c) => this.canAddBarLineBefore(c.noteId))
+    })
     this.slots = computed(() => slotsOf(this.score.value, this.editing.value, this.current.value - 1))
   }
 
@@ -1154,10 +1167,24 @@ export class EditorSession {
     return this.tryApply((s) => setBarEnd(s, bar, end))
   }
 
-  /** How many times the section that ends in the current bar's end-repeat is played (2 to 8). */
-  setRepeatTimes(times: number): boolean {
+  /**
+   * How many times the section that ends in the current bar's end-repeat is played (2 to 8). With `amend`, part of the
+   * last undo step (the steps of a held button are one undo step with the first).
+   */
+  setRepeatTimes(times: number, options: { amend?: boolean } = {}): boolean {
     const bar = this.current.peek() - 1
-    return this.tryApply((s) => setRepeatTimes(s, bar, times))
+    return this.tryApply((s) => setRepeatTimes(s, bar, times), undefined, options)
+  }
+
+  /**
+   * A tap on a scissors mark (spec "Add a bar line"): a bar line before the note or rest `noteId`, splitting its bar in
+   * every part, as one undo step. The current bar stays the first of the two, unless a selected note is now in the
+   * second. Refused, with where, when a note sounds across that point or a triplet would be cut, and where it is not
+   * offered (`canAddBarLineBefore`).
+   */
+  addBarLineBefore(noteId: string): boolean {
+    if (!this.canAddBarLineBefore(noteId)) return this.refuse('barline.error.first')
+    return this.tryApply((s) => void splitBar(s, noteId))
   }
 
   /** "+ Bar before" or "+ Bar after" (spec "Add a bar"): an empty bar in every part, which becomes the current bar, with nothing selected. One undo step. */

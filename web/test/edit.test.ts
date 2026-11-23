@@ -1523,6 +1523,22 @@ test('bar lines: a rest across the new bar line is split into standard lengths, 
   assert.deepEqual(second, [['hidden:1/4'], ['hidden:1/4', 'v1:1/4', 'v2:1/4']])
 })
 
+test('bar lines: the places a bar line can be added (the scissors, spec "Add a bar line"): before every note or rest but the first, once per start, in every voice asked for', () => {
+  // The right hand plays four quarters; the left hand an eighth, a half rest, an eighth and a quarter.
+  const s = piano(
+    [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }, { id: 'r4' }],
+    [{ id: 'l1', type: 'eighth', octave: 3 }, { id: 'l2', type: 'half', rest: true }, { id: 'l3', type: 'eighth', octave: 3 }, { id: 'l4', octave: 3 }],
+  )
+  const at = (cuts: ed.BarLineCut[]) => cuts.map((c) => `${c.noteId}@${c.start.n}/${c.start.d}#${c.place}${c.pitch ? c.pitch.step : ''}`)
+  assert.deepEqual(at(ed.barLineCuts(s, [PIANO_RIGHT], 0)), ['r2@1/4#2C', 'r3@1/2#3C', 'r4@3/4#4C'], 'not before the first note')
+  // Both hands: the left hand's notes at 1/8 and 5/8 add their own places; at 3/4 the right hand's note is the one named.
+  assert.deepEqual(at(ed.barLineCuts(s, [PIANO_RIGHT, PIANO_LEFT], 0)), ['l2@1/8#2', 'r2@1/4#2C', 'r3@1/2#3C', 'l3@5/8#3C', 'r4@3/4#4C'])
+  // A place where the other hand's half rest or note sounds across is still listed: splitBar refuses it when tapped, with where.
+  assert.ok(ed.barLineCuts(s, [PIANO_RIGHT], 0).some((c) => c.noteId === 'r2'))
+  assert.throws(() => ed.splitBar(structuredClone(s), 'l3'), ed.BarLineError)
+  assert.deepEqual(ed.barLineCuts(s, [PIANO_RIGHT], 5), [], 'no such bar')
+})
+
 test('bar lines: a note or a triplet across the new bar line refuses it, naming the staff (spec "A note across the bar line")', () => {
   // Bar 7 of the fixture: the melody C5 D5 in halves, the left hand a whole G2.
   const across = refusedWith(melodyPiano(), (sc) => ed.splitBar(sc, 'n18'), 'across')

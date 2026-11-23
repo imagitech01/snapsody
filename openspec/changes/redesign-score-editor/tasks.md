@@ -65,9 +65,9 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 
 ## 9. Bars
 
-- [ ] 9.1 The Bars tray: how the bar starts and ends (normal, double, repeat with its count, end), "1st time only" and "2nd time only", "+ Bar before", "+ Bar after", "Same as bar before", "Join with next" and Delete bar. Verify (browser): the bar-line journeys in `web/test/ui/edit.test.ts` pass on the new tray, and a new journey adds a first and a second ending, adds a bar, deletes another, saves, and finds the score, `piece.json` and the loop as the specs say.
-- [ ] 9.2 The scissors: with the Bars tab open, a mark at every place a bar line can be added, between the notes in Notes and above the grid in Grid. Verify (browser): the "add a bar line" journeys in `web/test/ui/edit.test.ts` use the scissors and pass, including the refusal for a note of the other part.
-- [ ] 9.3 The suggested repairs as chips under the bar row, with their texts in the note-name style. Verify (browser): a journey opens a piece with a 3½-beat bar, taps "E4 → dotted quarter", finds the flag gone, and undoes it in one step.
+- [x] 9.1 The Bars tray: how the bar starts and ends (normal, double, repeat with its count, end), "1st time only" and "2nd time only", "+ Bar before", "+ Bar after", "Same as bar before", "Join with next" and Delete bar. Verify (browser): the bar-line journeys in `web/test/ui/edit.test.ts` pass on the new tray, and a new journey adds a first and a second ending, adds a bar, deletes another, saves, and finds the score, `piece.json` and the loop as the specs say.
+- [x] 9.2 The scissors: with the Bars tab open, a mark at every place a bar line can be added, between the notes in Notes and above the grid in Grid. Verify (browser): the "add a bar line" journeys in `web/test/ui/edit.test.ts` use the scissors and pass, including the refusal for a note of the other part.
+- [x] 9.3 The suggested repairs as chips under the bar row, with their texts in the note-name style. Verify (browser): a journey opens a piece with a 3½-beat bar, taps "E4 → dotted quarter", finds the flag gone, and undoes it in one step.
 - [ ] 9.4 Check the Bars tray, the scissors and the suggestions by eye in browser-dev at 360 × 780. Manual.
 
 ## 10. Screen-wide checks and docs

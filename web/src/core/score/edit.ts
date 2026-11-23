@@ -2039,6 +2039,45 @@ export function canSplitBefore(score: Score, id: string): boolean {
   }
 }
 
+/** A place in a bar where a bar line can be added (the scissors of the Bars tools): before the note or rest `noteId`. */
+export interface BarLineCut {
+  /** The note or rest the bar line goes before (`splitBar`). */
+  noteId: string
+  /** Where it starts in the bar, as a fraction of a whole note. */
+  start: Frac
+  /** Its place among the notes and rests of its voice's bar, from 1 (a chord counts once, grace notes and hidden rests not at all). */
+  place: number
+  /** Its written pitch, absent for a rest. */
+  pitch?: Pitch
+}
+
+/**
+ * Every place in bar `barIndex` (from 0) of the voices `refs` where a bar line can be added (change redesign-score-editor,
+ * spec "Add a bar line"): before each note or rest that `canSplitBefore` allows, once per start, in the order of the bar.
+ * Not before the first note of the bar, nor for a chord's other notes, a grace note or a hidden rest. A place where a
+ * note of another voice or part sounds across, or a triplet would be cut, is listed: `splitBar` refuses it, with where.
+ *
+ *   barLineCuts(score, [{ part: 'P1', staff: 0, voice: 0 }], 5) // four quarters: before the 2nd, 3rd and 4th
+ */
+export function barLineCuts(score: Score, refs: readonly VoiceRef[], barIndex: number): BarLineCut[] {
+  if (!score.bars[barIndex]) return []
+  const found: BarLineCut[] = []
+  for (const ref of refs) {
+    if (partIndex(score, ref.part) < 0) continue
+    const items = score.bars[barIndex]!.parts[partOf(score, ref)]?.staves[ref.staff]?.voices[ref.voice]
+    if (!items) continue
+    let place = 0
+    items.forEach((item, at) => {
+      if (!isNote(item) || item.chord || item.grace || item.hidden) return
+      place++
+      const start = onsetIn(items, at)
+      if (start.n === 0 || found.some((c) => eq(c.start, start)) || !canSplitBefore(score, item.id)) return
+      found.push({ noteId: item.id, start, place, ...(item.pitch ? { pitch: { ...item.pitch } } : {}) })
+    })
+  }
+  return found.sort((a, b) => cmp(a.start, b.start))
+}
+
 /**
  * The voice as a refusal names it: "in the left hand", "in the melody", "in the left hand, voice 2"; nothing for a
  * one-line piece. A part of one staff is named by its name, a part of two staves by the hand.

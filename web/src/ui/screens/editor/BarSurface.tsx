@@ -7,8 +7,8 @@ import { partIndex } from '../../../core/score/model.ts'
 import type { Pitch, Score } from '../../../core/score/model.ts'
 import { createScoreView } from '../../scoreView.ts'
 import type { ScoreView } from '../../scoreView.ts'
-import { dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, slideTarget, spanShapes, STAFF_REACH_STEPS, stepAt, yOfStep } from '../../notesSurface.ts'
-import type { SlotGeometry, SpanShape, StaffGeometry } from '../../notesSurface.ts'
+import { cutAreas, cutPlaces, dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, slideTarget, spanShapes, STAFF_REACH_STEPS, stepAt, yOfStep } from '../../notesSurface.ts'
+import type { CutArea, SlotGeometry, SpanShape, StaffGeometry } from '../../notesSurface.ts'
 import { useShell } from '../../ShellContext.ts'
 import { drawnNote, readBarLayout } from './barLayout.ts'
 import { fromExcerpt, toExcerpt } from './frame.ts'
@@ -38,6 +38,11 @@ import { fromExcerpt, toExcerpt } from './frame.ts'
  *   under the finger (`addAtSlot`, `addOnStaff`), and it sounds; while the finger stays down it is dragged to its pitch
  *   by the steps from where it came down, with the ghost and its name, and the release is part of the same undo step.
  *
+ * With the Bars tools open, a scissors mark stands over every place a bar line can be added (task 9.2, spec "Add a bar
+ * line"; the session's `barLineCuts`): a dashed line between the note and what is drawn before it, through every staff,
+ * and the scissors above it, a button of its own whose touch area is 44 px high and 44 px wide where the next mark leaves
+ * room (`cutAreas`). A tap on it is `onCut`; the touch does not reach the bar.
+ *
  * What it draws is one bar as a score of its own, so the elements it finds are named in the score through `fromExcerpt`
  * before the editor sees them. That drawing leaves out the slurs, ties and hairpins that reach another bar (`barForEditing`),
  * so the overlay draws them as hints, in from the start of the notes or out to the bar line (`spanShapes`, design D14); and
@@ -55,6 +60,8 @@ export interface BarSurfaceProps {
   onQuiet: () => void
   /** A slide that ended on no note. */
   onSlideNowhere: () => void
+  /** A tap on the scissors before the note or rest `noteId` (the Bars tools). */
+  onCut: (noteId: string) => void
 }
 
 /** A gesture on the large bar, from the touch to the release. */
@@ -95,9 +102,12 @@ interface Overlay {
   ghost?: { x: number; y: number; rx: number; ry: number; ledgers: readonly number[]; lineHalf: number; name: string; nameLeft: boolean }
   /** The arc of a slide, as a path. */
   slide?: string
+  /** The scissors of the Bars tools, and the heights their lines run between. */
+  cuts: readonly CutArea[]
+  cutLine?: { top: number; bottom: number }
 }
 
-const EMPTY: Overlay = { slots: [], slotStaves: new Map(), spans: [] }
+const EMPTY: Overlay = { slots: [], slotStaves: new Map(), spans: [], cuts: [] }
 
 /** The pitch on the middle line of each staff of the part `part` in a one-bar score (its clef in force). */
 function middlesOf(excerpt: Score, part: string): number[] {
@@ -106,7 +116,7 @@ function middlesOf(excerpt: Score, part: string): number[] {
   return staves.map((s) => middleLine(s.clef ?? { sign: 'G', line: 2 }))
 }
 
-export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElement, onQuiet, onSlideNowhere }: BarSurfaceProps) {
+export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElement, onQuiet, onSlideNowhere, onCut }: BarSurfaceProps) {
   const { i18n } = useShell()
   const box = useRef<HTMLDivElement>(null)
   const host = useRef<HTMLDivElement>(null)
@@ -150,7 +160,11 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
       shifted,
       session.spans.peek().map((x) => ({ kind: x.kind, fromId: x.fromId, toId: x.toId, staff: x.voice.staff, startsHere: x.startsHere, endsHere: x.endsHere })),
     )
-    setOverlay((now) => ({ ...now, slots, slotStaves, spans }))
+    const bars = session.tools.peek() === 'bars'
+    const cuts = bars ? cutAreas(cutPlaces(shifted, session.barLineCuts.peek()), 0, origin.width) : []
+    const staves = shifted.staves
+    const cutLine = bars && staves.length > 0 ? { top: Math.min(...staves.map((s) => s.top)) - 2 * halfGap(staves[0]!), bottom: Math.max(...staves.map((s) => s.bottom)) + 2 * halfGap(staves[0]!) } : undefined
+    setOverlay((now) => ({ ...now, slots, slotStaves, spans, cuts, cutLine }))
   }
 
   useLayoutEffect(() => {
@@ -189,6 +203,13 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
     void view.current?.setPart({ id: part })
   }, [part])
 
+  // The scissors come and go with the Bars tools, and follow the places of the bar (the bar is drawn again after an edit).
+  const tools = session.tools.value
+  const cuts = session.barLineCuts.value
+  useLayoutEffect(() => {
+    if (view.current?.element.dataset.rendered === 'true') measureSlots()
+  }, [tools, cuts])
+
   useLayoutEffect(() => {
     view.current?.mark('sel', selectedId ? [selectedId] : [])
   }, [selectedId])
@@ -212,7 +233,7 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
     const origin = box.current?.getBoundingClientRect()
     for (const g of root?.querySelectorAll('.is-dragged') ?? []) if (!drag || g.id !== drag.id) g.classList.remove('is-dragged')
     if (!drag || !root || !origin || !pitch) {
-      setOverlay((now) => (now.ghost ? { slots: now.slots, slotStaves: now.slotStaves, spans: now.spans } : now))
+      setOverlay((now) => (now.ghost ? { ...now, ghost: undefined } : now))
       return
     }
     drawnNote(root, drag.id)?.classList.add('is-dragged')
@@ -410,6 +431,9 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
             </g>
           )
         })}
+        {overlay.cutLine
+          ? overlay.cuts.map((c) => <line key={c.noteId} class="editor-cut-line" x1={c.x} x2={c.x} y1={overlay.cutLine!.top} y2={overlay.cutLine!.bottom} />)
+          : null}
         {ghost ? (
           <g class="editor-ghost">
             {ghost.ledgers.map((y) => (
@@ -428,6 +452,42 @@ export function BarSurface({ session, flagged, flaggedBars, onTapNote, onTapElem
           {ghost.name}
         </span>
       ) : null}
+      {overlay.cuts.length > 0 ? <Cuts cuts={overlay.cuts} session={session} onCut={onCut} /> : null}
+    </div>
+  )
+}
+
+/**
+ * The scissors of the Bars tools over a surface (Notes and Grid): a button per place, as wide as its touch area, with the
+ * mark drawn at the place. The touch stays with the button: the surface under it captures every other touch.
+ */
+export function Cuts({ cuts, session, onCut, top = 0 }: { cuts: readonly CutArea[]; session: EditorSession; onCut: (noteId: string) => void; top?: number }) {
+  const { i18n } = useShell()
+  const { t } = i18n
+  const byId = new Map(session.barLineCuts.value.map((c) => [c.noteId, c]))
+  return (
+    <div class="editor-cuts" role="group" aria-label={t('bars.cuts')} style={{ top: `${top}px` }}>
+      {cuts.map((area) => {
+        const cut = byId.get(area.noteId)
+        if (!cut) return null
+        const label = cut.pitch ? t('bars.cut', { note: i18n.noteName(cut.pitch), place: cut.place }) : t('bars.cut.rest', { place: cut.place })
+        return (
+          <button
+            key={area.noteId}
+            type="button"
+            class="editor-cut"
+            aria-label={label}
+            data-note={area.noteId}
+            style={{ left: `${area.left}px`, width: `${area.right - area.left}px` }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => onCut(area.noteId)}
+          >
+            <span class="editor-cut-mark" aria-hidden="true" style={{ left: `${area.x - area.left}px` }}>
+              ✂
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

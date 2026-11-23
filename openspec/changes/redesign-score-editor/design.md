@@ -149,6 +149,14 @@ Order: first the changes that touch no note (3, then 4, then 5), then 1 and 2 fr
 
 It does not guess beyond one change. That keeps it predictable, and a wrong guess costs one Undo.
 
+**Decided while applying (2026-11-23), for the Bars tools and the suggested repairs:**
+
+- One row above the large bar shows, in this order of priority: the notice of a waiting slur or hairpin, a refusal, the suggested repairs, the warning's text. So a bar that does not add up shows its repairs and the beats chip ("3½ of 4 beats"), not the warning sentence. The row is as high as an empty one, so the large bar does not move; the chips scroll sideways.
+- A key that cannot be used now (Delete bar, "Join with next") is drawn off but still takes a tap, and the tap says why on the message line.
+- The repeat count is shown off, not hidden, when the bar does not end with a repeat.
+- A scissors mark is 44 px high to touch. It is 44 px wide where the notes leave room; between close notes (eighths, sixteenths) each mark gets half the distance to its neighbour.
+- In Grid the scissors show the places of the voice shown; in Notes, of every voice of the part.
+
 ### D7. Endings
 
 `Barline.ending` already exists (`number`, `type: 'start' | 'stop' | 'discontinue'`) on the left bar line of an ending's first bar and the right bar line of its last. `setEnding(score, bar, n)` works on a derived view: for each bar, the ending number it lies in (the function that `timeline.ts` already has for playback is moved to `core/score/` and shared).

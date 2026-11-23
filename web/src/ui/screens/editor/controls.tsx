@@ -44,18 +44,32 @@ export interface ChipProps {
   /** The name of a chip whose face is a sign ("♯", a note value) or shorter than its name ("Delete" for "Delete note"). */
   label?: string
   disabled?: boolean
+  /**
+   * Shown off but still tappable (`aria-disabled`): for a change that is not offered here, whose tap lets the session say
+   * why on the message line ("This is the last bar read on its page, so it cannot be deleted.").
+   */
+  off?: boolean
   onPress: () => void
   children: ComponentChildren
 }
 
-export function Chip({ tone = 'plain', pressed, picking, armed, label, disabled, onPress, children }: ChipProps) {
+export function Chip({ tone = 'plain', pressed, picking, armed, label, disabled, off, onPress, children }: ChipProps) {
   const classes = ['editor-chip']
   if (tone === 'danger') classes.push('editor-chip--danger')
   if (pressed) classes.push('is-on')
   if (picking) classes.push('is-picking')
   if (armed) classes.push('is-armed')
+  if (off) classes.push('is-off')
   return (
-    <button type="button" class={classes.join(' ')} aria-label={label} aria-pressed={pressed === undefined ? undefined : pressed} disabled={disabled} onClick={onPress}>
+    <button
+      type="button"
+      class={classes.join(' ')}
+      aria-label={label}
+      aria-pressed={pressed === undefined ? undefined : pressed}
+      aria-disabled={off ? 'true' : undefined}
+      disabled={disabled}
+      onClick={onPress}
+    >
       {children}
     </button>
   )

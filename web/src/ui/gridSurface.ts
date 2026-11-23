@@ -1,6 +1,7 @@
 import { gridValue } from '../core/score/edit.ts'
 import type { GridBlock, GridDescription } from '../core/score/grid.ts'
 import { frac } from '../core/score/rational.ts'
+import type { Frac } from '../core/score/rational.ts'
 
 /*
  * The geometry of the Grid (change redesign-score-editor, design D3, D4; spec `score-editing` "Grid view", "Edit notes in
@@ -208,4 +209,15 @@ export const columnAtX = (geo: GridGeometry, x: number): number => (x - geo.gutt
 export function hairpinPath(x1: number, x2: number, mid: number, half: number): string {
   const [from, to] = [Math.min(x1, x2), Math.max(x1, x2)]
   return x2 >= x1 ? `M${to} ${mid - half} L${from} ${mid} L${to} ${mid + half}` : `M${from} ${mid - half} L${to} ${mid} L${from} ${mid + half}`
+}
+
+/**
+ * Where the scissors of the Bars tools go above the grid (task 9.2, spec "Add a bar line"): at the column line where each
+ * place starts (`start` a fraction of a whole note, a column a sixteenth), so between two blocks; off the sixteenths
+ * (after a triplet) between two column lines.
+ *
+ *   cutXs(geo, [{ noteId: 'n3', start: frac(1, 2) }]) // [{ noteId: 'n3', x: geo.gutter + 8 * geo.colW }]
+ */
+export function cutXs(geo: GridGeometry, cuts: readonly { noteId: string; start: Frac }[]): { noteId: string; x: number }[] {
+  return cuts.map((c) => ({ noteId: c.noteId, x: xOfColumn(geo, (c.start.n * 16) / c.start.d) }))
 }

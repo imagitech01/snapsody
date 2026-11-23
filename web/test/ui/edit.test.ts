@@ -140,6 +140,26 @@ const onScreen = (page: Page, name: string) => page.waitForFunction((n) => windo
 const title = (page: Page) => page.getByRole('textbox', { name: 'Title' })
 const save = (page: Page) => page.getByRole('button', { name: 'Save & practice' })
 const tabs = (page: Page, name: 'Notes' | 'Marks' | 'Bars' | 'Score') => page.getByRole('radiogroup', { name: 'Editing tools' }).getByRole('radio', { name })
+/**
+ * The Bars tray (task 9.1): "Repeat from" (how the bar starts), the keys of how it ends (Normal, Double, Repeat, End) with
+ * the ones that are on, and the passes of an end-repeat.
+ */
+function barTools(page: Page) {
+  const tray = page.getByRole('region', { name: 'Bar tools' })
+  const ends = tray.getByRole('group', { name: 'Ends with' })
+  return {
+    tray,
+    start: tray.getByRole('group', { name: 'Starts with' }).getByRole('button', { name: 'Repeat from' }),
+    end: (name: 'Normal' | 'Double' | 'Repeat' | 'End') => ends.getByRole('button', { name, exact: true }),
+    endPressed: () => ends.getByRole('button', { pressed: true }).evaluateAll((keys) => keys.map((k) => k.querySelector('.editor-mark-name')?.textContent ?? '')),
+    passes: tray.getByRole('group', { name: 'Played' }),
+  }
+}
+
+/** The scissors of the Bars tools (task 9.2), by their names ("Bar line before E5 (3)"), in the order of the bar. */
+const cuts = (page: Page) => page.getByRole('group', { name: 'Places for a bar line' }).getByRole('button')
+const cutNames = (page: Page) => cuts(page).evaluateAll((keys) => keys.map((k) => k.getAttribute('aria-label') ?? ''))
+
 /** "Bar 3 · Note 4": what the tools say is selected. */
 const selection = (page: Page) => textOf(page.locator('.editor-selection'))
 const pitch = (page: Page) => textOf(page.getByRole('group', { name: 'Pitch' }).getByRole('status'))
@@ -346,7 +366,8 @@ test('edit: one bar at a time; it opens on the bar of the first flag, else on ba
     assert.match(await textOf(warnings(page)), /^2 to check · Next$/)
     assert.ok((await page.locator(`${OVERVIEW} g.note.mk-flagbar`).count()) >= 3, 'the flags are in the overview')
     assert.equal(await page.locator(`${BIG} g.note.mk-flagbar`).count(), 3, 'and on the large bar')
-    assert.match(await textOf(page.locator('.editor-warnings-text')), /^Bar 3 adds up to 3 beats/)
+    // A bar that does not add up shows its suggested repairs in the row of what the editor says (design D6, D13).
+    assert.match(await textOf(page.locator('.editor-fix')), /^Did you mean Add a quarter rest at the end /)
     await page.getByRole('button', { name: 'Back', exact: true }).click()
 
     // Nothing to check: bar 1 of 12, and a bar that adds up says so in green.
@@ -459,7 +480,7 @@ test('edit: go to another bar; next, a tap in the overview, across to the next l
     await warnings(page).getByRole('button', { name: 'Next' }).click()
     await onBar(page, 12)
     assert.notEqual((await lineHolds(page, 12)).line, line, 'another line')
-    assert.match(await textOf(page.locator('.editor-warnings-text')), /^Bar 12 adds up to 3 beats/)
+    assert.match(await textOf(page.locator('.editor-fix')), /^Did you mean Add a quarter rest at the end /, 'the suggested repairs of bar 12')
   })
 })
 
@@ -1395,18 +1416,16 @@ test('edit: Notes and Grid show the same bar and selection; a staccato put on in
   })
 })
 
-test('edit: the Bars tab sets how the current bar starts and ends, and the passes of an end-repeat; saving stores the repeat signs (change edit-bar-lines)', async () => {
+test('edit: the Bars tray sets how the current bar starts and ends, and the passes of an end-repeat; saving stores the repeat signs (change edit-bar-lines)', async () => {
   await withApp({ seed: 'library' }, async (app) => {
     const { page } = app
     await openEditor(page, ID.ode)
     await tabs(page, 'Bars').click()
-    const group = page.getByRole('region', { name: 'Bar lines' })
-    const start = group.getByRole('combobox', { name: 'Starts with' })
-    const end = group.getByRole('combobox', { name: 'Ends with' })
-    // There is always a current bar (change redesign-score-editor, D1): with nothing selected the group is bar 1's.
+    const { start, end, endPressed, passes } = barTools(page)
+    // There is always a current bar (change redesign-score-editor, D1): with nothing selected the tray is bar 1's.
     await page.getByRole('heading', { name: 'Bar 1' }).waitFor()
     assert.equal(await start.isDisabled(), false)
-    assert.equal(await end.isDisabled(), false)
+    assert.equal(await end('Normal').isDisabled(), false)
 
     // A tap on the bar line that closes bar 7 makes bar 7 current, with no note.
     await goToBar(page, 7)
@@ -1416,19 +1435,20 @@ test('edit: the Bars tab sets how the current bar starts and ends, and the passe
 
     await tapNote(page, ODE[2]![1]!)
     await page.getByRole('heading', { name: 'Bar 3' }).waitFor()
-    assert.equal(await start.inputValue(), 'normal')
-    assert.equal(await end.inputValue(), 'normal')
-    const passes = group.getByRole('group', { name: 'Played' })
-    assert.equal(await passes.count(), 0, 'no passes without an end-repeat')
+    assert.equal(await start.getAttribute('aria-pressed'), 'false', 'a plain start')
+    assert.deepEqual(await endPressed(), ['Normal'])
+    // The passes are off without an end-repeat (the mock's tray keeps the row).
+    assert.deepEqual([await passes.getByRole('button', { name: 'Play the section fewer times' }).isDisabled(), await passes.getByRole('button', { name: 'Play the section more times' }).isDisabled()], [true, true], 'no passes without an end-repeat')
 
-    await start.selectOption('repeat')
-    await end.selectOption('repeat')
+    await start.click()
+    await end('Repeat').click()
+    assert.deepEqual(await endPressed(), ['Repeat'])
     assert.equal(await textOf(passes.getByRole('status')), '2×')
     await passes.getByRole('button', { name: 'Play the section more times' }).click()
     assert.equal(await textOf(passes.getByRole('status')), '3×')
     await page.getByRole('button', { name: 'Undo' }).click()
     assert.equal(await textOf(passes.getByRole('status')), '2×', 'one undo takes the step back')
-    assert.equal(await start.inputValue(), 'repeat')
+    assert.equal(await start.getAttribute('aria-pressed'), 'true')
     assert.equal(await passes.getByRole('button', { name: 'Play the section fewer times' }).isDisabled(), true, 'two passes is the fewest')
 
     await save(page).click()
@@ -1875,12 +1895,13 @@ test('edit: a tap on a bar line makes its bar current and opens the Bars tools w
     assert.equal(await tabs(page, 'Bars').isChecked(), true, 'the Bars tools are open')
     assert.equal(await barRow(page), 'Bar 2 of 4')
     assert.equal(await panel(page).count(), 0, 'a bar line has no element panel')
-    const group = page.getByRole('region', { name: 'Bar lines' })
-    assert.equal(await group.getByRole('combobox', { name: 'Starts with' }).isDisabled(), false)
-    assert.equal(await group.getByRole('combobox', { name: 'Ends with' }).isDisabled(), false)
+    const { start, end, endPressed } = barTools(page)
+    assert.equal(await start.isDisabled(), false)
+    assert.equal(await end('Double').isDisabled(), false)
+    assert.deepEqual(await endPressed(), ['Normal'], 'its end is shown')
+    assert.equal(await page.getByRole('button', { name: 'Join with next' }).getAttribute('aria-disabled'), null, '"Join with next" is offered')
   })
 })
-
 
 test('edit: Trill from the Marks tab is stored as <trill-mark/> on its note, a tap on the trill selects it and Delete removes it; Arpeggio needs a chord (change more-marks)', async () => {
   await withApp({ seed: '' }, async (app) => {
@@ -2055,21 +2076,25 @@ async function pieceJson(app: App, pieceId: string): Promise<{ bars: number; pag
   return JSON.parse((await app.file(`pieces/${pieceId}/piece.json`)) ?? '{}') as { bars: number; pages: { firstBar: number; lastBar: number }[] }
 }
 
-test('edit parts: tap a bar line, remove it, save: one bar fewer in the score and in piece.json; not at the end of a page', async () => {
+test('edit parts: tap a bar line, "Join with next", save: one bar fewer in the score and in piece.json; not at the end of a page', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
     const id = await makeOdePiece(page)
     await openEditor(page, id)
-    // The bar line that closes bar 4 ends the first page: it stays.
+    // The bar line that closes bar 4 ends the first page: it stays. "Join with next" is off, and a tap on it says why.
     await goToBar(page, 4)
     await tapBarLine(page)
     await page.getByRole('heading', { name: 'Bar 4' }).waitFor()
-    assert.equal(await page.getByRole('button', { name: 'Remove bar line' }).count(), 0)
+    const join = page.getByRole('button', { name: 'Join with next' })
+    assert.equal(await join.getAttribute('aria-disabled'), 'true')
+    await join.click({ force: true })
+    assert.equal(await textOf(page.locator('.editor-message')), 'This bar ends a line of the printed page, so its bar line stays.')
+    assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), true, 'nothing changed')
     // The bar line that closes bar 1 goes.
     await goToBar(page, 1)
     await tapBarLine(page)
     await page.getByRole('heading', { name: 'Bar 1' }).waitFor()
-    await page.getByRole('button', { name: 'Remove bar line' }).click()
+    await join.click()
     await save(page).click()
     await onScreen(page, 'practice')
     const saved = await stored(app, id)
@@ -2081,22 +2106,23 @@ test('edit parts: tap a bar line, remove it, save: one bar fewer in the score an
   })
 })
 
-test('edit parts: add a bar line, Save & practice: the loop is over the same music', async () => {
+test('edit parts: add a bar line with the scissors, Save & practice: the loop is over the same music', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
     const id = await makeOdePiece(page)
     await page.evaluate((pieceId) => window.__test!.shell.library.writePractice(pieceId, { bar: 9, tempo: null, loop: { start: 9, end: 12 }, loopRest: 0, metronome: false }), id)
     await openEditor(page, id)
-    // Bar 6, before its third note: the Bars tools add the bar line.
+    // Bar 6, before its third note: the Bars tools show a scissors mark between every two notes, none before the first.
     await tapNote(page, ODE[5]![2]!)
     await tabs(page, 'Bars').click()
-    await page.getByRole('button', { name: 'Bar line before' }).click()
+    assert.deepEqual(await cutNames(page), ['Bar line before D5 (2)', 'Bar line before E5 (3)', 'Bar line before F5 (4)'])
+    await page.getByRole('button', { name: 'Bar line before E5 (3)' }).tap()
     assert.equal(await selection(page), 'Bar 7 · Note 1', 'the note stays selected, now the first of the new bar 7')
     await onBar(page, 7)
     // Not offered before the first note of a bar.
     await tapNote(page, ODE[5]![0]!)
-    await page.getByRole('heading', { name: 'Bar 6' }).waitFor()
-    assert.equal(await page.getByRole('button', { name: 'Bar line before' }).count(), 0)
+    await onBar(page, 6)
+    assert.deepEqual(await cutNames(page), ['Bar line before D5 (2)'], 'bar 6 is C5 D5 now: one mark, between them')
     await save(page).click()
     await onScreen(page, 'practice')
     await page.getByRole('button', { name: 'Loop 10–13' }).waitFor()
@@ -2107,7 +2133,7 @@ test('edit parts: add a bar line, Save & practice: the loop is over the same mus
   })
 })
 
-test('edit parts: a bar line that would cut a note of the other part is refused, with its explanation', async () => {
+test('edit parts: a bar line that would cut a note of the other part is refused, with its explanation, from the scissors in Notes and in Grid', async () => {
   await withApp({ seed: '' }, async (app) => {
     const { page } = app
     const id = await makeDuet(page)
@@ -2115,8 +2141,111 @@ test('edit parts: a bar line that would cut a note of the other part is refused,
     // The melody's second note: the right hand holds a half-note chord across it.
     await tapNote(page, duetNote('P1', 0, 1, 1))
     await tabs(page, 'Bars').click()
-    await page.getByRole('button', { name: 'Bar line before' }).click()
-    assert.equal(await textOf(page.locator('.editor-message')), 'A note in the right hand sounds across that point, so a bar line cannot go there.')
+    const refused = 'A note in the right hand sounds across that point, so a bar line cannot go there.'
+    await page.getByRole('button', { name: 'Bar line before A4 (2)' }).tap()
+    assert.equal(await textOf(page.locator('.editor-message')), refused)
     assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), true, 'nothing changed')
+    // In Grid the scissors stand above the grid: the same mark, the same refusal.
+    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Grid' }).click()
+    await page.locator('.editor-blocks-cutrow .editor-cut').first().waitFor()
+    await tabs(page, 'Notes').click()
+    await tabs(page, 'Bars').click()
+    assert.equal(await page.locator('.editor-message').count(), 0, 'another tab took the message away')
+    assert.deepEqual(await cutNames(page), ['Bar line before A4 (2)', 'Bar line before B4 (3)', 'Bar line before C5 (4)'])
+    await page.locator('.editor-blocks-cutrow').getByRole('button', { name: 'Bar line before A4 (2)' }).tap()
+    assert.equal(await textOf(page.locator('.editor-message')), refused)
+    assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), true, 'nothing changed')
+  })
+})
+
+// ---- the Bars tools and the suggested repairs (change redesign-score-editor, group 9) ------------------------------
+
+test('edit: Bars: a first and a second ending, a bar added after bar 8 and the old bar 10 deleted; the score, piece.json and the loop follow (tasks 9.1, spec "First and second endings", "Add a bar", "Delete a bar", "Bar numbers follow a bar-line change")', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await makeOdePiece(page)
+    await page.evaluate((pieceId) => window.__test!.shell.library.writePractice(pieceId, { bar: 9, tempo: null, loop: { start: 9, end: 12 }, loopRest: 0, metronome: false }), id)
+    await openEditor(page, id)
+    await tabs(page, 'Bars').click()
+    const { tray, endPressed } = barTools(page)
+    const next = async (bar: number) => {
+      await page.getByRole('button', { name: 'Next bar' }).click()
+      await onBar(page, bar)
+    }
+    for (const bar of [2, 3, 4]) await next(bar)
+    // Bar 4 "1st time only": its bracket, and the end-repeat comes along in the same step.
+    await tray.getByRole('button', { name: '1st time only' }).click()
+    assert.equal(await tray.getByRole('button', { name: '1st time only' }).getAttribute('aria-pressed'), 'true')
+    assert.deepEqual(await endPressed(), ['Repeat'], 'the end-repeat comes along')
+    await drawn(page, `${BIG} g.ending`, 1)
+    await next(5)
+    await tray.getByRole('button', { name: '2nd time only' }).click()
+    assert.equal(await tray.getByRole('button', { name: '2nd time only' }).getAttribute('aria-pressed'), 'true')
+    // "+ Bar after" bar 8: the new bar 9 is current and empty; the old bar 9 is bar 10.
+    for (const bar of [6, 7, 8]) await next(bar)
+    await tray.getByRole('button', { name: '+ Bar after' }).click()
+    await onBar(page, 9)
+    assert.equal(await barRow(page), 'Bar 9 of 13')
+    assert.equal(await page.locator(`${BIG} g.note`).count(), 0, 'the added bar holds no note')
+    // Delete the old bar 10, now bar 11.
+    for (const bar of [10, 11]) await next(bar)
+    await tray.getByRole('button', { name: 'Delete bar' }).click()
+    await page.locator('.editor-bar-position').filter({ hasText: /^Bar 11 of 12$/ }).waitFor()
+
+    await save(page).click()
+    await onScreen(page, 'practice')
+    // The loop was bars 9 to 12: the old bar 10 is gone, and the bar added before them moves them on by one.
+    await page.getByRole('button', { name: 'Loop 10–12' }).waitFor()
+    const saved = await stored(app, id)
+    const bars = firstLine(saved).measures
+    assert.equal(bars.length, 12)
+    assert.deepEqual([bars[3]!.leftBarline?.ending, bars[3]!.rightBarline?.ending, bars[3]!.rightBarline?.repeat], [{ number: '1', type: 'start' }, { number: '1', type: 'stop' }, 'backward'], 'bar 4 is the first ending, with its end-repeat')
+    assert.deepEqual([bars[4]!.leftBarline?.ending, bars[4]!.rightBarline?.ending], [{ number: '2', type: 'start' }, { number: '2', type: 'discontinue' }], 'bar 5 the second')
+    assert.deepEqual(bars[8]!.items.filter(isNote).map((n) => [n.rest, n.measureRest]), [[true, true]], 'bar 9 is the added bar, a whole-bar rest')
+    assert.deepEqual([bars[9]!, bars[10]!, bars[11]!].map((m) => m.items.filter(isNote)[0]!.id), [ODE[8]![0], ODE[10]![0], ODE[11]![0]], 'bars 10 to 12 are the old bars 9, 11 and 12')
+    const info = await pieceJson(app, id)
+    assert.equal(info.bars, 12)
+    assert.deepEqual(info.pages.map((p) => [p.firstBar, p.lastBar]), [[1, 4], [5, 9], [10, 12]], 'the added bar is on the page of bar 8')
+    const practice = JSON.parse((await app.file(`pieces/${id}/practice.json`)) ?? '{}') as { bar: number; loop?: { start: number; end: number } }
+    assert.deepEqual([practice.bar, practice.loop], [10, { start: 10, end: 12 }])
+  })
+})
+
+/** A 4/4 piece whose bar 2 is a quarter note E4, an eighth note and a half note: 3½ beats (the spec's "A missed dot"). */
+const MISSED_DOT = scoreXml(
+  [
+    ['C', 'D', 'E', 'F'].map((step) => noteXml({ step, type: 'quarter' })).join(''),
+    noteXml({ step: 'E', octave: 4, type: 'quarter' }) + noteXml({ step: 'G', octave: 4, type: 'eighth' }) + noteXml({ step: 'A', octave: 4, type: 'half' }),
+    ['C', 'D', 'E', 'F'].map((step) => noteXml({ step, type: 'quarter' })).join(''),
+  ],
+  [4, 4],
+)
+
+test('edit: a bar of 3½ beats offers "E4 (1) → dotted quarter" under the bar row; a tap makes it add up and takes the flag away, and one undo brings both back (task 9.3, spec "Suggested repairs")', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    const id = await page.evaluate(async (xml) => {
+      const { platform, shell } = window.__test!
+      platform.files.seed('scans/test/page.jpg', Uint8Array.of(0xff, 0xd8, 0xff, 0xe0))
+      return (await shell.library.create({ name: 'A missed dot', musicxml: xml, bars: 3, repairs: [], pages: [{ source: 'scans/test/page.jpg', recognised: xml, firstBar: 1, lastBar: 3 }] })).id
+    }, MISSED_DOT)
+    await openEditor(page, id)
+    // The editor opens on the bar to check.
+    await onBar(page, 2)
+    assert.equal(await textOf(page.locator('.editor-beats')), '3½ of 4 beats')
+    const chips = page.getByRole('group', { name: 'Did you mean' })
+    assert.deepEqual(await chips.getByRole('button').allInnerTexts(), ['Add an eighth rest at the end', 'E4 (1) → dotted quarter', 'G4 (2) → quarter'])
+    await chips.getByRole('button', { name: 'E4 (1) → dotted quarter' }).tap()
+    await page.locator('.editor-beats--ok').filter({ hasText: '4 of 4 beats' }).waitFor()
+    assert.equal(await warnings(page).count(), 0, 'nothing left to check')
+    assert.equal(await chips.count(), 0, 'and nothing to suggest')
+    await drawn(page, `${BIG} g.note.mk-flagbar`, 0)
+    await drawn(page, `${BIG} g.dots`, 1)
+    // One undo: the bar is as it was, flagged, with its suggestions.
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await page.locator('.editor-beats--off').filter({ hasText: '3½ of 4 beats' }).waitFor()
+    assert.match(await textOf(warnings(page)), /^1 to check · Next$/)
+    assert.equal(await chips.getByRole('button').count(), 3)
+    assert.equal(await page.getByRole('button', { name: 'Undo' }).isDisabled(), true, 'it was one undo step')
   })
 })

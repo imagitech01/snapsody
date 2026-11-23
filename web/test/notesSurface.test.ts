@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { DRAG_START_PX, dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, pitchAtStep, slideTarget, spanShapes, staffAt, stepAt, yOfStep } from '../src/ui/notesSurface.ts'
+import { CUT_TOUCH_PX, DRAG_START_PX, cutAreas, cutPlaces, dragAxis, dragSteps, halfGap, hitBar, ledgerSteps, pitchAtStep, slideTarget, spanShapes, staffAt, stepAt, yOfStep } from '../src/ui/notesSurface.ts'
 import type { BarLayout, DrawnNote, StaffGeometry } from '../src/ui/notesSurface.ts'
 
 // The geometry of the large bar in Notes (change redesign-score-editor, design D2, task 6.2): what a touch is on, which
@@ -134,4 +134,23 @@ test('the hints of spans that reach outside the bar (task 7.5): from a note or t
   assert.deepEqual([points[2], points[3]], [88, TREBLE.bottom + 4 * halfGap(TREBLE)], 'its point on C5, under the staff')
   assert.ok(points[1]! < points[3]! && points[7]! > points[3]!, 'open at the right')
   assert.deepEqual(spanShapes(ODE, [{ ...base, staff: 1, kind: 'tie', startsHere: true, endsHere: false }]), [], 'a staff that is not drawn')
+})
+
+test('scissors (task 9.2): a mark between a note and what is drawn before it in any staff, and touch areas of 44 px, cut at the middle where marks are closer', () => {
+  // C5 D5 E5 F5 in the treble, 48 px apart from x 80; in the bass a half note under C5 and one under E5, with a sharp 10 px to its left.
+  const sharp = { ...quarter('b2', 176, 0, BASS), box: { left: 166, right: 192, top: 200, bottom: 240 } }
+  const layout: BarLayout = { staves: [TREBLE, BASS], notes: [quarter('c', 80, 0), quarter('d', 128, 1), quarter('e', 176, 2), quarter('f', 224, 3), quarter('b1', 80, 0, BASS), sharp], slots: [] }
+  const places = cutPlaces(layout, [{ noteId: 'd' }, { noteId: 'e' }, { noteId: 'f' }, { noteId: 'gone' }])
+  assert.deepEqual(places, [
+    { noteId: 'd', x: 112 },
+    { noteId: 'e', x: 155 },
+    { noteId: 'f', x: 208 },
+  ], 'between the notes; before E5 clear of the sharp under it; a note not drawn has none')
+  assert.deepEqual(cutAreas(places, 0, 360), [
+    { noteId: 'd', x: 112, left: 90, right: 133.5 },
+    { noteId: 'e', x: 155, left: 133.5, right: 177 },
+    { noteId: 'f', x: 208, left: 186, right: 230 },
+  ])
+  assert.equal(CUT_TOUCH_PX, 44)
+  assert.deepEqual(cutAreas([{ noteId: 'a', x: 10 }], 0, 360), [{ noteId: 'a', x: 10, left: 0, right: 32 }], 'within the surface')
 })

@@ -129,7 +129,7 @@ function placeOfRefusal(t: I18n['t'], score: Score, error: BarLineError): string
 }
 
 /** A message key, for the fixed texts the session puts on the message line. */
-export type SessionMessage = Extract<MessageKey, 'editor.error.edit' | 'bars.error.onlyBar' | 'bars.error.onlyPage' | 'bars.error.firstBar' | 'barline.error.last' | 'barline.error.line' | 'mark.error.rest' | 'mark.error.voice' | 'mark.error.staff' | 'grid.error.locked' | 'grid.error.rest'>
+export type SessionMessage = Extract<MessageKey, 'editor.error.edit' | 'bars.error.onlyBar' | 'bars.error.onlyPage' | 'bars.error.firstBar' | 'barline.error.first' | 'barline.error.last' | 'barline.error.line' | 'mark.error.rest' | 'mark.error.voice' | 'mark.error.staff' | 'grid.error.locked' | 'grid.error.rest'>
 
 // ---- Changes of bars and the piece as last saved (design D8, task 5.3) ---------------------
 

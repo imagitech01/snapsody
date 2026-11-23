@@ -121,7 +121,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.3125rem var(--space-3);
+  padding: 0.25rem var(--space-3);
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--mark-flagbar) 16%, var(--surface));
 }
@@ -334,6 +334,59 @@
   flex: none;
   padding: 0 var(--space-3);
   font-size: var(--fs-12);
+}
+
+/* The suggested repairs of a bar that does not add up (task 9.3): "Did you mean" and up to four chips in one row that
+   scrolls sideways, in the tint of a bar to check. The row takes the 1rem of an empty row, so the large bar does not
+   move when a bar stops adding up (a second tap in the slot lands where the first did) and keeps its room (design D13);
+   its chips are 44 px high to touch, reaching over the bar row and the large bar, and only the chips take a touch there. */
+.editor-say {
+  position: relative;
+  z-index: 1;
+}
+.editor-fix {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: var(--tap);
+  margin: calc((1rem - var(--tap)) / 2) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  pointer-events: none;
+}
+.editor-fix-lead {
+  flex: none;
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.editor-fix-chip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: var(--tap);
+  padding: 0;
+  background: none;
+  pointer-events: auto;
+  touch-action: pan-x;
+}
+.editor-fix-pill {
+  padding: 0.25rem var(--space-3);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--mark-flagbar) 14%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--mark-flagbar);
+  color: var(--ink);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.editor-fix-chip:active .editor-fix-pill {
+  filter: brightness(0.94);
 }
 
 /* ---- The large bar ----------------------------------------------------------------------------- */
@@ -1009,6 +1062,98 @@
 .editor-span-key--remove {
   color: var(--danger);
   font-size: var(--fs-14);
+}
+
+/* The Bars tray (task 9.1): how the bar starts and ends, five across; the passes of an end-repeat and the endings; the
+   bars, five across with Delete in the warning colour. Every key is at least 44 x 44. */
+.editor-bars {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) 0;
+}
+.editor-bars-row {
+  display: grid;
+  gap: var(--space-1);
+  align-items: stretch;
+}
+.editor-bars-row--lines {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 4fr);
+}
+.editor-bars-keys {
+  display: grid;
+  gap: var(--space-1);
+}
+.editor-bars-keys--ends {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.editor-bars-row--endings {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+.editor-bars-row--endings .stepper--compact {
+  min-width: 0;
+  width: 100%;
+}
+.editor-bars-other {
+  grid-column: span 2;
+  display: grid;
+}
+.editor-bars-row--bars {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.editor-bars .editor-chip {
+  padding: 0 0.125rem;
+  font-size: var(--fs-10);
+}
+/* Not offered here, but a tap says why (the session's message). */
+.editor-chip.is-off {
+  opacity: 0.45;
+}
+
+/* The scissors of the Bars tools (task 9.2): a dashed line where the bar line would go, and above it a mark in a circle,
+   on a button whose touch area is 44 px high (and as wide where the marks beside it leave room). */
+.editor-cuts {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--tap);
+  pointer-events: none;
+}
+.editor-cut {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  padding: 0;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.editor-cut-mark {
+  position: absolute;
+  top: 50%;
+  width: 1.5rem;
+  height: 1.5rem;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+  color: var(--primary);
+  font-size: var(--fs-12);
+  line-height: 1;
+}
+.editor-cut:active .editor-cut-mark {
+  background: var(--primary-tint);
+}
+.editor-cut-line {
+  stroke: var(--primary);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+.editor-blocks-cutrow {
+  position: relative;
+  flex: none;
+  height: var(--tap);
 }
 
 /* The "Bar N" group, the temporary Bars tray (change edit-bar-lines, D2): the Score tab's grid. */

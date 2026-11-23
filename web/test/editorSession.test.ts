@@ -1651,6 +1651,37 @@ test('not offered (task 5.3): Delete bar for the only bar of the piece or of a p
   assert.deepEqual([one.canDeleteBar.value, one.deleteBar(), one.message.value], [false, false, 'This is the only bar of the piece, so it cannot be deleted.'])
 })
 
+test('scissors (task 9.2): the places of a bar line in the current bar, in Notes for every voice and in Grid for the one shown; a tap is one undo step, refused with where', async () => {
+  const { editor } = await setup()
+  editor.goToBar(2)
+  const [g1, g2, g3] = idsOf(editor, 2)
+  assert.deepEqual(editor.barLineCuts.value.map((c) => [c.noteId, c.place]), [[g2, 2], [g3, 3]], 'not before the first note')
+  assert.equal(editor.addBarLineBefore(g1!), false)
+  assert.equal(editor.message.value, 'A bar line cannot go before the first note of a bar.')
+  oneStep(editor, 'scissors', () => editor.addBarLineBefore(g3!), () => {
+    assert.deepEqual([idsOf(editor, 2), idsOf(editor, 3), editor.currentBar.value, editor.barCount.value], [[g1, g2], [g3], 2, 5], 'bar 2 is cut before its third note and stays current')
+  })
+  editor.goToBar(2)
+  assert.deepEqual(editor.barLineCuts.value.map((c) => c.noteId), [g2])
+
+  // The melody over a piano: in bar 7 the left hand holds a whole note across the melody's second note.
+  const piece = await setupMelodyPiano()
+  const melody = noteAt(piece.editor, { part: 'P1', staff: 0, voice: 0 }, 7, 1)
+  piece.editor.goToBar(7)
+  assert.deepEqual(piece.editor.barLineCuts.value.map((c) => c.noteId), [melody])
+  const before = piece.editor.score.value
+  assert.equal(piece.editor.addBarLineBefore(melody), false)
+  assert.deepEqual([piece.editor.score.value === before, piece.editor.message.value], [true, 'A note in the left hand sounds across that point, so a bar line cannot go there.'])
+  // Grid shows one voice: its places only. In bar 3 of the piano the left hand moves on beat 2, the right hand does not.
+  piece.editor.setPart('P2')
+  piece.editor.goToBar(3)
+  const at = () => piece.editor.barLineCuts.value.map((c) => `${c.start.n}/${c.start.d}`)
+  assert.deepEqual(at(), ['1/4', '1/2'], 'both hands in Notes')
+  await piece.editor.setView('grid')
+  piece.editor.setGridVoice(RH)
+  assert.deepEqual(at(), ['1/2'], 'the right hand in Grid')
+})
+
 test('not offered (task 5.3): Join with next at the end of a line or page, also after bars were deleted or brought back by an undo across a save', async () => {
   // Page 1: lines 1 and 2–3; page 2: lines 4–5 and 6.
   const lines: Line[] = [

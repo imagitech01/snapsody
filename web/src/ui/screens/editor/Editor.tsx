@@ -16,7 +16,7 @@ import { ElementPanel } from './ElementPanel.tsx'
 import { GridSurface } from './GridSurface.tsx'
 import { frameLayout } from './frame.ts'
 import type { FrameLayout } from './frame.ts'
-import { BarLineGroup } from './MarksTab.tsx'
+import { BarsTray } from './BarsTray.tsx'
 import { MarksTray } from './MarksTray.tsx'
 import type { Failure, FailureKey } from './NoteTab.tsx'
 import { NotesTray } from './NotesTray.tsx'
@@ -37,16 +37,17 @@ import { ScoreTab } from './ScoreTab.tsx'
  *    Notes | Grid switch.
  * 5. One row for what the editor has to say (design D13): the notice of a slur, tie or hairpin that waits for its last
  *    note, with Cancel (design D14), which says a refused change in its place until the next action; else a refused
- *    change; else what the bar's warning says.
+ *    change; else, for a bar that does not add up, the suggested repairs as chips ("Did you mean E4 (1) → dotted
+ *    quarter", design D6, task 9.3); else what the bar's warning says.
  * 6. The large bar: in Notes `BarSurface` (a tap selects a note or an element or adds a note, a drag changes a pitch),
  *    in Grid `GridSurface` (the voice as blocks: a tap on a cell adds a note, a block is dragged to move it, change its
  *    pitch or by its end its length, and the loudness strip under it). Both show the same bar and the same selection,
  *    which are the session's, so switching keeps them (spec "Notes and Grid views").
  * 7. The tools: the tabs Notes · Marks · Bars · Score and the tray of the open one, with the selection and the selected
- *    element (`ElementPanel`) at its top. Notes is the Notes tray (`NotesTray`) and Marks the Marks tray (`MarksTray`);
- *    Bars is still today's bar-line group (`MarksTab`'s `BarLineGroup`) until its new tray replaces it (task 9.1). With
- *    the Marks tools open the line at the top of the tray says what to do next: tap a note or a mark, tap the notes
- *    that get the armed mark, or tap the first note of the armed slur.
+ *    element (`ElementPanel`) at its top. Notes is the Notes tray (`NotesTray`), Marks the Marks tray (`MarksTray`) and
+ *    Bars the Bars tray (`BarsTray`), with the scissors in the large bar: a tap on one adds a bar line there (task 9.2).
+ *    With the Marks tools open the line at the top of the tray says what to do next: tap a note or a mark, tap the notes
+ *    that get the armed mark, or tap the first note of the armed slur; with the Bars tools open, how the scissors work.
  * 8. Save & practice.
  *
  * Design D13: the screen does not scroll; every row but the large bar has its own height, the tray three rows of keys
@@ -211,6 +212,12 @@ export function Editor({ session }: { session: EditorSession }) {
     if (ref.kind === 'barline') session.openTools('bars')
   }
 
+  /** A tap on a scissors mark of the Bars tools (task 9.2): a bar line before that note, or the reason it cannot go there. */
+  const cut = (noteId: string): void => {
+    quiet()
+    session.addBarLineBefore(noteId)
+  }
+
   /** The part switch (change edit-parts, D1): another part is drawn, and the selection and a span waiting for a note of the other part go. */
   const switchPart = (id: string): void => {
     quiet()
@@ -287,13 +294,15 @@ export function Editor({ session }: { session: EditorSession }) {
       ? t('score.whole')
       : selection && note && label
         ? label
-        : tools !== 'marks'
-          ? t(view === 'grid' && tools === 'notes' ? 'grid.hint' : 'editor.selection.none')
-          : armed === null
-            ? t(view === 'grid' ? 'grid.marks.hint' : 'marks.hint')
-            : isSpanMark(armed)
-              ? t('marks.armed.span')
-              : t('marks.armed.note')
+        : tools === 'bars'
+          ? t(view === 'grid' ? 'bars.hint.grid' : 'bars.hint')
+          : tools !== 'marks'
+            ? t(view === 'grid' && tools === 'notes' ? 'grid.hint' : 'editor.selection.none')
+            : armed === null
+              ? t(view === 'grid' ? 'grid.marks.hint' : 'marks.hint')
+              : isSpanMark(armed)
+                ? t('marks.armed.span')
+                : t('marks.armed.note')
   const previewing = session.previewing.value
   const naming = session.naming.value
   const beats = session.barBeats.value
@@ -321,6 +330,33 @@ export function Editor({ session }: { session: EditorSession }) {
   const barWarnings = session.barWarnings.value
   const focused = session.currentWarning.value
   const warning = focused && barWarnings.includes(focused) ? focused : barWarnings[0]
+  // The suggested repairs of a bar that does not add up (design D6), as chips in one row that scrolls sideways; a tap is
+  // one undo step. They come after a notice and a refusal in the row (design D13), and before the bar's warning text,
+  // which the beats chip of the bar row says too. A warning the user stepped to that is not about the bar's length (a
+  // note out of range) keeps its text in the row instead.
+  const stepped = warning !== undefined && warning === focused && warning.kind !== 'bar-length'
+  const suggestions = session.suggestions.value
+  const chips =
+    suggestions.length > 0 && !stepped ? (
+      <div class="editor-fix" role="group" aria-label={t('suggest.lead')}>
+        <span class="editor-fix-lead" aria-hidden="true">
+          {t('suggest.lead')}
+        </span>
+        {suggestions.map((suggestion, k) => (
+          <button
+            key={`${k}:${i18n.suggestion(suggestion)}`}
+            type="button"
+            class="editor-fix-chip"
+            onClick={() => {
+              quiet()
+              session.applySuggestion(suggestion)
+            }}
+          >
+            <span class="editor-fix-pill">{i18n.suggestion(suggestion)}</span>
+          </button>
+        ))}
+      </div>
+    ) : null
 
   const classes = ['screen', 'editor']
   if (full) classes.push('editor--full')
@@ -438,6 +474,8 @@ export function Editor({ session }: { session: EditorSession }) {
               <p class="editor-message" role="status">
                 {said}
               </p>
+            ) : chips ? (
+              chips
             ) : warning ? (
               <p class="editor-warnings-text" role="status">
                 {i18n.warning(warning)}
@@ -453,6 +491,7 @@ export function Editor({ session }: { session: EditorSession }) {
                 onTapEmpty={() => tapElement(undefined)}
                 onQuiet={quiet}
                 onStripNowhere={() => setMessage('grid.error.strip')}
+                onCut={cut}
               />
             ) : (
               <BarSurface
@@ -463,6 +502,7 @@ export function Editor({ session }: { session: EditorSession }) {
                 onTapElement={tapElement}
                 onQuiet={quiet}
                 onSlideNowhere={() => setMessage('mark.error.slide')}
+                onCut={cut}
               />
             )}
           </div>
@@ -485,7 +525,7 @@ export function Editor({ session }: { session: EditorSession }) {
               <ElementPanel session={session} run={run} />
               {tools === 'notes' ? <NotesTray session={session} run={run} onQuiet={quiet} /> : null}
               {tools === 'marks' ? <MarksTray session={session} onQuiet={quiet} /> : null}
-              {tools === 'bars' ? <BarLineGroup session={session} run={run} /> : null}
+              {tools === 'bars' ? <BarsTray session={session} onQuiet={quiet} /> : null}
               {tools === 'score' ? <ScoreTab session={session} run={run} onAddPages={() => void addPages()} /> : null}
             </div>
           </section>

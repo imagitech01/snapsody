@@ -302,3 +302,51 @@ export function spanShapes(layout: BarLayout, spans: readonly SpanInBar[]): Span
   }
   return out
 }
+
+// ---- The scissors of the Bars tools (task 9.2, spec "Add a bar line") ---------------------------------------------
+
+/** The touch area of a scissors mark, as wide and high as any control (design D13), where the marks beside it leave room. */
+export const CUT_TOUCH_PX = 44
+
+/** A scissors mark: where its line is drawn, and the touch area around it, from `left` to `right`. */
+export interface CutArea {
+  noteId: string
+  x: number
+  left: number
+  right: number
+}
+
+/**
+ * Where the scissors of the places `cuts` go in the drawn bar: between the note or rest a bar line goes before and what
+ * is drawn before it, in any staff. The note's left edge is that of the notes drawn at the same place (a chord, the other
+ * hand), accidentals included. A place whose note is not drawn has none.
+ */
+export function cutPlaces(layout: BarLayout, cuts: readonly { noteId: string }[]): { noteId: string; x: number }[] {
+  const out: { noteId: string; x: number }[] = []
+  for (const cut of cuts) {
+    const note = layout.notes.find((n) => n.id === cut.noteId)
+    if (!note) continue
+    const at = centreX(note.head)
+    const left = Math.min(...layout.notes.filter((n) => Math.abs(centreX(n.head) - at) <= 3).map((n) => Math.min(n.box.left, n.head.left)))
+    const before = layout.notes.filter((n) => n.box.right <= left + 1).map((n) => n.box.right)
+    out.push({ noteId: cut.noteId, x: before.length > 0 ? (Math.max(...before) + left) / 2 : left - 4 })
+  }
+  return out
+}
+
+/**
+ * The touch areas of the marks at `places`, within `from` to `to`: `CUT_TOUCH_PX` wide around each, cut at the middle
+ * between two marks that are closer than that (dense sixteenths), so a touch goes to the nearer mark.
+ *
+ *   cutAreas([{ noteId: 'a', x: 100 }, { noteId: 'b', x: 130 }], 0, 360) // a: 78 to 115, b: 115 to 152
+ */
+export function cutAreas(places: readonly { noteId: string; x: number }[], from: number, to: number, size = CUT_TOUCH_PX): CutArea[] {
+  const sorted = [...places].sort((a, b) => a.x - b.x)
+  return sorted.map((p, k) => {
+    const before = sorted[k - 1]
+    const after = sorted[k + 1]
+    const left = Math.max(from, p.x - size / 2, before ? (before.x + p.x) / 2 : -Infinity)
+    const right = Math.min(to, p.x + size / 2, after ? (after.x + p.x) / 2 : Infinity)
+    return { noteId: p.noteId, x: p.x, left, right }
+  })
+}

@@ -4,6 +4,7 @@ import type { GridBlock } from '../src/core/score/grid.ts'
 import { frac } from '../src/core/score/rational.ts'
 import {
   GRID_GUTTER_PX,
+  cutXs,
   GRID_ROW_MAX_PX,
   GRID_ROW_MIN_PX,
   GROW_STEPS,
@@ -146,4 +147,12 @@ test('the strip: the note that sounds in a column, a chord by its first note, no
 test('the strip: a slide draws a crescendo open at the finger going forward, a diminuendo open at the start going back', () => {
   assert.equal(hairpinPath(10, 50, 15, 6), 'M50 9 L10 15 L50 21')
   assert.equal(hairpinPath(50, 10, 15, 6), 'M10 9 L50 15 L10 21')
+})
+
+test('scissors (task 9.2): above the grid at the column line where each place starts, also off the sixteenths', () => {
+  const geo = gridGeometry({ rows: 10, columns: 16 }, 326, 193)
+  assert.deepEqual(cutXs(geo, [{ noteId: 'a', start: frac(1, 4) }, { noteId: 'b', start: frac(1, 6) }]), [
+    { noteId: 'a', x: GRID_GUTTER_PX + 4 * geo.colW },
+    { noteId: 'b', x: GRID_GUTTER_PX + (8 / 3) * geo.colW },
+  ])
 })

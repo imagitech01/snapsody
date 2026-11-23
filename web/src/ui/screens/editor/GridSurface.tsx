@@ -10,6 +10,7 @@ import {
   GRID_STRIP_PX,
   blockRect,
   columnAtX,
+  cutXs,
   endHandle,
   gridGeometry,
   growFor,
@@ -25,8 +26,9 @@ import {
   yOfRow,
 } from '../../gridSurface.ts'
 import type { GridGeometry, Rect } from '../../gridSurface.ts'
-import { dragAxis } from '../../notesSurface.ts'
+import { cutAreas, dragAxis } from '../../notesSurface.ts'
 import { useShell } from '../../ShellContext.ts'
+import { Cuts } from './BarSurface.tsx'
 import { SelectField } from './controls.tsx'
 
 /**
@@ -43,6 +45,9 @@ import { SelectField } from './controls.tsx'
  *   hatched, as locked); the hatched time of a triplet's rest; the other voices of the staff faint. When the rows do not
  *   fit at their smallest height they scroll inside the Grid, by the row names (the cells keep every touch).
  * - The loudness strip: the marks and the hairpins of the staff in the bar.
+ * - With the Bars tools open, a row of scissors above the beat numbers, one at the column line of every place in the
+ *   voice shown where a bar line can be added (task 9.2, the session's `barLineCuts`), with a dashed line down the rows.
+ *   A tap on one is `onCut`; the touch does not reach the Grid.
  *
  * The touches are this component's, with pointer capture on its box, so a gesture goes on while it is drawn again:
  *
@@ -69,6 +74,8 @@ export interface GridSurfaceProps {
   onQuiet: () => void
   /** A tap or a slide on the strip under no note. */
   onStripNowhere: () => void
+  /** A tap on the scissors before the note or rest `noteId` (the Bars tools). */
+  onCut: (noteId: string) => void
 }
 
 /** A gesture on the Grid, from the touch to the release. */
@@ -105,7 +112,7 @@ interface Ghost {
 const sameVoice = (a: VoiceRef, b: VoiceRef): boolean => a.part === b.part && a.staff === b.staff && a.voice === b.voice
 const voiceKey = (ref: VoiceRef): string => `${ref.staff}:${ref.voice}`
 
-export function GridSurface({ session, onTapNote, onTapEmpty, onQuiet, onStripNowhere }: GridSurfaceProps) {
+export function GridSurface({ session, onTapNote, onTapEmpty, onQuiet, onStripNowhere, onCut }: GridSurfaceProps) {
   const { i18n } = useShell()
   const { t } = i18n
   const box = useRef<HTMLDivElement>(null)
@@ -375,6 +382,9 @@ export function GridSurface({ session, onTapNote, onTapEmpty, onQuiet, onStripNo
 
   const width = size?.width ?? 0
   const rowsHeight = geo?.rowsHeight ?? 0
+  // With the Bars tools open, the scissors stand in a row above the beat numbers, at the column line of each place, and
+  // their dashed lines run down the rows (task 9.2).
+  const cuts = session.tools.value === 'bars' && geo ? cutAreas(cutXs(geo, session.barLineCuts.value), geo.gutter, width) : []
   const voiceChip =
     offered.length > 1 ? (
       <div class="editor-blocks-chip">
@@ -404,6 +414,11 @@ export function GridSurface({ session, onTapNote, onTapEmpty, onQuiet, onStripNo
       onPointerCancel={(event) => end(event, true)}
     >
       {voiceChip}
+      {session.tools.value === 'bars' ? (
+        <div class="editor-blocks-cutrow">
+          <Cuts cuts={cuts} session={session} onCut={onCut} />
+        </div>
+      ) : null}
       <svg class="editor-blocks-head" width={width} height={GRID_HEAD_PX} aria-hidden="true">
         {desc && geo
           ? desc.columns.map((c, k) =>
@@ -456,6 +471,9 @@ export function GridSurface({ session, onTapNote, onTapEmpty, onQuiet, onStripNo
                 if (ghost?.id === b.id) classes.push('is-dragged')
                 return drawBlock(b, blockRect(geo, b), classes.join(' '), i18n.noteName(b.pitch), b.id)
               })}
+              {cuts.map((c) => (
+                <line key={`cut-${c.noteId}`} class="editor-cut-line" x1={c.x} x2={c.x} y1={0} y2={rowsHeight} />
+              ))}
               {ghost
                 ? (() => {
                     const b = desc.blocks.find((x) => x.id === ghost.id)
