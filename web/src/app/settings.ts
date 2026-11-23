@@ -2,16 +2,18 @@ import { signal } from '@preact/signals'
 import type { ReadonlySignal, Signal } from '@preact/signals'
 import { DEFAULT_INSTRUMENT, instrumentById } from '../core/instruments/instruments.ts'
 import type { InstrumentId } from '../core/instruments/instruments.ts'
+import type { NoteNameStyle } from '../core/score/noteNames.ts'
 import { PlatformError } from '../platform/port.ts'
 import type { Files } from '../platform/port.ts'
 import { isJson, settleTemps } from './strayTemps.ts'
 
 /*
  * The general settings (practice-app design D4, D8, D13; spec `app-shell`, "General settings"):
- * the default instrument, the count-in (design D17) and whether
- * the scan hint was seen, kept in `settings.json` at the root of the app's files.
+ * the default instrument, the count-in (design D17), whether
+ * the scan hint was seen, the note names and the editor's view (change redesign-score-editor, D9), kept in
+ * `settings.json` at the root of the app's files.
  *
- *   { "defaultInstrument": "tenor-sax", "countIn": false, "scanHintSeen": false }
+ *   { "defaultInstrument": "tenor-sax", "countIn": false, "scanHintSeen": false, "noteNames": "letters", "editorView": "notes" }
  *
  * - Each setting is a signal. A setter changes the signal at once, so the app follows without a
  *   restart, and returns the promise of the save. Saves go through one queue, each writing the
@@ -24,7 +26,9 @@ import { isJson, settleTemps } from './strayTemps.ts'
  * - What is read is never trusted. A missing file, a file that is not JSON or a wrongly shaped one
  *   gives the defaults, and so does each value that is not valid: an instrument id that is unknown
  *   or hidden (none is, today) gives the tenor
- *   saxophone, and a count-in or scan hint flag that is not true gives false.
+ *   saxophone, a count-in or scan hint flag that is not true gives false, note names that are not
+ *   `solfege` give `letters` and an editor view that is not `grid` gives `notes` (so an older file without
+ *   them needs no migration).
  * - A file that is there but cannot be read (the platform reports anything other than "not found")
  *   is not replaced: the app runs with the defaults, the settings are `readOnly`, and every save
  *   rejects without writing, until a later start reads the file. The user's settings may still be
@@ -41,12 +45,20 @@ export interface SettingsData {
   countIn: boolean
   /** The hint before the first scan has been shown. */
   scanHintSeen: boolean
+  /** How notes are named everywhere in the app: C D E, or Do Re Mi. */
+  noteNames: NoteNameStyle
+  /** The editor's surface the user last chose: engraved notes or the grid. */
+  editorView: EditorView
 }
+
+export type EditorView = 'notes' | 'grid'
 
 export const DEFAULT_SETTINGS: Readonly<SettingsData> = {
   defaultInstrument: DEFAULT_INSTRUMENT.id,
   countIn: false,
   scanHintSeen: false,
+  noteNames: 'letters',
+  editorView: 'notes',
 }
 
 const SETTINGS_FILE = 'settings.json'
@@ -71,6 +83,8 @@ export function normaliseSettings(value: unknown): SettingsData {
     defaultInstrument: offeredInstrument(o.defaultInstrument) ?? DEFAULT_SETTINGS.defaultInstrument,
     countIn: o.countIn === true,
     scanHintSeen: o.scanHintSeen === true,
+    noteNames: o.noteNames === 'solfege' ? 'solfege' : 'letters',
+    editorView: o.editorView === 'grid' ? 'grid' : 'notes',
   }
 }
 
@@ -79,6 +93,8 @@ export class Settings {
   private readonly instrument: Signal<InstrumentId>
   private readonly count: Signal<boolean>
   private readonly hint: Signal<boolean>
+  private readonly names: Signal<NoteNameStyle>
+  private readonly view: Signal<EditorView>
   /** The end of the queue of saves; it never rejects. */
   private tail: Promise<unknown> = Promise.resolve()
   /**
@@ -94,6 +110,8 @@ export class Settings {
     this.instrument = signal(data.defaultInstrument)
     this.count = signal(data.countIn)
     this.hint = signal(data.scanHintSeen)
+    this.names = signal(data.noteNames)
+    this.view = signal(data.editorView)
   }
 
   /** The instrument every practice session starts with. */
@@ -110,12 +128,24 @@ export class Settings {
     return this.hint
   }
 
+  /** How notes are named: in the editor, in the warnings and in the instrument's range. */
+  get noteNames(): ReadonlySignal<NoteNameStyle> {
+    return this.names
+  }
+
+  /** The editor's surface: Notes or Grid. */
+  get editorView(): ReadonlySignal<EditorView> {
+    return this.view
+  }
+
   /** The current values, as they are stored. */
   snapshot(): SettingsData {
     return {
       defaultInstrument: this.instrument.value,
       countIn: this.count.value,
       scanHintSeen: this.hint.value,
+      noteNames: this.names.value,
+      editorView: this.view.value,
     }
   }
 
@@ -134,6 +164,16 @@ export class Settings {
 
   setScanHintSeen(seen: boolean = true): Promise<void> {
     this.hint.value = seen
+    return this.save()
+  }
+
+  setNoteNames(style: NoteNameStyle): Promise<void> {
+    this.names.value = style
+    return this.save()
+  }
+
+  setEditorView(view: EditorView): Promise<void> {
+    this.view.value = view
     return this.save()
   }
 

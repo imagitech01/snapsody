@@ -97,6 +97,20 @@ test('selection: a note and its bar, and a bar alone', async () => {
   assert.equal(editor.selection.value, null)
 })
 
+test('selection: the selected note is named in the note names of the settings, and follows a change at once (change redesign-score-editor, D9)', async () => {
+  const { editor, settings } = await setup()
+  const [a3, c5] = idsOf(editor, 1)
+  assert.equal(editor.selectedNoteName.value, '', 'no note selected')
+  editor.select(a3!)
+  assert.equal(editor.selectedNoteName.value, 'A3', 'letters until the user changes it')
+  await settings.setNoteNames('solfege')
+  assert.equal(editor.selectedNoteName.value, 'La3')
+  editor.select(c5!)
+  assert.equal(editor.selectedNoteName.value, 'Do5')
+  await settings.setNoteNames('letters')
+  assert.equal(editor.selectedNoteName.value, 'C5')
+})
+
 // ---- edits ---------------------------------------------------------------------------------
 
 test('edits: a pitch step with undo and redo; the score signal follows, and undoing every edit is clean again', async () => {

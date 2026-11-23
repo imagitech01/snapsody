@@ -3,7 +3,6 @@ import { DURATION_TYPES, addChordNote, deleteNote, insertNote, moveToOtherStaff,
 import type { AccidentalChoice, EditError } from '../../../core/score/edit.ts'
 import { barLineText } from './barLineText.ts'
 import type { NoteType, Score } from '../../../core/score/model.ts'
-import { pitchName } from '../../../core/score/repairs.ts'
 import { Stepper } from '../../components/index.ts'
 import { useShell } from '../../ShellContext.ts'
 import { Chip, SelectField } from './controls.tsx'
@@ -68,7 +67,7 @@ export function NoteTab({ session, run }: ToolProps) {
         <Stepper
           size="compact"
           label={t('note.pitch')}
-          value={note?.pitch ? pitchName(note.pitch) : rest ? t('note.rest') : '–'}
+          value={note?.pitch ? session.selectedNoteName.value : rest ? t('note.rest') : '–'}
           decrementLabel={t('note.pitch.down')}
           incrementLabel={t('note.pitch.up')}
           decrementDisabled={off || rest}

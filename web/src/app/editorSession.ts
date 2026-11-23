@@ -17,6 +17,7 @@ import type { ElementInfo, ElementRef } from '../core/score/elements.ts'
 import { isNote, isWedge } from '../core/score/model.ts'
 import type { Clef, KeySignature, MeasureItem, Note, Score, TimeSignature, VoiceRef, VoiceScore } from '../core/score/model.ts'
 import { allItemLists, barMap, barSpans, firstVoice, partIndex, placeOfNote, sameMusic, singleVoiceScore, voiceView } from '../core/score/model.ts'
+import { noteName } from '../core/score/noteNames.ts'
 import { midiNumber } from '../core/score/repairs.ts'
 import { dropLooseSlurEnds, parseMusicXml, serializeMusicXml } from '../core/score/musicxml.ts'
 import { computeScoreWarnings } from '../core/score/warnings.ts'
@@ -112,7 +113,8 @@ export type SaveResult =
 
 export interface EditorDeps {
   library: Pick<Library, 'load' | 'writeScore' | 'update' | 'readPractice'>
-  settings: Pick<Settings, 'defaultInstrument'>
+  /** The default instrument (warnings, preview) and the note names the selected note is named in (design D9). */
+  settings: Pick<Settings, 'defaultInstrument' | 'noteNames'>
   /** The router with the editor screen on top: the leave guard goes on it, and Save & practice goes back to the practice screen under it, or replaces it. */
   router?: Pick<Router, 'setLeaveGuard' | 'confirm' | 'replace' | 'pop' | 'stack'>
   /** The texts of the discard question. */
@@ -181,6 +183,8 @@ export class EditorSession {
   readonly selection: ReadonlySignal<Selection | null>
   /** The selected note, if a note is selected. */
   readonly selectedNote: ReadonlySignal<Note | undefined>
+  /** The selected note's pitch in the note names of the settings ("B♭3", "Si♭3"); empty for a rest or no note. It follows a change of the setting. */
+  readonly selectedNoteName: ReadonlySignal<string>
   /** The selected element other than a note, while it is in the score (change select-and-delete-elements). */
   readonly selectedElement: ReadonlySignal<SelectedElement | undefined>
   /** How the selected bar starts and ends (change edit-bar-lines), or undefined when no bar is selected. */
@@ -282,6 +286,10 @@ export class EditorSession {
     this.selectedNote = computed(() => {
       const id = this.chosen.value?.noteId
       return id ? findNote(this.score.value, id)?.note : undefined
+    })
+    this.selectedNoteName = computed(() => {
+      const pitch = this.selectedNote.value?.pitch
+      return pitch ? noteName(pitch, deps.settings.noteNames.value) : ''
     })
     this.selectionLabel = computed(() => {
       const id = this.chosen.value?.noteId

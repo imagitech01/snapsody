@@ -293,6 +293,14 @@
 .settings-section {
   margin-top: var(--gap-block);
 }
+/* A choice of two in a row (the note names): the title on the left, the pills on the right, each as wide as its text. */
+.settings-choice .segmented {
+  flex: none;
+}
+.settings-choice .segmented-option {
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+}
 
 /* ---- About, Credits and Licence (change paper-and-ink-and-about D6, D10) ------------------------ */
 

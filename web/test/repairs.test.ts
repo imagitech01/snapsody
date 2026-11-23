@@ -4,7 +4,8 @@ import { notesOf } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
 import { eq, frac } from '../src/core/score/rational.ts'
 import { TENOR_SAX } from '../src/core/instruments/instruments.ts'
-import { barLength, beatsText, inferTimeSignature, midiName, repairBarLengths } from '../src/core/score/repairs.ts'
+import { midiNoteName } from '../src/core/score/noteNames.ts'
+import { barLength, beatsText, inferTimeSignature, repairBarLengths } from '../src/core/score/repairs.ts'
 import { eighths, note, quarters, score } from './helpers.ts'
 import { firstLine, warningsFor } from './helpers.ts'
 
@@ -122,7 +123,7 @@ test('range: written A3 is flagged and keeps its pitch; B-flat3 to F-sharp6 are 
 })
 
 test('midi note names are spelled as the instrument ranges are given', () => {
-  assert.deepEqual([58, 90, 52, 96, 21, 108, 83, 55, 100, 54, 86].map(midiName), ['B♭3', 'F♯6', 'E3', 'C7', 'A0', 'C8', 'B5', 'G3', 'E7', 'F♯3', 'D6'])
+  assert.deepEqual([58, 90, 52, 96, 21, 108, 83, 55, 100, 54, 86].map((midi) => midiNoteName(midi, 'letters')), ['B♭3', 'F♯6', 'E3', 'C7', 'A0', 'C8', 'B5', 'G3', 'E7', 'F♯3', 'D6'])
 })
 
 test('beat counts read as mixed numbers', () => {

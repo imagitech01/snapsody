@@ -10,9 +10,9 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 
 ## 2. Note names
 
-- [ ] 2.1 Add `core/score/noteNames.ts` (`noteName`, `midiNoteName`, styles `letters` and `solfege`) and use it where `pitchName` and `midiName` are used, in `describeNote` (`ui/scoreView.ts`) and in `EditorSession.noteLabel`; remove those two from `repairs.ts`. Grep for other places that build a note name from `pitch.step` and route them through it. Verify (quick): new `web/test/noteNames.test.ts` proves C4 = Do4, B♭3 = Si♭3, F♯5 = Fa♯5 and every step of the scale in both styles.
-- [ ] 2.2 Add `noteNames` and `editorView` to `SettingsData`, with defaults in `DEFAULT_SETTINGS` and `normaliseSettings`, and setters on `Settings`. Verify (quick): `web/test/settings.test.ts` proves a `settings.json` without the fields loads with `letters` and `notes`, and that both are kept after a save and a load.
-- [ ] 2.3 Build the shown warning texts in `app/i18n/index.ts` with the style from the settings. Verify (quick): `web/test/i18n.test.ts` proves a range warning reads "Do6" and names the ends of the range with do re mi when the style is `solfege`.
+- [x] 2.1 Add `core/score/noteNames.ts` (`noteName`, `midiNoteName`, styles `letters` and `solfege`) and use it where `pitchName` and `midiName` are used, in `describeNote` (`ui/scoreView.ts`) and in `EditorSession.noteLabel`; remove those two from `repairs.ts`. Grep for other places that build a note name from `pitch.step` and route them through it. Verify (quick): new `web/test/noteNames.test.ts` proves C4 = Do4, B♭3 = Si♭3, F♯5 = Fa♯5 and every step of the scale in both styles.
+- [x] 2.2 Add `noteNames` and `editorView` to `SettingsData`, with defaults in `DEFAULT_SETTINGS` and `normaliseSettings`, and setters on `Settings`. Verify (quick): `web/test/settings.test.ts` proves a `settings.json` without the fields loads with `letters` and `notes`, and that both are kept after a save and a load.
+- [x] 2.3 Build the shown warning texts in `app/i18n/index.ts` with the style from the settings. Verify (quick): `web/test/i18n.test.ts` proves a range warning reads "Do6" and names the ends of the range with do re mi when the style is `solfege`.
 - [ ] 2.4 Add the "Note names" row (C D E | Do Re Mi) to the Settings screen between the default instrument and the count-in, with its English texts. Verify (browser): `web/test/ui/settings.test.ts` chooses "Do Re Mi", restarts the app and finds it chosen. Check the screen by eye at 360 × 780 (manual).
 
 ## 3. Score operations

@@ -1,6 +1,8 @@
 import { instrumentById } from '../../core/instruments/instruments.ts'
 import type { InstrumentFamily } from '../../core/instruments/instruments.ts'
-import { midiName } from '../../core/score/repairs.ts'
+import type { Pitch } from '../../core/score/model.ts'
+import { midiNoteName, noteName } from '../../core/score/noteNames.ts'
+import type { NoteNameStyle } from '../../core/score/noteNames.ts'
 import type { ScoreWarning } from '../../core/score/warnings.ts'
 import { en } from './en.ts'
 import type { MessageKey } from './en.ts'
@@ -23,6 +25,9 @@ export type { Params } from './format.ts'
  * - Dates and times use `Intl.RelativeTimeFormat` and `Intl.DateTimeFormat`, and the calendar days
  *   are the phone's local days. Every function that depends on the time takes `now`, for tests.
  * - Instrument names are not copied here: `core/instruments` has them.
+ * - Notes are named in the style of the settings (`createI18n({ noteNames: settings.noteNames })`, change
+ *   redesign-score-editor D9), read each time a text is built: a screen or a computed that builds one follows a
+ *   change of the setting at once. Without it, letters.
  */
 
 /** The BCP 47 locale everything is formatted with: dates as "18 Nov, 14:05". */
@@ -65,9 +70,13 @@ export interface I18n {
   instrumentName(id: string): string
   /** The label of an instrument family ("Woodwind"). */
   familyName(family: InstrumentFamily): string
+  /** A written pitch in the note names of the settings: "B♭3" or "Si♭3". */
+  noteName(pitch: Pitch): string
+  /** A MIDI note (an end of an instrument's range) in the note names of the settings: "F♯6" or "Fa♯6". */
+  midiNoteName(midi: number): string
   /**
-   * What a score warning says, built from its `kind`, `bar`, `pitch`,
-   * `instrument` (and the instrument's written range), `counted` and `time`. The warning's own English `message` is used
+   * What a score warning says, built from its `kind`, `bar`, `pitch` (`written`, named in the note names of the
+   * settings), `instrument` (and the instrument's written range, named the same way), `counted` and `time`. The warning's own English `message` is used
    * for a kind or a field this does not know.
    */
   warning(warning: ScoreWarning): string
@@ -88,8 +97,13 @@ const numbers = new Intl.NumberFormat(LOCALE, { useGrouping: false })
 const relative = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' })
 const dateTime = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 
+export interface I18nOptions {
+  /** The note names of the settings (`Settings.noteNames`); letters when not given. */
+  noteNames?: { readonly value: NoteNameStyle }
+}
+
 /** The translator. */
-export function createI18n(): I18n {
+export function createI18n(options: I18nOptions = {}): I18n {
   const t = ((key: MessageKey, params: Params = {}): string => fill(pickForm(en[key], params, plural), params, numbers)) as I18n['t']
 
   const relativeTime = (when: Date | string, now: Date = new Date()): string => {
@@ -106,6 +120,11 @@ export function createI18n(): I18n {
   const added: I18n['added'] = (when, now = new Date()) => sentence('library.summary.added', when, now)
 
   const instrumentName: I18n['instrumentName'] = (id) => instrumentById(id)?.name ?? id
+
+  // Read at each call, so a text built in a render or a computed follows the setting.
+  const style = (): NoteNameStyle => options.noteNames?.value ?? 'letters'
+  const pitchName: I18n['noteName'] = (pitch) => noteName(pitch, style())
+  const midiName: I18n['midiNoteName'] = (midi) => midiNoteName(midi, style())
 
   const warning: I18n['warning'] = (w) => {
     const bar = w.bar
@@ -128,7 +147,8 @@ export function createI18n(): I18n {
         const instrument = w.instrument === undefined ? undefined : instrumentById(w.instrument)
         if (bar === undefined || w.pitch === undefined || !instrument) return w.message
         const { low, high } = instrument.writtenRange
-        const params = { bar, pitch: w.pitch, instrument: instrumentName(instrument.id), low: midiName(low), high: midiName(high) }
+        const pitch = w.written ? pitchName(w.written) : w.pitch
+        const params = { bar, pitch, instrument: instrumentName(instrument.id), low: midiName(low), high: midiName(high) }
         return place ? t('warning.out-of-range.place', { ...params, place }) : t('warning.out-of-range', params)
       }
       case 'time-signature-inferred':
@@ -144,6 +164,8 @@ export function createI18n(): I18n {
     t,
     instrumentName,
     familyName: (family) => t(`family.${family}`),
+    noteName: pitchName,
+    midiNoteName: midiName,
     warning,
     relativeTime,
     practised,

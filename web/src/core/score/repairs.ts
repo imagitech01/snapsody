@@ -22,19 +22,6 @@ export function midiNumber(p: Pitch): number {
   return 12 * (p.octave + 1) + (STEP_SEMITONES[p.step] ?? 0) + (p.alter ?? 0)
 }
 
-const SEMITONE_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B']
-
-/** A MIDI note as a person reads it: 58 is "B♭3" and 90 is "F♯6" (the spelling the instrument ranges are given in). */
-export function midiName(midi: number): string {
-  return `${SEMITONE_NAMES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`
-}
-
-export function pitchName(p: Pitch): string {
-  const alter = p.alter ?? 0
-  const sign = alter === 0 ? '' : alter > 0 ? '♯'.repeat(Math.round(alter)) : '♭'.repeat(Math.round(-alter))
-  return `${p.step}${sign}${p.octave}`
-}
-
 /** Total time of a bar: grace notes and chord members do not advance time. */
 export function barLength(measure: Measure): Frac {
   let total = ZERO

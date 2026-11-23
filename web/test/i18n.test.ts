@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { signal } from '@preact/signals'
 import { createI18n } from '../src/app/i18n/index.ts'
 import type { I18n, MessageKey, PluralForms } from '../src/app/i18n/index.ts'
 import { en } from '../src/app/i18n/en.ts'
 import { calendarDaysBetween, capitalise, fill, pickForm, relativeParts } from '../src/app/i18n/format.ts'
-import { ALTO_SAX, INSTRUMENTS, PIANO, TENOR_SAX } from '../src/core/instruments/instruments.ts'
+import { ALTO_SAX, GUITAR, INSTRUMENTS, PIANO, TENOR_SAX } from '../src/core/instruments/instruments.ts'
 import type { InstrumentFamily } from '../src/core/instruments/instruments.ts'
 import { parseMusicXml } from '../src/core/score/musicxml.ts'
+import type { NoteNameStyle } from '../src/core/score/noteNames.ts'
 import { prepareRecognisedScore } from '../src/core/score/prepare.ts'
 import type { ScoreWarning, ScoreWarningKind } from '../src/core/score/warnings.ts'
 import { eighths, note, quarters, score } from './helpers.ts'
@@ -205,6 +207,24 @@ test('warnings: the instrument in the warning decides the name and the range', (
   const i18n = createI18n()
   assert.match(i18n.warning(warningsOf(xml, ALTO_SAX)[0]!), /\(Alto saxophone, B♭3–F♯6\)/)
   assert.deepEqual(warningsOf(xml, PIANO), [])
+})
+
+test('warnings: with do re mi, a range warning names the note and the ends of the range in do re mi (change redesign-score-editor, D9)', () => {
+  // C6 is above the guitar's written range (E3–B5).
+  const [warning] = warningsOf(score([note({ step: 'C', octave: 6, type: 'whole' })], [4, 4]), GUITAR)
+  assert.equal(warning!.kind, 'out-of-range')
+  const style = signal<NoteNameStyle>('solfege')
+  const i18n = createI18n({ noteNames: style })
+  assert.equal(i18n.warning(warning!), 'Bar 1: Do6 is outside the written range of the instrument (Guitar, Mi3–Si5); it may be a misread.')
+  assert.match(warning!.message, /C6 is outside the written range of the instrument \(Guitar, E3–B5\)/, 'the English message keeps letters')
+  // The style is read each time: a change of the setting shows at once.
+  style.value = 'letters'
+  assert.equal(i18n.warning(warning!), 'Bar 1: C6 is outside the written range of the instrument (Guitar, E3–B5); it may be a misread.')
+  assert.equal(createI18n().warning(warning!), i18n.warning(warning!), 'letters without the setting')
+  // A flat, and the saxophone's range with its accidentals.
+  const [low] = warningsOf(score([note({ step: 'A', alter: -1, octave: 3, type: 'whole' })], [4, 4]))
+  assert.equal(createI18n({ noteNames: signal<NoteNameStyle>('solfege') }).warning(low!), 'Bar 1: La♭3 is outside the written range of the instrument (Tenor saxophone, Si♭3–Fa♯6); it may be a misread.')
+  assert.equal(createI18n({ noteNames: signal<NoteNameStyle>('solfege') }).noteName({ step: 'E', octave: 4 }), 'Mi4')
 })
 
 test('warnings: a bar that does not add up, and the two time-signature warnings', () => {

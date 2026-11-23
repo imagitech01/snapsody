@@ -407,9 +407,12 @@ export const en = {
   'key.sharps': { one: '{count} sharp', other: '{count} sharps' },
   'key.flats': { one: '{count} flat', other: '{count} flats' },
 
-  // ---- Settings (frame 07, specs `app-shell`, `instruments`) --------------------------------
+  // ---- Settings (frame 07, specs `app-shell`, `instruments`; note names: change redesign-score-editor D9) ---
   'settings.title': 'Settings',
   'settings.instrument': 'Default instrument',
+  'settings.noteNames': 'Note names',
+  'settings.noteNames.letters': 'C D E',
+  'settings.noteNames.solfege': 'Do Re Mi',
   'settings.subtitle': 'A familiar sound makes learning easier.',
   'settings.rate': 'Rate on Google Play',
   'settings.about': 'About Snapsody',

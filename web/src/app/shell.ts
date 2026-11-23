@@ -24,7 +24,7 @@ import type { Settings } from './settings.ts'
  *   2. `library.sweep()`: it settles what an interrupted run left in `pieces/` and MUST finish before
  *      the first `list()` (design D4: a piece whose `piece.json` only survives as a temp file is
  *      recovered at start). A sweep that fails is not the end of the app: the list is read anyway.
- *   3. `createI18n()`: the translator.
+ *   3. `createI18n()`: the translator, naming notes as the settings say.
  *   4. The library view and the home (`createLibraryView`, `createHome`), over the library.
  *   5. The router, and the back button handed to it (`connectBackButton`).
  *   Then the list is read once (`home.refresh()`), so the first screen is drawn with the pieces in it.
@@ -90,7 +90,7 @@ export async function startShell(platform: Platform): Promise<Shell> {
     // The list below is read anyway; what the sweep could not clean up is tried again at the next start.
   }
 
-  const i18n = createI18n()
+  const i18n = createI18n({ noteNames: settings.noteNames })
   const view = createLibraryView({ library, i18n })
   const home = createHome({ view, library, i18n })
   const router = createRouter('practice')

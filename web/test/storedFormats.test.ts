@@ -147,7 +147,7 @@ test('stored formats: v2 holds the piece the app wrote, with every field read ba
   assert.deepEqual(await library.readPractice(info.id), { bar: 10, tempo: 72, loop: { start: 9, end: 12 }, loopRest: 1, metronome: true })
   const settings = await loadSettings(files)
   // Its settings.json has no countIn yet (off), and still has a pitchReference from before design D19 and a language "nl" from before the app was English only: both ignored.
-  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: true })
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: true, noteNames: 'letters', editorView: 'notes' })
 })
 
 test('stored formats: a piece saved before dynamics, tempo marks and words had ids loads, and gets unique ones (change select-and-delete-elements, design D1)', async () => {

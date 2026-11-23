@@ -1,9 +1,10 @@
 import type { Instrument, InstrumentId } from '../instruments/instruments.ts'
 import { instrumentOfPart } from '../instruments/instruments.ts'
-import type { Score, VoiceScore } from './model.ts'
+import type { Pitch, Score, VoiceScore } from './model.ts'
 import { isNote, partIndex, voiceView, voices } from './model.ts'
 import { cmp, eq, frac, mul } from './rational.ts'
-import { barLength, beatsText, effectiveTimes, expectedLength, hasNotes, midiName, midiNumber, pitchName } from './repairs.ts'
+import { midiNoteName, noteName } from './noteNames.ts'
+import { barLength, beatsText, effectiveTimes, expectedLength, hasNotes, midiNumber } from './repairs.ts'
 
 /*
  * Warnings: what the user should check in a score (practice-app design D4, specs `score-recognition`
@@ -30,6 +31,8 @@ export interface ScoreWarning {
   noteId?: string
   /** For out-of-range: the written pitch as read (for example "A3") and the instrument it is outside of. */
   pitch?: string
+  /** For out-of-range: the same written pitch, so the shown text can name it in the user's note names (design D9). */
+  written?: Pitch
   instrument?: InstrumentId
   /**
    * For bar-length: what the bar adds up to, counted in the time signature's beat unit, as a person
@@ -49,7 +52,7 @@ export interface ScoreWarning {
   hand?: 'right' | 'left'
   /** The voice by number from 1, when its staff has more than one. The text names it. */
   voiceNumber?: number
-  /** English text for the UI; the app's i18n can build its own from the fields above. */
+  /** English text, notes named with letters (for logs and tests); the app's i18n builds the shown text from the fields above. */
   message: string
 }
 
@@ -103,15 +106,16 @@ function voiceWarnings(score: VoiceScore, instrument: Instrument | undefined, la
       if (!isNote(item) || item.rest || !item.pitch) continue
       const midi = midiNumber(item.pitch)
       if (midi >= low && midi <= high) continue
-      const pitch = pitchName(item.pitch)
+      const pitch = noteName(item.pitch, 'letters')
       found.push({
         kind: 'out-of-range',
         bar: m.number,
         noteId: item.id,
         pitch,
+        written: { ...item.pitch },
         instrument: instrument.id,
         ...placeFields(where),
-        message: `${barPlace(m.number, where)}: ${pitch} is outside the written range of the instrument (${instrument.name}, ${midiName(low)}–${midiName(high)}); it may be a misread`,
+        message: `${barPlace(m.number, where)}: ${pitch} is outside the written range of the instrument (${instrument.name}, ${midiNoteName(low, 'letters')}–${midiNoteName(high, 'letters')}); it may be a misread`,
       })
     }
     return found

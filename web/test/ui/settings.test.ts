@@ -25,7 +25,9 @@ test('settings: the default instrument is one line that opens a sheet with all i
     const { page } = app
     await tab(page, 'Settings').click()
     await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
-    assert.equal(await page.getByRole('radio').count(), 0, 'the lists are behind their lines')
+    assert.equal(await page.getByRole('radiogroup', { name: 'Default instrument' }).count(), 0, 'the list is behind its line')
+    assert.equal(await page.getByRole('radiogroup').count(), 1, 'the only choice on the screen is the note names')
+    assert.equal(await page.getByRole('radio').count(), 2)
     assert.equal(await page.getByText('Pitch reference').count(), 0, 'no pitch reference any more')
     assert.match(await textOf(line(page, 'Default instrument')), /Tenor saxophone/, 'until the user chooses, the tenor saxophone')
 
@@ -57,7 +59,7 @@ test('settings: the default instrument is one line that opens a sheet with all i
     await page.getByRole('radio', { name: /^B♭ clarinet/ }).click()
     await page.getByRole('dialog').waitFor({ state: 'detached' })
     assert.match(await textOf(line(page, 'Default instrument')), /B♭ clarinet/)
-    assert.deepEqual(await saved(app), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: false })
+    assert.deepEqual(await saved(app), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: false, noteNames: 'letters', editorView: 'notes' })
     assert.ok(!('pitchReference' in ((await saved(app)) as object)), 'the pitch reference is not written')
     // It is what every practice session starts with: the setting is read from the shell, no restart needed.
     assert.equal(await app.page.evaluate(() => window.__test!.shell.settings.defaultInstrument.value), 'clarinet')
@@ -102,6 +104,32 @@ test('settings: they are read at start and kept across a reload (the committed s
     assert.equal(stored.defaultInstrument, 'alto-sax')
     assert.ok(!('pitchReference' in stored), 'the old pitch reference is dropped by the next save')
     assert.ok(!('language' in stored), 'the old language is dropped by the next save')
+  })
+})
+
+test('settings: the note names are a choice of C D E and Do Re Mi between the default instrument and the count-in; Do Re Mi is kept after a restart (change redesign-score-editor D9)', async () => {
+  await withApp({ seed: '' }, async (app) => {
+    const { page } = app
+    await tab(page, 'Settings').click()
+    await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
+    const order = await page.locator('.screen-body').innerText()
+    assert.ok(order.indexOf('Default instrument') < order.indexOf('Note names') && order.indexOf('Note names') < order.indexOf('Count-in'), 'between the default instrument and the count-in')
+    assert.deepEqual(await page.getByRole('radiogroup', { name: 'Note names' }).getByRole('radio').allTextContents(), ['C D E', 'Do Re Mi'])
+    assert.equal(await choice(page, 'Note names', 'C D E').getAttribute('aria-checked'), 'true', 'letters until the user changes it')
+
+    await choice(page, 'Note names', 'Do Re Mi').click()
+    assert.equal(await choice(page, 'Note names', 'Do Re Mi').getAttribute('aria-checked'), 'true')
+    // It takes effect without a restart: the shell's settings and its texts follow at once.
+    assert.equal(await page.evaluate(() => window.__test!.shell.settings.noteNames.value), 'solfege')
+    assert.equal(await page.evaluate(() => window.__test!.shell.i18n.midiNoteName(58)), 'Si♭3')
+    for (let i = 0; i < 50 && ((await saved(app)) as { noteNames?: string } | undefined)?.noteNames !== 'solfege'; i++) await page.waitForTimeout(20)
+    assert.equal(((await saved(app)) as Record<string, unknown>).noteNames, 'solfege')
+
+    await app.reload()
+    await tab(page, 'Settings').click()
+    await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor()
+    assert.equal(await choice(page, 'Note names', 'Do Re Mi').getAttribute('aria-checked'), 'true', 'still chosen after a restart')
+    assert.equal(await choice(page, 'Note names', 'C D E').getAttribute('aria-checked'), 'false')
   })
 })
 

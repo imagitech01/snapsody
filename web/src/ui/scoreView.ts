@@ -5,6 +5,8 @@ import { renderScore } from "../core/score/render.ts";
 import { mapElements, sameElement } from "../core/score/elements.ts";
 import type { ElementRef, SvgTree } from "../core/score/elements.ts";
 import { linesOf } from "../core/score/lines.ts";
+import { noteName } from "../core/score/noteNames.ts";
+import type { NoteNameStyle } from "../core/score/noteNames.ts";
 import type { LineBars } from "../core/score/lines.ts";
 
 /**
@@ -21,7 +23,7 @@ export interface TappedNote {
   id: string;
   bar: string;
   barIndex: number;
-  /** "G4", "B♭4", "rest". */
+  /** "G4", "B♭4" (or "Sol4", "Si♭4" in do re mi), "rest". */
   pitch: string;
   /** Printed value, e.g. "quarter" or "eighth.", and the exact length as a fraction of a whole note. */
   duration: string;
@@ -109,13 +111,9 @@ const DOM_TREE: SvgTree<Element> = {
   },
 };
 
-export function describeNote(info: NoteInfo): TappedNote {
+export function describeNote(info: NoteInfo, style: NoteNameStyle = "letters"): TappedNote {
   const { note } = info;
-  let pitch = "rest";
-  if (note.pitch) {
-    const alter = note.pitch.alter ?? 0;
-    pitch = `${note.pitch.step}${alter > 0 ? "♯".repeat(alter) : alter < 0 ? "♭".repeat(-alter) : ""}${note.pitch.octave}`;
-  }
+  const pitch = note.pitch ? noteName(note.pitch, style) : "rest";
   return {
     id: note.id,
     bar: info.bar,

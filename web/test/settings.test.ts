@@ -17,7 +17,7 @@ test('defaults: tenor saxophone, no count-in, the scan hint not seen', async () 
   assert.equal(settings.defaultInstrument.value, 'tenor-sax')
   assert.equal(settings.scanHintSeen.value, false)
   assert.equal(settings.countIn.value, false)
-  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'tenor-sax', countIn: false, scanHintSeen: false })
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'tenor-sax', countIn: false, scanHintSeen: false, noteNames: 'letters', editorView: 'notes' })
   assert.deepEqual(settings.snapshot(), DEFAULT_SETTINGS)
   assert.deepEqual(files.paths(), [], 'loading writes nothing')
 })
@@ -29,7 +29,7 @@ test('a value survives a reload, each setting and all together', async () => {
   await settings.setCountIn(true)
   await settings.setScanHintSeen()
   assert.deepEqual(files.paths(), ['settings.json'], 'one file, no temp left over')
-  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true })
+  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true, noteNames: 'letters', editorView: 'notes' })
 
   const reloaded = await loadSettings(files)
   assert.equal(reloaded.defaultInstrument.value, 'clarinet')
@@ -40,7 +40,7 @@ test('a value survives a reload, each setting and all together', async () => {
   await reloaded.setScanHintSeen(false)
   await reloaded.setCountIn(false)
   const again = await loadSettings(files)
-  assert.deepEqual(again.snapshot(), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: false })
+  assert.deepEqual(again.snapshot(), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: false, noteNames: 'letters', editorView: 'notes' })
 })
 
 test('a change takes effect at once, before it is saved', async () => {
@@ -61,7 +61,7 @@ test('the pitch reference is gone: an old file that has one loads, and it is not
   const { files } = createFakePlatform()
   files.seed('settings.json', JSON.stringify({ defaultInstrument: 'clarinet', pitchReference: 442, countIn: true, language: 'nl', scanHintSeen: true }))
   const settings = await loadSettings(files)
-  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true })
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true, noteNames: 'letters', editorView: 'notes' })
   assert.ok(!('pitchReference' in settings.snapshot()))
   assert.ok(!('pitchReference' in normaliseSettings({ pitchReference: 442 })))
   await settings.setCountIn(false)
@@ -72,10 +72,10 @@ test('the language is gone: an old file that has one loads, and it is not writte
   const { files } = createFakePlatform()
   files.seed('settings.json', JSON.stringify({ defaultInstrument: 'clarinet', countIn: true, language: 'nl', scanHintSeen: true }))
   const settings = await loadSettings(files)
-  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true })
+  assert.deepEqual(settings.snapshot(), { defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true, noteNames: 'letters', editorView: 'notes' })
   assert.ok(!('language' in normaliseSettings({ language: 'nl' })))
   await settings.setCountIn(false)
-  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: true }, 'the next save has no language')
+  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'clarinet', countIn: false, scanHintSeen: true, noteNames: 'letters', editorView: 'notes' }, 'the next save has no language')
 })
 
 test('a missing, broken or wrongly shaped file gives the defaults and the app starts', async () => {
@@ -110,9 +110,58 @@ test('other invalid values fall back one by one: count-in and the hint flag', ()
     defaultInstrument: 'piano',
     countIn: false,
     scanHintSeen: false,
+    noteNames: 'letters',
+    editorView: 'notes',
   })
   assert.equal(normaliseSettings({ scanHintSeen: true }).scanHintSeen, true)
   assert.equal(normaliseSettings({ countIn: true }).countIn, true)
+})
+
+// The note names and the editor's view (change redesign-score-editor, D9; spec `app-shell` "Note names").
+
+test('note names and editor view: a settings.json without them loads with letters and notes', async () => {
+  const { files } = createFakePlatform()
+  files.seed('settings.json', JSON.stringify({ defaultInstrument: 'clarinet', countIn: true, scanHintSeen: true }))
+  const settings = await loadSettings(files)
+  assert.equal(settings.noteNames.value, 'letters')
+  assert.equal(settings.editorView.value, 'notes')
+  assert.equal(settings.defaultInstrument.value, 'clarinet', 'the other values stay')
+  assert.equal(settings.readOnly, false)
+  assert.deepEqual([DEFAULT_SETTINGS.noteNames, DEFAULT_SETTINGS.editorView], ['letters', 'notes'])
+})
+
+test('note names and editor view: both are kept after a save and a load', async () => {
+  const { files } = createFakePlatform()
+  const settings = await loadSettings(files)
+  await settings.setNoteNames('solfege')
+  await settings.setEditorView('grid')
+  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'tenor-sax', countIn: false, scanHintSeen: false, noteNames: 'solfege', editorView: 'grid' })
+  const reloaded = await loadSettings(files)
+  assert.equal(reloaded.noteNames.value, 'solfege')
+  assert.equal(reloaded.editorView.value, 'grid')
+
+  // and back
+  await reloaded.setNoteNames('letters')
+  await reloaded.setEditorView('notes')
+  const again = await loadSettings(files)
+  assert.deepEqual([again.noteNames.value, again.editorView.value], ['letters', 'notes'])
+})
+
+test('note names and editor view: a change takes effect at once, and a value that is not valid gives the default', async () => {
+  const { files } = createFakePlatform()
+  const settings = await loadSettings(files)
+  const seen: string[] = []
+  const stop = effect(() => {
+    seen.push(settings.noteNames.value)
+  })
+  const saved = settings.setNoteNames('solfege')
+  assert.deepEqual(seen, ['letters', 'solfege'], 'the signal moved before the write finished')
+  await saved
+  stop()
+  for (const value of ['Solfege', 'do re mi', '', 7, null, {}]) {
+    const read = normaliseSettings({ noteNames: value, editorView: value })
+    assert.deepEqual([read.noteNames, read.editorView], ['letters', 'notes'], JSON.stringify(value))
+  }
 })
 
 test('setting an instrument the app does not have is refused and changes nothing', async () => {
@@ -236,7 +285,7 @@ test('a save that fails where the store can still see it leaves the old file and
   assert.equal(JSON.parse(files.text('settings.json')!).defaultInstrument, 'clarinet')
   // the next change saves everything, including the value whose save failed
   await settings.setScanHintSeen()
-  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'guitar', countIn: false, scanHintSeen: true })
+  assert.deepEqual(JSON.parse(files.text('settings.json')!), { defaultInstrument: 'guitar', countIn: false, scanHintSeen: true, noteNames: 'letters', editorView: 'notes' })
 })
 
 test('changes made one after the other without waiting are saved in order and the last one stays', async () => {
