@@ -1,5 +1,6 @@
 import { instrumentOfPart } from '../instruments/instruments.ts'
 import type { Instrument, InstrumentId } from '../instruments/instruments.ts'
+import { endingsOf } from '../score/endings.ts'
 import type { Barline, Measure, Note, Pitch, Score, TimeSignature, VoiceRef, VoiceScore, WedgeItem } from '../score/model.ts'
 import { isNote, isWedge, voiceView, voices } from '../score/model.ts'
 import type { Frac } from '../score/rational.ts'
@@ -238,35 +239,8 @@ export function concertMidi(written: number, instrument: Pick<Instrument, 'trans
 
 // --- measure order: repeats and endings ---
 
-/** Ending numbers of an `<ending number="1, 2">` (also "1-3"). */
-export function parseEndingNumbers(text: string): number[] {
-  const out: number[] = []
-  for (const part of text.split(/[,\s]+/)) {
-    if (!part) continue
-    const range = /^(\d+)\s*[-–]\s*(\d+)$/.exec(part)
-    if (range) {
-      for (let k = Number(range[1]); k <= Number(range[2]); k++) out.push(k)
-    } else if (/^\d+$/.test(part)) {
-      out.push(Number(part))
-    }
-  }
-  return out
-}
-
-/** For each measure, the ending numbers it belongs to, or null when it is in no ending. */
-function endingsOf(measures: Measure[]): (number[] | null)[] {
-  const result: (number[] | null)[] = []
-  let current: number[] | null = null
-  measures.forEach((m, i) => {
-    const starts = m.leftBarline?.ending ?? (m.rightBarline?.ending?.type === 'start' ? m.rightBarline.ending : undefined)
-    if (starts?.type === 'start') current = parseEndingNumbers(starts.number)
-    else if (current && m.leftBarline?.repeat === 'forward') current = null
-    result.push(current)
-    const closes = m.rightBarline?.ending
-    if (closes && (closes.type === 'stop' || closes.type === 'discontinue')) current = null
-  })
-  return result
-}
+// Which bars lie in which ending is a view of the bar lines (`core/score/endings.ts`), shared with the editor.
+export { parseEndingNumbers } from '../score/endings.ts'
 
 export interface PlayedBar {
   barIndex: number

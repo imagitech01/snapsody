@@ -15,10 +15,10 @@ import { EditSession } from '../core/score/editSession.ts'
 import { describeElement } from '../core/score/elements.ts'
 import type { ElementInfo, ElementRef } from '../core/score/elements.ts'
 import { isNote, isWedge } from '../core/score/model.ts'
-import type { Clef, KeySignature, Note, Score, TimeSignature, VoiceRef, VoiceScore } from '../core/score/model.ts'
+import type { Clef, KeySignature, MeasureItem, Note, Score, TimeSignature, VoiceRef, VoiceScore } from '../core/score/model.ts'
 import { allItemLists, barMap, barSpans, firstVoice, partIndex, placeOfNote, sameMusic, singleVoiceScore, voiceView } from '../core/score/model.ts'
 import { midiNumber } from '../core/score/repairs.ts'
-import { parseMusicXml, serializeMusicXml } from '../core/score/musicxml.ts'
+import { dropLooseSlurEnds, parseMusicXml, serializeMusicXml } from '../core/score/musicxml.ts'
 import { computeScoreWarnings } from '../core/score/warnings.ts'
 import type { ScoreWarning } from '../core/score/warnings.ts'
 import type { I18n } from './i18n/index.ts'
@@ -745,6 +745,21 @@ function sameWarning(a: ScoreWarning, b: ScoreWarning): boolean {
  * that is not there gives a score without bars.
  */
 export function barExcerpt(score: Score, index: number): Score {
+  return excerptOf(score, index, false)
+}
+
+/**
+ * The bar at [index] as a score of its own, for the large bar of the editor (change redesign-score-editor, D2): as
+ * `barExcerpt`, but with the bar's own bar lines and endings, so that a bar line can be tapped and an ending's
+ * bracket is seen (Verovio 6.4 draws it only when the ending starts and ends in this bar); and without what reaches outside the bar, which cannot be drawn from one bar: hairpins, and the
+ * slur and tie ends of notes whose other end is in another bar. The score is not changed; a bar that is not there
+ * gives a score without bars.
+ */
+export function barForEditing(score: Score, index: number): Score {
+  return excerptOf(score, index, true)
+}
+
+function excerptOf(score: Score, index: number, forEditing: boolean): Score {
   const parts = score.parts.map((p) => ({ ...p }))
   const source = score.bars[index]
   if (!source) return { parts, bars: [] }
@@ -753,8 +768,10 @@ export function barExcerpt(score: Score, index: number): Score {
   let time: TimeSignature | undefined
   for (const b of before) time = b.time ?? time
   if (time) bar.time = { ...time }
-  delete bar.leftBarline
-  delete bar.rightBarline
+  if (!forEditing) {
+    delete bar.leftBarline
+    delete bar.rightBarline
+  }
   delete bar.newSystem
   bar.number = '1'
   const ids = new Set(allItemLists({ parts, bars: [bar] }).flatMap((items) => items.filter(isNote).map((n) => n.id)))
@@ -768,11 +785,36 @@ export function barExcerpt(score: Score, index: number): Score {
       for (const b of before) clef = b.parts[pi]?.staves[si]?.clef ?? clef
       if (clef) sb.clef = { ...clef }
       sb.voices = sb.voices.map((items) => items.filter((item) => !isWedge(item) || (ids.has(item.start) && ids.has(item.stop))))
+      if (forEditing) sb.voices.forEach(dropTiesOutside)
     })
   })
   const excerpt: Score = { parts, bars: [bar] }
   if (score.title !== undefined) excerpt.title = score.title
+  // In one bar, a slur whose other end is in another bar has one end only.
+  if (forEditing) dropLooseSlurEnds(excerpt)
   return excerpt
+}
+
+/**
+ * Takes the tie ends off the notes of one voice's bar whose other end is in another bar: a tie joins a note to the
+ * next chord or note of the voice (grace notes do not count), so a tie start in the bar's last one goes to the next
+ * bar and a tie stop in its first one comes from the bar before.
+ */
+function dropTiesOutside(items: MeasureItem[]): void {
+  const notes = items.filter(isNote)
+  // For each note, the main note of its chord: the note itself, or the note before it that the chord hangs on.
+  const heads = new Map<Note, Note>()
+  let head: Note | undefined
+  for (const n of notes) {
+    if (!n.chord || !head) head = n
+    heads.set(n, head)
+  }
+  const mains = notes.filter((n) => !n.grace && !n.chord)
+  for (const n of notes) {
+    const at = notes.indexOf(heads.get(n)!)
+    if (n.tieStart && !mains.some((m) => notes.indexOf(m) > at)) delete n.tieStart
+    if (n.tieStop && !mains.some((m) => notes.indexOf(m) < at)) delete n.tieStop
+  }
 }
 
 /** What Practice tools remember for the piece (practice.json) that the editor needs: your part, what plays along, and the piece's own instrument. */

@@ -216,7 +216,7 @@ The mock was checked at 400 × 880 with one staff. The app is checked at 360 × 
 - [The slide for a slur and the drag for a pitch are told apart by the first 8 px] → The rule is one constant; it is checked by hand on a real phone, and the two-tap way stays for every span.
 - [Verovio renders the bar again after every edit, which may flicker] → The island already swaps the SVG in one step; the first task measures the time.
 - [Grid looks like it can do everything, and then a triplet does not move] → Locked blocks look different (hatched) and say where to edit them.
-- [Suggested repairs offer a change that adds up but is not what the book says] → At most three, each named, one Undo away; the photo line is right above.
+- [Suggested repairs offer a change that adds up but is not what the book says] → At most four (D6), each named, one Undo away; the photo line is right above.
 - [Deleting a bar is a large change for one tap] → It is one undo step, and Delete sits apart from the other bar keys, in the warning colour.
 - [The editor journey test (`web/test/ui/edit.test.ts`, about 1200 lines) is tied to the old screen] → It is rewritten group by group with the screen, not at the end; the tests of behaviour that does not change (naming, saving, conflicts, parts) keep their bodies and get new selectors.
 - [The photo line may again be judged too small] → It is the last group and independent (D10).

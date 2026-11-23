@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { effect, signal } from '@preact/signals'
-import { barExcerpt, openEditor } from '../src/app/editorSession.ts'
+import { barExcerpt, barForEditing, openEditor } from '../src/app/editorSession.ts'
 import type { EditorDeps, EditorSession } from '../src/app/editorSession.ts'
 import { createI18n } from '../src/app/i18n/index.ts'
 import { DEFAULT_PRACTICE, createLibrary } from '../src/app/library.ts'
@@ -10,8 +10,8 @@ import { loadSettings } from '../src/app/settings.ts'
 import { preparePages } from '../src/core/pages/pages.ts'
 import type { AudioBackend } from '../src/core/playback/player.ts'
 import type { NoteOnSpec, TimerApi } from '../src/core/playback/scheduler.ts'
-import { addChordNote, addSlur, deleteElement, deleteNote, insertNote, joinBars, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
-import { notesOf, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
+import { addChordNote, addSlur, addTie, addWedge, deleteElement, deleteNote, insertNote, joinBars, ownerOf, setBarEnd, setBarStart, setClef, setDuration, setKey, setRepeatTimes, splitBar, stepPitch, toggleStaccato } from '../src/core/score/edit.ts'
+import { isWedge, notesOf, singleVoiceScore, voiceView } from '../src/core/score/model.ts'
 import type { MeasureItem } from '../src/core/score/model.ts'
 import type { Score } from '../src/core/score/model.ts'
 import { parseMusicXml, serializeMusicXml } from '../src/core/score/musicxml.ts'
@@ -482,6 +482,52 @@ test('preview: without a practice tempo the score decides; the excerpt drops rep
   assert.deepEqual(firstLine(excerpt).measures[0]!.time, { beats: 3, beatType: 4 })
   assert.deepEqual(s, before)
   assert.deepEqual(barExcerpt(s, 9).bars, [], 'no bar 10: a score without bars')
+})
+
+test('bar for editing: the bar keeps its own bar lines and ending, and leaves out the hairpin, slur and tie into the next bar', () => {
+  // 4/4: bar 1 G G G E, bar 2 E E E E, bar 3 E F F F; bar 2 is a first ending that ends with a backward repeat.
+  const s = parseMusicXml(score([quarters(3) + quarters(1, 'E'), quarters(4, 'E'), quarters(1, 'E') + quarters(3, 'F')], [4, 4]))
+  const ids = firstLine(s).measures.map((m) => notesOf(m).map((n) => n.id))
+  const [b1, b2, b3] = [ids[0]!, ids[1]!, ids[2]!]
+  setAttr(s, 1, 'leftBarline', { ending: { number: '1', type: 'start' } })
+  setAttr(s, 1, 'rightBarline', { repeat: 'backward', ending: { number: '1', type: 'stop' } })
+  addSlur(s, b2[0]!, b2[1]!) // inside the bar
+  addSlur(s, b2[2]!, b3[1]!) // into the next bar
+  addSlur(s, b1[1]!, b2[0]!) // from the bar before
+  addWedge(s, 'crescendo', b2[0]!, b2[2]!) // inside the bar
+  addWedge(s, 'diminuendo', b2[3]!, b3[2]!) // into the next bar
+  addTie(s, b1[3]!, b2[0]!) // from the bar before
+  addTie(s, b2[3]!, b3[0]!) // into the next bar
+  addTie(s, b2[1]!, b2[2]!) // inside the bar
+  const before = structuredClone(s)
+
+  const excerpt = barForEditing(s, 1)
+  assert.equal(excerpt.bars.length, 1)
+  const bar = firstLine(excerpt).measures[0]!
+  assert.deepEqual(bar.leftBarline, { ending: { number: '1', type: 'start' } }, 'the ending starts here')
+  assert.deepEqual(bar.rightBarline, { repeat: 'backward', ending: { number: '1', type: 'stop' } }, 'the repeat and the end of the ending')
+  assert.deepEqual(bar.time, { beats: 4, beatType: 4 }, 'the time in force')
+  assert.deepEqual(bar.clef, { sign: 'G', line: 2 }, 'the clef in force')
+  const notes = notesOf(bar)
+  assert.deepEqual(notes.map((n) => n.id), b2)
+  assert.deepEqual(notes.map((n) => n.slurs.map((m) => m.type)), [['start'], ['stop'], [], []], 'only the slur inside the bar')
+  assert.deepEqual(notes.map((n) => [!!n.tieStart, !!n.tieStop]), [[false, false], [true, false], [false, true], [false, false]], 'only the tie inside the bar')
+  assert.deepEqual(bar.items.filter(isWedge).map((w) => [w.type, w.start, w.stop]), [['crescendo', b2[0], b2[2]]], 'only the hairpin inside the bar')
+  assert.deepEqual(s, before, 'the score is unchanged')
+
+  // The preview's excerpt of the same bar has no bar lines, as before.
+  const preview = firstLine(barExcerpt(s, 1)).measures[0]!
+  assert.equal(preview.leftBarline, undefined)
+  assert.equal(preview.rightBarline, undefined)
+  assert.deepEqual(barForEditing(s, 9).bars, [], 'no bar 10: a score without bars')
+})
+
+test('bar for editing: every staff of a piano piece, each with its clef in force', () => {
+  const s = parseMusicXml(read(MELODY_PIANO_FIXTURE))
+  const left = { part: 'P2', staff: 1, voice: 0 }
+  const bar = voiceView(barForEditing(s, 2), left).measures[0]!
+  assert.deepEqual(bar.clef, { sign: 'F', line: 4 })
+  assert.deepEqual(notesOf(bar).map((n) => n.id), notesOf(voiceView(s, left).measures[2]!).map((n) => n.id))
 })
 
 // ---- your part (change parts-and-accompaniment, task 7.1) -------------------------------------

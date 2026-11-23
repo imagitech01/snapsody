@@ -5,8 +5,8 @@ Layers are those of `docs/testing.md`: **quick** (`make test-quick`, node unit t
 ## 1. Measure and prepare
 
 - [ ] 1.1 Measure how long Verovio takes to render one bar (`barExcerpt`) of a one-line piece and of a piano piece, in browser-dev and on the emulator, and write the numbers to `evidence/render-one-bar.md` in this change (design D2). Verify: the file exists with both numbers. Manual.
-- [ ] 1.2 Move the function that gives each bar its ending numbers from `core/playback/timeline.ts` to `core/score/` and use it from both. Verify (quick): `web/test/timeline.test.ts` passes unchanged.
-- [ ] 1.3 Add `barForEditing` next to `barExcerpt` (design D2): the bar with its own bar lines and endings, without what reaches outside it. Verify (quick): `web/test/editorSession.test.ts` proves the bar lines and an ending are kept, a hairpin and a slur into the next bar are left out, and the score itself is unchanged.
+- [x] 1.2 Move the function that gives each bar its ending numbers from `core/playback/timeline.ts` to `core/score/` and use it from both. Verify (quick): `web/test/timeline.test.ts` passes unchanged.
+- [x] 1.3 Add `barForEditing` next to `barExcerpt` (design D2): the bar with its own bar lines and endings, without what reaches outside it. Verify (quick): `web/test/editorSession.test.ts` proves the bar lines and an ending are kept, a hairpin and a slur into the next bar are left out, and the score itself is unchanged.
 
 ## 2. Note names
 
