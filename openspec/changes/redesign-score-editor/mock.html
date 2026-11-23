@@ -1,0 +1,780 @@
+<title>Snapsody Editor Trio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a switcher, then the phone on the left with the case for that editor on the right; borrowed ideas below. */
+:root {
+  --bg: #e9ecf1; --panel: #ffffff; --fg: #1c2433; --muted: #5c6472; --rule: #cfd5de; --accent: #2c5bbf; --accent-tint: #e6ecf7; --bezel: #1c2433;
+  --font: 'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #12161d; --panel: #1b212b; --fg: #e8ecf2; --muted: #9aa4b3; --rule: #323b49; --accent: #8fb0f2; --accent-tint: #232f47; --bezel: #05070a; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #12161d; --panel: #1b212b; --fg: #e8ecf2; --muted: #9aa4b3; --rule: #323b49; --accent: #8fb0f2; --accent-tint: #232f47; --bezel: #05070a; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 15px; line-height: 1.5; }
+.page { max-width: 1040px; margin: 0 auto; padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 22px; }
+h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+h2 { font-size: 19px; letter-spacing: -0.01em; margin: 0; }
+h3 { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+p { margin: 0; }
+.lede { max-width: 66ch; color: var(--muted); }
+.lede b { color: var(--fg); font-weight: 600; }
+.switch { display: flex; flex-wrap: wrap; gap: 8px; }
+.switch button { font: inherit; font-weight: 600; color: var(--fg); background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 14px; cursor: pointer; text-align: left; flex: 1 1 200px; min-width: 0; }
+.switch button small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+.switch button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); background: var(--accent-tint); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stage { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+.phone { flex: 0 0 auto; width: 398px; max-width: 100%; background: var(--bezel); border-radius: 30px; padding: 4px; }
+.case { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+.case ul, .case ol { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.case p, .case li { max-width: 62ch; }
+.borrow { display: flex; flex-direction: column; gap: 10px; }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+a { color: var(--accent); }
+.fine { color: var(--muted); font-size: 13px; max-width: 70ch; }
+@media (max-width: 460px) { .phone { width: 100%; border-radius: 0; padding: 0; background: none; } .phone .screen { border-radius: 4px; border: 1px solid var(--rule); } h1 { font-size: 23px; } }
+
+/* ---- The phone screen: the app's own tokens (tokens.css). The app has one look, light. ---- */
+.screen {
+  --s-bg: #f1f3f6; --surface: #ffffff; --surface-muted: #eef1f5; --ink: #1c2433; --ink-muted: #5c6472; --primary: #2c5bbf; --primary-tint: #e6ecf7;
+  --line: #d6dbe3; --line-strong: #c3cad5; --danger: #a8261b; --danger-tint: #f8e8e6; --flag: #b7791f; --flag-tint: #fbf1dc; --ok: #1f7a4d; --paper: #efe6d2;
+  color-scheme: light; background: var(--s-bg); color: var(--ink); border-radius: 26px; height: 800px; overflow: hidden; display: flex; flex-direction: column; font-size: 14px; line-height: 1.35; position: relative;
+  -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.screen button { font: inherit; color: inherit; cursor: pointer; }
+.topbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; }
+.topbar .eyebrow { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); font-weight: 600; flex: 1; }
+.tbtn { background: none; border: 0; padding: 8px 6px; font-size: 13px; color: var(--primary); font-weight: 500; }
+.tbtn:disabled { color: var(--line-strong); cursor: default; }
+.check { display: inline-flex; align-items: center; gap: 6px; background: var(--flag-tint); color: #6b4a12; border: 0; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+.check::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--flag); }
+.check.ok { background: #e2f1e9; color: var(--ok); } .check.ok::before { background: var(--ok); }
+.body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 4px 12px 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
+.photo { background: var(--paper); border-radius: 4px; overflow: hidden; position: relative; }
+.photo svg { display: block; width: 100%; height: auto; transform: rotate(-0.7deg) scale(1.02); filter: blur(0.35px) contrast(0.9); opacity: 0.85; }
+.photo span { position: absolute; left: 6px; top: 3px; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: #6a5c3c; font-weight: 600; }
+.staff svg, .surface svg { display: block; width: 100%; height: auto; }
+.surface { touch-action: none; cursor: pointer; }
+.ink { fill: #1c2433; } .inkS { stroke: #1c2433; fill: none; } .sel { fill: #2c5bbf; } .selS { stroke: #2c5bbf; fill: none; }
+.row { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.where { font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beats { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--ink-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.beats.bad { background: var(--flag-tint); color: #6b4a12; }
+.beats.good { background: #e2f1e9; color: var(--ok); }
+.hint { color: var(--ink-muted); font-size: 12.5px; }
+.msg { color: var(--ink-muted); font-size: 12px; min-height: 16px; text-align: center; }
+.keys { display: grid; gap: 5px; }
+.k { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; min-height: 44px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; padding: 0 2px; gap: 3px; }
+.k svg { display: block; }
+.k:active { background: var(--surface-muted); }
+.k[aria-pressed="true"] { background: var(--primary-tint); border-color: var(--primary); color: var(--primary); }
+.k.soft { background: var(--surface-muted); font-size: 12.5px; font-weight: 500; }
+.k.danger { color: var(--danger); }
+.k.pitch { font-size: 18px; min-height: 50px; }
+.k:disabled { color: var(--line-strong); cursor: default; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; background: none; border: 0; padding: 8px 0 7px; font-size: 13px; font-weight: 500; color: var(--ink-muted); border-bottom: 2px solid transparent; }
+.tabs button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--primary); font-weight: 600; }
+.stubgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.foot { padding: 8px 12px 12px; }
+.save { width: 100%; min-height: 44px; border: 0; border-radius: 4px; background: var(--ink); color: #fff !important; font-weight: 600; font-size: 15px; }
+.barnav { display: flex; align-items: center; gap: 6px; }
+.barnav .k { min-height: 36px; width: 40px; flex: 0 0 auto; }
+.bubble { background: var(--ink); border-radius: 6px; padding: 5px; display: flex; gap: 4px; position: relative; }
+.bubble::before { content: ""; position: absolute; top: -6px; left: var(--ax, 50%); margin-left: -6px; border: 6px solid transparent; border-top: 0; border-bottom-color: var(--ink); }
+.bubble button { flex: 1; min-height: 42px; background: #2c3648; color: #fff !important; border: 0; border-radius: 4px; font-size: 13px; font-weight: 600; padding: 0 2px; }
+.bubble button.d { background: #6d2a24; }
+.bubble .len { flex: 1.5; color: #fff; font-size: 12px; text-align: center; align-self: center; }
+.sheet { position: absolute; inset: 0; background: rgb(20 26 38 / 0.38); display: flex; align-items: flex-end; z-index: 5; }
+.sheet > div { background: var(--surface); border-radius: 14px 14px 0 0; padding: 14px 12px 16px; width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.sheet h4 { margin: 0; font-size: 16px; }
+.grow { flex: 1; min-height: 0; }
+
+.screen { height: 880px; }
+.body > * { flex-shrink: 0; }
+.body > .grow { flex-shrink: 1; }
+.topbar .sp { flex: 1; }
+.tbtn.ic { font-size: 17px; padding: 6px 8px; color: var(--ink); }
+.msg { text-align: left; }
+.check { white-space: nowrap; }
+.k.sm { min-height: 38px; font-size: 12px; font-weight: 500; flex-direction: column; gap: 0; line-height: 1.1; }
+.k.sm b { font-size: 15px; font-weight: 700; line-height: 1; }
+.k.dyn { font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700; font-size: 16px; min-height: 36px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 7px 10px; font-size: 12.5px; font-weight: 600; color: var(--ink-muted); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #fff !important; }
+.fix { display: flex; gap: 6px; align-items: center; overflow-x: auto; }
+.fix span { font-size: 12px; color: #6b4a12; font-weight: 600; white-space: nowrap; }
+.fix button { white-space: nowrap; border: 1px solid var(--flag); background: var(--flag-tint); color: #6b4a12 !important; border-radius: 999px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--ink-muted); }
+.chips button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 9px; font-size: 12px; }
+.tray { display: flex; flex-direction: column; gap: 5px; }
+.pagectl { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.pagectl .pseg { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; background: var(--panel); }
+.pagectl .pseg button { font: inherit; font-weight: 600; border: 0; background: none; color: var(--muted); padding: 8px 14px; cursor: pointer; }
+.pagectl .pseg button[aria-pressed="true"] { background: var(--accent); color: var(--panel); }
+.case dl { margin: 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
+.case dt { font-weight: 600; }
+.case dd { margin: 0; max-width: 62ch; }
+.tag { display: inline-block; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 600; border: 1px solid var(--rule); border-radius: 3px; padding: 0 5px; margin-left: 6px; color: var(--muted); vertical-align: 1px; }
+.body > .tray { flex-shrink: 1; min-height: 90px; overflow-y: auto; }
+.tbtn { white-space: nowrap; }
+.barnav .where { flex: 0 0 auto; white-space: nowrap; overflow: visible; }
+.resetbtn { font: inherit; border: 1px solid var(--rule); background: var(--panel); border-radius: 4px; padding: 7px 12px; cursor: pointer; color: inherit; }
+.titlerow { display: flex; align-items: center; gap: 4px; padding: 8px 12px 0; }
+.titlerow b { font-size: 15px; font-weight: 600; }
+.topbar { padding-top: 2px; }
+.lrow { display: flex; gap: 4px; align-items: stretch; }
+.lrow .card { flex: 1; min-width: 0; }
+.lrow .lz { width: 24px; min-height: 0; flex: 0 0 auto; font-size: 15px; padding: 0; }
+.photo { border: 0; padding: 0; width: 100%; display: block; cursor: pointer; }
+.photo em { position: absolute; right: 6px; top: 3px; font-size: 9px; font-style: normal; color: #6a5c3c; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.zoom { overflow: auto; background: var(--paper); border-radius: 4px; max-height: 300px; }
+.zoom svg { width: 820px; max-width: none; display: block; }
+.fix.wait span { color: var(--primary); }
+.fix.wait { background: var(--primary-tint); border-radius: 6px; padding: 5px 8px; }
+.fix.wait button { border-color: var(--primary); background: var(--surface); color: var(--primary) !important; margin-left: auto; }
+.spn { display: inline-flex; align-items: center; gap: 3px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 4px 2px 9px; background: var(--surface); color: var(--ink); }
+.spn button { padding: 3px 8px; }
+.k.x6 { font-size: 10.5px; }
+.stepper { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); min-height: 38px; font-size: 12px; font-weight: 600; }
+.stepper button { border: 0; background: none; font-size: 18px; width: 36px; align-self: stretch; color: var(--primary); }
+.stepper.off { color: var(--line-strong); } .stepper.off button { color: var(--line-strong); }
+.fullscore { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; gap: 2px; }
+.fullscore svg { display: block; width: 100%; height: auto; cursor: pointer; }
+.fullhead { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; }
+.tag.on { color: var(--accent); border-color: var(--accent); }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs id="defs"></defs></svg>
+
+<div class="page">
+  <header style="display:flex;flex-direction:column;gap:10px">
+    <h1>The editor as the change describes it</h1>
+    <p class="lede">This is the sketch brought in line with the change <b>redesign-score-editor</b>, so you can try it before it is built. The piece now has eleven bars over three lines, so going to another bar, the line overview and <b>Full score</b> have something to do. Three bars need checking.</p>
+    <div class="pagectl"><span>Note names</span><span class="pseg" id="names"></span><span class="fine">In the app: one setting for the whole app, next to the instrument.</span><button id="reset" class="resetbtn">Start the sketch again</button></div>
+  </header>
+  <main class="stage">
+    <div class="phone"><div class="screen" id="screen"></div></div>
+    <aside class="case" id="case"></aside>
+  </main>
+  <section class="borrow">
+    <h2>Where these ideas come from</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Idea</th><th>Seen in</th><th>Here</th></tr></thead>
+      <tbody id="borrowed"></tbody>
+    </table></div>
+    <p class="fine">Still a sketch: the notes are drawn by a stand-in engraver with the app's music font and no beams, and the book strip is drawn, not a photo. Nothing is saved.</p>
+  </section>
+</div>
+
+<script>
+const GLYPHS = {"E050":"M441 -245c-23 -4 -48 -6 -76 -6c-59 0 -102 7 -130 20c-88 42 -150 93 -187 154c-26 44 -43 103 -48 176c0 6 -1 13 -1 19c0 54 15 111 45 170c29 57 65 106 110 148s96 85 153 127c-3 16 -8 46 -13 92c-4 43 -5 73 -5 89c0 117 16 172 69 257c34 54 64 82 89 82 c21 0 43 -30 69 -92s39 -115 41 -159v-15c0 -109 -21 -162 -67 -241c-13 -20 -63 -90 -98 -118c-13 -9 -25 -19 -37 -29l31 -181c8 1 18 2 28 2c58 0 102 -12 133 -35c59 -43 92 -104 98 -184c1 -7 1 -15 1 -22c0 -123 -87 -209 -181 -248c8 -57 17 -110 25 -162 c5 -31 6 -58 6 -80c0 -30 -5 -53 -14 -70c-35 -64 -88 -99 -158 -103c-5 0 -11 -1 -16 -1c-37 0 -72 10 -108 27c-50 24 -77 59 -80 105v11c0 29 7 55 20 76c18 28 45 42 79 44h6c49 0 93 -42 97 -87v-9c0 -51 -34 -86 -105 -106c17 -24 51 -36 102 -36c62 0 116 43 140 85 c9 16 13 41 13 74c0 20 -1 42 -5 67c-8 53 -18 106 -26 159zM461 939c-95 0 -135 -175 -135 -286c0 -24 2 -48 5 -71c50 39 92 82 127 128c40 53 60 100 60 140v8c-4 53 -22 81 -55 81h-2zM406 119l54 -326c73 25 110 78 110 161c0 7 0 15 -1 23c-7 95 -57 142 -151 142h-12 zM382 117c-72 -2 -128 -47 -128 -120v-7c2 -46 43 -99 75 -115c-3 -2 -7 -5 -10 -10c-70 33 -116 88 -123 172v11c0 68 44 126 88 159c23 17 49 29 78 36l-29 170c-21 -13 -52 -37 -92 -73c-50 -44 -86 -84 -109 -119c-45 -69 -67 -130 -67 -182v-13c5 -68 35 -127 93 -176 s125 -73 203 -73c25 0 50 3 75 9c-19 111 -36 221 -54 331z","E084":"M20 -78c84 97 114 180 134 329h170c-13 -32 -82 -132 -99 -151l-84 -97c-33 -36 -59 -63 -80 -81h162v102l127 123v-225h57v-39h-57v-34c0 -43 19 -65 57 -65v-34h-244v36c48 0 60 26 60 70v27h-203v39z","E0A2":"M198 133c102 0 207 -45 207 -133c0 -92 -118 -133 -227 -133c-101 0 -178 46 -178 133c0 88 93 133 198 133zM293 -21c0 14 -3 29 -8 44c-7 20 -18 38 -33 54c-20 21 -43 31 -68 31l-20 -2c-15 -5 -27 -14 -36 -28c-4 -9 -6 -17 -8 -24s-3 -16 -3 -27c0 -15 3 -34 9 -57 s18 -41 34 -55c15 -15 36 -23 62 -23c4 0 10 1 18 2c19 5 32 15 40 30s13 34 13 55z","E0A3":"M278 64c0 22 -17 39 -43 39c-12 0 -26 -3 -41 -10c-85 -43 -165 -94 -165 -156c5 -25 15 -32 49 -32c67 11 200 95 200 159zM0 -36c0 68 73 174 200 174c66 0 114 -39 114 -97c0 -84 -106 -173 -218 -173c-64 0 -96 32 -96 96z","E0A4":"M0 -39c0 68 73 172 200 172c66 0 114 -37 114 -95c0 -84 -106 -171 -218 -171c-64 0 -96 30 -96 94z","E262":"M136 186v169h17v-164l44 14v-91l-44 -14v-165l44 12v-91l-44 -13v-155h-17v150l-76 -22v-155h-17v149l-43 -13v90l43 14v167l-43 -14v92l43 13v169h17v-163zM60 73v-167l76 22v168z","E241":"M179 646c-4 8 -17 30 -18 33l-4 10c0 3 2 5 5 5s7 -2 13 -7c23 -33 46 -81 66 -132c22 -57 35 -125 35 -163c0 -104 -60 -183 -122 -241c-63 -59 -57 -53 -61 -56c-38 -34 -63 -95 -71 -95h-22v190c40 7 69 11 87 16c88 27 168 95 168 200c0 30 -12 89 -30 138 c-17 47 -31 73 -46 102z","E260":"M20 110c32 16 54 27 93 27c26 0 35 -3 54 -13c13 -7 24 -20 27 -38l4 -25c0 -28 -16 -57 -45 -89c-23 -25 -39 -44 -65 -68l-88 -79v644h20v-359zM90 106c-32 0 -48 -10 -70 -29v-194c31 31 54 59 71 84c21 32 32 59 32 84c0 9 1 16 1 20c0 14 -3 21 -11 30l-8 3z","E243":"M216 730c-5 8 -10 13 -11 16l-4 10c0 3 2 5 5 5s7 -2 13 -7c35 -42 57 -101 57 -172c0 -34 -6 -65 -17 -94c10 -31 17 -64 17 -96c0 -104 -60 -183 -122 -241c-63 -59 -57 -53 -61 -56c-38 -34 -63 -95 -71 -95h-22v190v190c40 7 69 11 87 16c116 36 175 111 175 197 c0 44 -15 91 -46 137zM248 463c-23 -48 -58 -89 -94 -122c-63 -59 -57 -53 -61 -56c-30 -27 -44 -71 -53 -88c20 3 36 6 47 9c88 27 168 95 168 200c0 19 -3 39 -7 57z","E261":"M0 -188v539h18v-191l139 22v-533h-17v186zM18 -100l122 17v176l-122 -19v-174z","E240":"M179 -646c15 29 29 55 46 102c18 49 30 108 30 138c0 105 -80 173 -168 200c-18 5 -47 9 -87 16v190h22c8 0 33 -61 71 -95c4 -3 -2 3 61 -56c62 -58 122 -137 122 -241c0 -38 -13 -106 -35 -163c-20 -51 -43 -99 -66 -132c-6 -5 -10 -7 -13 -7s-5 2 -5 5l4 10 c1 3 14 25 18 33z","E242":"M206 -748c32 48 49 100 49 149c0 89 -55 168 -168 203c-18 5 -47 9 -87 16v190v190h22c8 0 33 -61 71 -95c4 -3 -2 3 61 -56c62 -58 122 -137 122 -241c0 -32 -7 -65 -17 -96c11 -29 17 -60 17 -94c0 -71 -32 -148 -67 -190c-6 -5 -10 -7 -13 -7s-5 2 -5 5l4 10 c1 3 6 8 11 16zM248 -463c4 18 7 38 7 57c0 105 -80 173 -168 200c-11 3 -27 6 -47 9c9 -17 23 -61 53 -88c4 -3 -2 3 61 -56c36 -33 71 -74 94 -122z","E4E3":"M0 -115v105c0 9 1 10 10 10h280c9 0 10 -1 10 -10v-105c0 -9 -1 -10 -10 -10h-280c-9 0 -10 1 -10 10z","E4E4":"M0 10v105c0 9 1 10 10 10h280c9 0 10 -1 10 -10v-105c0 -9 -1 -10 -10 -10h-280c-9 0 -10 1 -10 10z","E4E5":"M107 292c-13 24 -30 49 -52 71c-1 1 0 2 0 3l-2 2c3 3 4 4 6 4c12 0 26 -7 40 -20s44 -40 89 -81c26 -24 28 -29 46 -47c4 -4 8 -9 10 -14c6 -8 8 -16 8 -27c0 -19 -12 -40 -36 -61c-28 -23 -49 -38 -61 -73c-4 -11 -7 -27 -10 -50c13 -43 34 -83 59 -121 c31 -47 59 -79 101 -129c-8 0 -26 7 -54 20l-62 29l-21 6l-23 1c-25 0 -45 -10 -60 -30l-4 -14l-1 -12c0 -33 20 -56 39 -78c8 -9 17 -18 26 -26c17 -15 27 -24 28 -30l-3 -3c-11 5 -19 10 -25 15c-9 3 -37 21 -45 26c-24 14 -45 32 -63 51c-19 21 -37 44 -37 71 c0 63 27 95 80 95c41 0 86 -18 136 -52c-19 26 -37 48 -55 66c-23 23 -48 44 -73 65c-28 23 -47 40 -58 53s-17 26 -18 39c75 64 113 125 113 183c0 27 -7 48 -18 68z","E4E6":"M0 123c7 34 33 56 69 60c29 -3 43 -9 53 -29c4 -8 7 -15 10 -22c0 -21 -1 -25 -11 -35c-5 -8 -18 -14 -40 -20l12 -3l15 -1c44 0 97 26 122 56c10 11 18 26 24 42c7 1 15 2 22 3l-140 -424h-36l111 330c-10 -6 -27 -12 -53 -16l-52 -8h-10l-20 1c-1 0 -8 3 -21 6 c-37 9 -55 28 -55 60z","E4E7":"M133 -111c0 -33 -21 -50 -52 -55c10 -3 18 -4 25 -4c40 0 69 24 90 47l66 197c-36 -18 -64 -25 -112 -25c-23 0 -38 3 -45 8c-37 7 -55 27 -55 59c8 35 30 54 68 58c45 -6 49 -13 64 -48c0 -3 1 -5 1 -7c0 -27 -25 -46 -52 -49c6 -4 15 -6 26 -6c32 2 62 14 88 29 c32 19 44 36 59 71l7 1l10 2h4c-72 -220 -143 -439 -215 -659h-37l108 324c-20 -13 -51 -20 -82 -20c-21 0 -35 4 -43 10c-37 6 -55 26 -55 58c8 35 31 56 68 60c43 -8 48 -13 64 -51z","E083":"M208 250c97 0 177 -52 177 -116c0 -69 -40 -111 -118 -125c56 -5 125 -44 125 -116c0 -31 -10 -57 -31 -78c-19 -21 -45 -38 -78 -49l-50 -11c-15 -3 -36 -7 -55 -7c-50 0 -86 16 -113 38c-16 10 -23 18 -34 34c-7 13 -11 25 -11 38c0 43 27 83 68 83l3 -2 c61 0 75 -42 75 -70c0 -19 -24 -42 -26 -57c7 -17 20 -25 37 -25c44 0 94 29 94 78c0 75 -34 125 -138 125v36c84 0 131 22 131 98c0 54 -37 88 -87 88c-26 0 -43 -7 -51 -22c15 -22 44 -16 44 -70c0 -37 -37 -62 -71 -62c-22 0 -69 15 -69 76c0 79 101 116 178 116z","E088":"M195 -214c76 0 88 58 90 68c0 34 -35 60 -57 73l-52 29c-21 10 -32 17 -34 20c-39 -33 -58 -54 -62 -92c5 -23 23 -98 115 -98zM301 135c0 61 -72 76 -113 76c-40 0 -77 -17 -77 -51c3 -21 15 -38 26 -50c17 -15 33 -26 48 -34l65 -28c34 27 51 56 51 87zM176 -250 c-57 0 -166 26 -166 132c0 47 30 86 89 116c-33 15 -79 60 -79 119c0 79 85 132 178 132h18c5 0 21 1 28 -1c25 0 126 -30 126 -110c0 -37 -23 -76 -69 -116c43 -25 83 -71 83 -119c0 -101 -118 -153 -208 -153z","E082":"M124 -185c-18 0 -55 -14 -65 -65h-36l-3 30c0 25 6 45 18 63c11 19 22 30 39 43l121 82l37 29c15 11 27 29 38 54c12 24 18 47 18 70c0 40 -19 88 -94 88c-25 0 -32 0 -50 -8c-14 -5 -23 -12 -26 -22c3 -9 7 -15 10 -18l24 -17c12 -7 17 -11 27 -21c5 -7 7 -16 7 -27 c0 -12 0 -57 -79 -74c-30 0 -76 26 -76 94c0 66 81 135 197 135c72 0 181 -32 181 -150c0 -53 -32 -95 -113 -133l-91 -41c-26 -11 -45 -23 -57 -37l49 7c84 0 115 -41 148 -41c20 0 33 20 39 61h35c0 -152 -68 -168 -114 -168c-17 0 -65 0 -79 7h10l-28 17 c-49 37 -69 40 -87 42z","E086":"M284 -91c0 37 -28 92 -67 92c-35 0 -65 -54 -65 -111c0 -52 22 -104 68 -104c47 0 64 68 64 123zM230 214c-36 0 -90 -33 -90 -184l2 -36c40 24 81 36 120 36c80 0 140 -48 140 -121c0 -99 -99 -159 -182 -159c-160 0 -200 173 -200 244c0 21 2 43 7 71l10 35 c26 85 73 115 98 126c41 19 74 24 103 24c93 0 142 -63 142 -105c0 -58 -52 -72 -73 -72c-33 0 -59 24 -65 35c-3 5 -6 14 -7 25l11 30c6 15 9 27 9 35c0 11 -9 16 -25 16z"};
+document.getElementById('defs').innerHTML = Object.entries(GLYPHS).map(([k, d]) => `<path id="g${k}" d="${d}"/>`).join('');
+const $ = (s) => document.querySelector(s);
+
+// ---- Model ----
+const REP = [1, 2, 3, 4, 6, 8, 12, 16];
+const STEPS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], SOL = ['Do', 'Re', 'Mi', 'Fa', 'Sol', 'La', 'Si'], SEMI = [0, 2, 4, 5, 7, 9, 11];
+let NAMES = 'cde';
+try { NAMES = localStorage.getItem('names') === 'sol' ? 'sol' : 'cde'; } catch {}
+const DNAME = { 16: 'whole', 12: 'dotted half', 8: 'half', 6: 'dotted quarter', 4: 'quarter', 3: 'dotted eighth', 2: 'eighth', 1: 'sixteenth' };
+const total = (b) => b.reduce((s, i) => s + i.d, 0);
+const accText = (acc) => (acc === 1 ? '♯' : acc === -1 ? '♭' : '');
+const pname = (p, acc) => ((NAMES === 'sol' ? SOL[p % 7] : STEPS[p % 7]) + accText(acc) + Math.floor(p / 7));
+const nname = (n) => (n.p === null ? 'rest' : pname(n.p, n.acc));
+const beatsText = (n) => { const w = Math.floor(n / 4), r = n % 4; return (w || !r ? w : '') + ({ 0: '', 1: '¼', 2: '½', 3: '¾' })[r]; };
+let uid = 0;
+const N = (p, d, acc = 0) => ({ id: 'n' + ++uid, p, d, acc, m: {}, dyn: '' });
+const Q = (...ps) => ps.map((p) => N(p, 4));
+const seed = () => [Q(30, 30, 31, 32), Q(32, 31, 31, 29), [], [N(30, 8), N(29, 2), N(29, 8)], Q(29, 29, 30, 28), [N(29, 4), N(30, 2), N(31, 2), N(30, 4), N(28, 4)], [N(29, 4), N(30, 2), N(31, 2), N(30, 4), N(29, 4)], [N(28, 4), N(29, 4), N(32, 8)], Q(30, 30, 31, 32), Q(32, 31, 30, 29), [...Q(28, 28, 29, 30), N(29, 6), N(28, 2), N(28, 8)]];
+const TARGET = [Q(30, 30, 31, 32), Q(32, 31, 30, 29), Q(28, 28, 29, 30), [N(30, 6), N(29, 2), N(29, 8)], Q(29, 29, 30, 28), [N(29, 4), N(30, 2), N(31, 2), N(30, 4), N(28, 4)], [N(29, 4), N(30, 2), N(31, 2), N(30, 4), N(29, 4)], [N(28, 4), N(29, 4), N(32, 8)], Q(30, 30, 31, 32), Q(32, 31, 30, 29), Q(28, 28, 29, 30), [N(29, 6), N(28, 2), N(28, 8)]];
+const PER = 4;
+const sig = (bars) => bars.map((b) => { const c = b.slice(); while (c.length && c[c.length - 1].p === null) c.pop(); return c.map((i) => `${i.p}:${i.p === null ? 0 : i.acc}:${i.d}`).join(','); }).join('|');
+const fresh = () => { const bars = seed(), z = (v) => bars.map(() => v); return { bars, ends: bars.map((b, i) => (i === bars.length - 1 ? 'f' : 'n')), starts: z(false), endings: z(0), times: z(2), spans: [] }; };
+const s = { ...fresh(), undo: [], redo: [], bar: 0, sel: null, view: 'B', tab: 'notes', ink: 4, inkRest: false, armed: null, spanFrom: null, def: 4, msg: '', sheet: false, dragName: '', ghost: null, full: false, photoBig: false };
+const matches = () => sig(s.bars) === sig(TARGET);
+const snap_ = () => JSON.stringify({ bars: s.bars, ends: s.ends, starts: s.starts, endings: s.endings, times: s.times, spans: s.spans });
+const push = () => { s.undo.push(snap_()); s.redo = []; };
+const find = (id) => { for (let b = 0; b < s.bars.length; b++) { const i = s.bars[b].findIndex((n) => n.id === id); if (i >= 0) return [b, i]; } return null; };
+const note = (id) => { const at = id && find(id); return at ? s.bars[at[0]][at[1]] : null; };
+function tidy() {
+  s.bar = Math.max(0, Math.min(s.bars.length - 1, s.bar));
+  if (s.sel && !find(s.sel)) s.sel = null;
+  if (s.spanFrom && !note(s.spanFrom)) s.spanFrom = null;
+  s.spans = s.spans.filter((q) => { const a = note(q.from), b = note(q.to); return a && b && a.p !== null && b.p !== null; });
+}
+function undo(back) {
+  const from = back ? s.undo : s.redo, to = back ? s.redo : s.undo;
+  if (!from.length) return;
+  to.push(snap_()); Object.assign(s, JSON.parse(from.pop()));
+}
+const flaggedBars = () => s.bars.map((b, i) => (total(b) !== 16 ? i : -1)).filter((i) => i >= 0);
+const order = (id) => { const at = find(id); return at[0] * 1000 + at[1]; };
+
+// ---- Marks ----
+const MARKS = [['stac', 'Staccato', '•'], ['stacc', 'Staccatiss.', '▾'], ['ten', 'Tenuto', '–'], ['acc', 'Accent', '>'], ['marc', 'Strong acc.', '^'], ['ferm', 'Fermata', '◠'], ['tr', 'Trill', 'tr'], ['turn', 'Turn', '∾'], ['mord', 'Mordent', '〰'], ['trem', 'Tremolo', '≡'], ['breath', 'Breath', '’'], ['caes', 'Caesura', '//']];
+const ONE_OF = ['tr', 'turn', 'mord'];
+const SPANS = [['slur', 'Slur', '⌒'], ['tie', 'Tie', '⌣'], ['cresc', 'Cresc.', '<'], ['dim', 'Dim.', '>']];
+const DYNS = ['pp', 'p', 'mp', 'mf', 'f', 'ff'];
+function toggleMark(n, v) { if (n.m[v]) delete n.m[v]; else { if (ONE_OF.includes(v)) ONE_OF.forEach((k) => delete n.m[k]); n.m[v] = 1; } }
+function addSpan(type, a, b) {
+  if (a === b) return;
+  const [from, to] = order(a) <= order(b) ? [a, b] : [b, a];
+  const i = s.spans.findIndex((q) => q.type === type && q.from === from && q.to === to);
+  push();
+  if (i >= 0) s.spans.splice(i, 1); else s.spans.push({ type, from, to });
+}
+/** A tap on a note while a mark is armed. */
+function applyArmed(id) {
+  const n = note(id), a = s.armed;
+  if (!n || n.p === null) { s.msg = 'Marks go on notes, not on rests.'; return; }
+  if (a.k === 'm') { push(); toggleMark(n, a.v); beep(n.p, n.acc, n.d); }
+  else if (a.k === 'dyn') { push(); n.dyn = n.dyn === a.v ? '' : a.v; }
+  else if (!s.spanFrom || s.spanFrom === id) { s.spanFrom = id; }
+  else { addSpan(a.v, s.spanFrom, id); s.spanFrom = null; }
+}
+function stamp(k, v) {
+  const n = note(s.sel), same = s.armed && s.armed.k === k && s.armed.v === v;
+  if (k === 'span') {
+    s.armed = same ? null : { k, v }; s.spanFrom = !same && n && n.p !== null ? n.id : null;
+    s.msg = same || s.spanFrom ? '' : 'Tap the first note, then the last. The last one can be in another bar.';
+  } else if (n && n.p !== null) { push(); if (k === 'm') toggleMark(n, v); else n.dyn = n.dyn === v ? '' : v; s.armed = null; }
+  else { s.armed = same ? null : { k, v }; s.msg = same ? '' : 'Now tap every note that gets it. Tap the mark again to stop.'; }
+}
+
+// ---- Bars ----
+function splitBar(b, i) {
+  if (i <= 0 || i >= s.bars[b].length) return;
+  push();
+  const bar = s.bars[b];
+  s.bars.splice(b, 1, bar.slice(0, i), bar.slice(i)); s.ends.splice(b, 1, 'n', s.ends[b]); s.starts.splice(b, 1, s.starts[b], false); s.endings.splice(b, 1, s.endings[b], s.endings[b]); s.times.splice(b, 1, 2, s.times[b]);
+}
+function joinBar(b) {
+  if (b >= s.bars.length - 1) { s.msg = 'This is the last bar.'; return; }
+  push();
+  s.bars.splice(b, 2, [...s.bars[b], ...s.bars[b + 1]]); s.ends.splice(b, 2, s.ends[b + 1]); s.starts.splice(b, 2, s.starts[b]); s.endings.splice(b, 2, s.endings[b]); s.times.splice(b, 2, s.times[b + 1]);
+}
+function barAct(v) {
+  const b = s.bar;
+  if (v === 'join') joinBar(b);
+  else if (v === 'add') { push(); s.bars.splice(b + 1, 0, []); s.ends.splice(b + 1, 0, s.ends[b]); s.ends[b] = s.ends[b] === 'f' ? 'n' : s.ends[b]; s.starts.splice(b + 1, 0, false); s.endings.splice(b + 1, 0, 0); s.times.splice(b + 1, 0, 2); s.bar = b + 1; s.sel = null; }
+  else if (v === 'addb') { push(); s.bars.splice(b, 0, []); s.ends.splice(b, 0, 'n'); s.starts.splice(b, 0, false); s.endings.splice(b, 0, 0); s.times.splice(b, 0, 2); s.sel = null; }
+  else if (v === 'del') { if (s.bars.length < 2) { s.msg = 'The only bar of a piece cannot be deleted.'; return; } push(); s.bars.splice(b, 1); const e = s.ends.splice(b, 1)[0]; s.starts.splice(b, 1); s.endings.splice(b, 1); s.times.splice(b, 1); if (b === s.bars.length && e === 'f') s.ends[b - 1] = 'f'; }
+  else if (v === 'e1' || v === 'e2') {
+    const n = v === 'e1' ? 1 : 2;
+    if (s.endings[b] === n) { push(); s.endings[b] = 0; return; }
+    if (n === 2 && !(b > 0 && s.endings[b - 1] >= 1)) { s.msg = 'A second ending comes directly after a first ending.'; return; }
+    push(); s.endings[b] = n;
+    if (n === 1) { let last = b; while (s.endings[last + 1] === 1) last++; if (s.ends[last] !== 'r') s.ends[last] = 'r'; }
+  }
+  else if (v === 't-' || v === 't+') { if (s.ends[b] !== 'r') { s.msg = 'Set the end of the bar to Repeat first.'; return; } const t = s.times[b] + (v === 't+' ? 1 : -1); if (t >= 2 && t <= 8) { push(); s.times[b] = t; } }
+  else if (v === 'copy') { if (!b) { s.msg = 'There is no bar before this one.'; return; } push(); s.bars[b] = s.bars[b - 1].map((n) => ({ ...N(n.p, n.d, n.acc), m: { ...n.m }, dyn: '' })); }
+  else if (v === 'start') { push(); s.starts[b] = !s.starts[b]; }
+  else { push(); s.ends[b] = v; }
+}
+/** One-tap repairs for a bar that does not add up: first the ones that touch no note, then one note each, from the left. At most four. */
+function fixes(b) {
+  const bar = s.bars[b], diff = total(bar) - 16, out = [], next = s.bars[b + 1];
+  if (!diff || !bar.length) return out;
+  if (diff < 0 && REP.includes(-diff)) out.push({ label: `Add a ${DNAME[-diff]} rest`, run: () => bar.push(N(null, -diff)) });
+  if (diff > 0) { let pos = 0; bar.forEach((n, i) => { if (pos === 16) out.push({ label: `Bar line after note ${i}`, split: i }); pos += n.d; }); }
+  if (diff < 0 && next && next.length && total(bar) + total(next) === 16) out.push({ label: 'Join with the next bar', join: true });
+  bar.forEach((n, i) => { const d = n.d - diff; if (REP.includes(d)) out.push({ label: `${nname(n)} (${i + 1}) → ${DNAME[d]}`, run: () => { n.d = d; } }); });
+  if (diff > 0) bar.forEach((n, i) => { if (n.d === diff) out.push({ label: `Remove ${nname(n)} (${i + 1})`, run: () => bar.splice(i, 1) }); });
+  return out.slice(0, 4);
+}
+/** The slurs, ties and hairpins that begin, end or pass in bar b. */
+const spansOf = (b) => s.spans.map((q, i) => ({ q, i, a: find(q.from)[0], z: find(q.to)[0] })).filter((x) => x.a <= b && b <= x.z);
+
+// ---- Sound: starts from the first tap ----
+let ac;
+function beep(p, acc, d = 2, at = 0) {
+  if (p === null) return;
+  try {
+    ac ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === 'suspended') ac.resume();
+    const midi = 12 * (Math.floor(p / 7) + 1) + SEMI[p % 7] + (acc === 1 ? 1 : acc === -1 ? -1 : 0);
+    const t = ac.currentTime + at, len = Math.max(0.12, d * 0.14);
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'triangle'; o.frequency.value = 440 * 2 ** ((midi - 69) / 12);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.22, t + 0.015); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + len + 0.02);
+  } catch {}
+}
+function playBar(bar) { let at = 0; for (const n of bar) { beep(n.p, n.acc, n.d, at); at += n.d * 0.14; } }
+
+
+// ---- Engraver (a stand-in for Verovio) ----
+const use = (id, x, y, sp, cls = 'ink') => `<use href="#g${id}" class="${cls}" transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${(sp / 250).toFixed(4)} ${(-sp / 250).toFixed(4)})"/>`;
+const baseOf = (d) => (d === 3 || d === 6 || d === 12 ? d / 1.5 : d);
+function noteSvg(x, y, d, sp, up, c = '') {
+  const base = baseOf(d), fill = c ? 'sel' : 'ink', stroke = c ? 'selS' : 'inkS';
+  let s = use(base === 16 ? 'E0A2' : base === 8 ? 'E0A3' : 'E0A4', x, y, sp, fill);
+  if (base < 16) {
+    const sx = up ? x + 1.13 * sp : x + 0.05 * sp, ey = up ? y - 3.5 * sp : y + 3.5 * sp;
+    s += `<line class="${stroke}" x1="${sx}" x2="${sx}" y1="${up ? y - 0.15 * sp : y + 0.15 * sp}" y2="${ey}" stroke-width="${0.12 * sp}"/>`;
+    if (base <= 2) s += use(base === 2 ? (up ? 'E240' : 'E241') : up ? 'E242' : 'E243', up ? sx - 0.06 * sp : x, ey, sp, fill);
+  }
+  if (base !== d) s += `<circle class="${fill}" cx="${x + (base === 16 ? 2.2 : 1.75) * sp}" cy="${y}" r="${0.2 * sp}"/>`;
+  return s;
+}
+function restSvg(x, top, d, sp, c = '') {
+  const base = baseOf(d), fill = c ? 'sel' : 'ink';
+  let s = use({ 16: 'E4E3', 8: 'E4E4', 4: 'E4E5', 2: 'E4E6', 1: 'E4E7' }[base], x, top + (base === 16 ? sp : 2 * sp), sp, fill);
+  if (base !== d) s += `<circle class="${fill}" cx="${x + 1.6 * sp}" cy="${top + 1.5 * sp}" r="${0.2 * sp}"/>`;
+  return s;
+}
+
+function marksSvg(n, nx, y, sp, top, up, cls) {
+  let o = '', near = 0, far = 0;
+  const cx = nx + 0.6 * sp, side = up ? 1 : -1, col = cls === 'sel' ? '#2c5bbf' : '#1c2433';
+  const txt = (t, yy, size, extra = '') => `<text x="${cx}" y="${yy}" text-anchor="middle" font-size="${size * sp}" fill="${col}" font-weight="700" ${extra}>${t}</text>`;
+  for (const k of ['stac', 'stacc', 'ten', 'acc', 'marc']) {
+    if (!n.m[k]) continue;
+    const yy = y + side * (1.15 + near * 0.95) * sp; near++;
+    if (k === 'stac') o += `<circle cx="${cx}" cy="${yy}" r="${0.22 * sp}" fill="${col}"/>`;
+    else if (k === 'ten') o += `<line x1="${cx - 0.6 * sp}" x2="${cx + 0.6 * sp}" y1="${yy}" y2="${yy}" stroke="${col}" stroke-width="${0.18 * sp}"/>`;
+    else o += txt(k === 'stacc' ? '▾' : k === 'acc' ? '>' : '^', yy + 0.45 * sp, 1.5);
+  }
+  const above = Math.min(top - 1.0 * sp, y - (up ? 4.3 : 1.6) * sp);
+  for (const k of ['ferm', 'tr', 'turn', 'mord']) {
+    if (!n.m[k]) continue;
+    const yy = above - far * 1.5 * sp; far++;
+    if (k === 'ferm') o += `<path d="M${cx - 0.9 * sp} ${yy} A${0.9 * sp} ${0.9 * sp} 0 0 1 ${cx + 0.9 * sp} ${yy}" fill="none" stroke="${col}" stroke-width="${0.2 * sp}"/><circle cx="${cx}" cy="${yy - 0.2 * sp}" r="${0.18 * sp}" fill="${col}"/>`;
+    else o += txt(k === 'tr' ? 'tr' : k === 'turn' ? '∾' : '〰', yy, 1.5, k === 'tr' ? 'font-style="italic" font-family="Georgia, serif"' : '');
+  }
+  if (n.m.trem) { const sx = up ? nx + 1.13 * sp : nx + 0.05 * sp, my = y - side * 2.2 * sp; for (const k of [-1, 0, 1]) o += `<line x1="${sx - 0.5 * sp}" x2="${sx + 0.5 * sp}" y1="${my + k * 0.45 * sp + 0.25 * sp}" y2="${my + k * 0.45 * sp - 0.25 * sp}" stroke="${col}" stroke-width="${0.2 * sp}"/>`; }
+  if (n.m.breath) o += `<text x="${cx + 1.9 * sp}" y="${top + 0.6 * sp}" text-anchor="middle" font-size="${2.8 * sp}" fill="${col}" font-family="Georgia, serif">’</text>`;
+  if (n.m.caes) for (const k of [0, 0.5]) o += `<line x1="${cx + (1.5 + k) * sp}" x2="${cx + (2.1 + k) * sp}" y1="${top + 0.7 * sp}" y2="${top - 0.9 * sp}" stroke="${col}" stroke-width="${0.16 * sp}"/>`;
+  if (n.dyn) o += `<text x="${cx}" y="${top + 7.4 * sp}" text-anchor="middle" font-size="${1.9 * sp}" fill="${col}" font-style="italic" font-weight="700" font-family="Georgia, 'Times New Roman', serif">${n.dyn}</text>`;
+  return o;
+}
+function engrave(bars, o) {
+  const sp = o.sp, top = o.top ?? 3.3 * sp, H = top + 4 * sp + (o.bottom ?? 3.7 * sp), W = o.w, st = o.s;
+  const first = o.first ?? 0, list = bars.slice(first, first + (o.count ?? bars.length));
+  const wd = (d) => sp * (2.3 + 0.85 * Math.log2(d));
+  const left = sp * 7.4;
+  const nat = list.map((b) => { const t = total(b); return b.reduce((a, i) => a + wd(i.d), 0) + (t < 16 ? Math.max(3.6 * sp, wd(16 - t)) : 0) + 1.2 * sp; });
+  const k = (W - left - 0.9 * sp) / nat.reduce((a, b) => a + b, 0);
+  const yOf = (p) => top + 4 * sp - (p - 30) * sp / 2;
+  let x = left, bg = '', fg = '', hit = '';
+  const pos = {};
+  const lay = { sp, top, H, W, left, bars: [], yOf, pAt: (y) => Math.max(26, Math.min(42, 30 + Math.round((top + 4 * sp - y) / (sp / 2)))) };
+  const thin = 0.13 * sp, vline = (xx, w) => `<line class="inkS" x1="${xx}" x2="${xx}" y1="${top}" y2="${top + 4 * sp}" stroke-width="${w}"/>`;
+  const dots = (xx) => `<circle class="ink" cx="${xx}" cy="${top + 1.5 * sp}" r="${0.22 * sp}"/><circle class="ink" cx="${xx}" cy="${top + 2.5 * sp}" r="${0.22 * sp}"/>`;
+  list.forEach((b, j) => {
+    const bi = first + j, x0 = x, bw = nat[j] * k, t = total(b), L = { b: bi, x0, x1: x0 + bw, slots: [], ph: null };
+    if (o.active === bi) bg += `<rect x="${x0}" y="${top - 1.2 * sp}" width="${bw}" height="${6.4 * sp}" fill="#e6ecf7" rx="3"/>`;
+    if (!o.plain && t !== 16) bg += `<rect x="${x0 + 2}" y="${H - 5}" width="${bw - 4}" height="3" fill="#b7791f" rx="1.5"/>`;
+    if (!o.plain) fg += `<text x="${x0 + 3}" y="${Math.max(9, top - 1.7 * sp)}" font-size="${Math.max(9, sp * 0.95)}" fill="${t !== 16 ? '#8a5a12' : '#5c6472'}" font-weight="600">${bi + 1}</text>`;
+    if (st && st.endings[bi]) { const en = st.endings[bi], yy = Math.max(3, top - 3.1 * sp), open = st.endings[bi - 1] !== en || j === 0 && false, close = st.endings[bi + 1] !== en; fg += `<path d="M${x0 + (open ? 1.7 * sp : 2)} ${open ? yy + 1.2 * sp : yy} ${open ? `L${x0 + 1.7 * sp} ${yy}` : ''} L${x0 + bw - 3} ${yy} ${close && en === 1 ? `L${x0 + bw - 3} ${yy + 1.2 * sp}` : ''}" fill="none" stroke="#1c2433" stroke-width="${Math.max(1, 0.13 * sp)}"/>` + (open ? `<text x="${x0 + 2.1 * sp}" y="${yy + 1.25 * sp}" font-size="${Math.max(8, 1.15 * sp)}" fill="#1c2433" font-weight="700">${en}.</text>` : ''); }
+    if (st && st.starts[bi]) fg += vline(x0 + 0.2 * sp, 0.4 * sp) + vline(x0 + 0.7 * sp, thin) + dots(x0 + 1.15 * sp);
+    let sx = x0 + 0.6 * sp * k + (st && st.starts[bi] ? 0.8 * sp : 0);
+    b.forEach((n, i) => {
+      const sw = wd(n.d) * k, nx = sx + Math.min(sw * 0.3, 2.4 * sp), c = o.sel === n.id || o.from === n.id ? 'sel' : '';
+      if (n.p === null) fg += restSvg(nx, top, n.d, sp, c);
+      else {
+        const y = yOf(n.p), up = n.p < 34;
+        for (let q = 28; q >= n.p; q -= 2) fg += `<line class="inkS" x1="${nx - 0.4 * sp}" x2="${nx + 1.6 * sp}" y1="${yOf(q)}" y2="${yOf(q)}" stroke-width="${0.13 * sp}"/>`;
+        for (let q = 40; q <= n.p; q += 2) fg += `<line class="inkS" x1="${nx - 0.4 * sp}" x2="${nx + 1.6 * sp}" y1="${yOf(q)}" y2="${yOf(q)}" stroke-width="${0.13 * sp}"/>`;
+        if (n.acc) fg += use(n.acc === 1 ? 'E262' : n.acc === -1 ? 'E260' : 'E261', nx - 1.05 * sp, y, sp, c || 'ink');
+        fg += noteSvg(nx, y, n.d, sp, up, c) + marksSvg(n, nx, y, sp, top, up, c);
+        pos[n.id] = { x: nx + 0.6 * sp, y, up };
+      }
+      if (o.cuts === bi && i > 0) fg += `<line x1="${sx}" x2="${sx}" y1="${top - 1.6 * sp}" y2="${top + 5 * sp}" stroke="#2c5bbf" stroke-width="1.5" stroke-dasharray="4 4"/><circle cx="${sx}" cy="${top - 2.6 * sp}" r="13" fill="#fff" stroke="#2c5bbf" stroke-width="1.5"/><text x="${sx}" y="${top - 2.6 * sp + 5}" text-anchor="middle" font-size="14" fill="#2c5bbf">✂</text>`;
+      hit += `<rect data-id="${n.id}" x="${sx}" y="0" width="${sw}" height="${H}" fill="transparent"/>`;
+      L.slots.push({ id: n.id, x: sx, w: sw, nx });
+      sx += sw;
+    });
+    if (t < 16 && !o.plain) {
+      const pw = x0 + bw - 0.6 * sp - sx;
+      fg += `<rect x="${sx + 2}" y="${top - 0.6 * sp}" width="${pw - 4}" height="${5.2 * sp}" rx="4" fill="#f4f6f9" stroke="#9aa3b1" stroke-dasharray="4 3"/>`;
+      fg += `<text x="${sx + pw / 2}" y="${top + 2 * sp + 5}" text-anchor="middle" font-size="${Math.max(13, sp * 1.6)}" fill="#5c6472" font-weight="600">+</text>`;
+      L.ph = { x: sx, w: pw };
+    }
+    x += bw;
+    const e = st ? st.ends[bi] : j === list.length - 1 ? 'f' : 'n';
+    if (e === 'n') fg += vline(x, thin);
+    else if (e === 'd') fg += vline(x - 0.5 * sp, thin) + vline(x, thin);
+    else fg += (e === 'r' ? dots(x - 1.1 * sp) : '') + vline(x - 0.65 * sp, thin) + vline(x - 0.1 * sp, 0.4 * sp) + (e === 'r' && st && st.times[bi] > 2 ? `<text x="${x - 0.4 * sp}" y="${top - 0.7 * sp}" text-anchor="end" font-size="${Math.max(8, 1.1 * sp)}" fill="#1c2433" font-weight="700">${st.times[bi]}×</text>` : '');
+    hit += `<rect data-bar="${bi}" x="${x0}" y="0" width="${bw}" height="${H}" fill="transparent" style="pointer-events:${o.barHits ? 'auto' : 'none'}"/>`;
+    lay.bars.push(L);
+  });
+  for (const q of st ? st.spans : []) {
+    const A = pos[q.from], Bp = pos[q.to], cut = !A || !Bp;
+    if (!A && !Bp) { const fa = find(q.from), ta = find(q.to); if (!fa || !ta || fa[0] >= first || ta[0] < first + list.length) continue; }
+    const through = { y: top + 4.2 * sp, up: true };
+    const x1 = A ? A.x : left - sp, x2 = Bp ? Bp.x : x - 0.3 * sp, ref = A || Bp || through;
+    if (q.type === 'slur' || q.type === 'tie') {
+      const dir = ref.up ? 1 : -1, y1 = (A || Bp || through).y + dir * 1.0 * sp, y2 = (Bp || A || through).y + dir * 1.0 * sp, bow = (q.type === 'tie' ? 1.1 : 1.6) * sp + (x2 - x1) * 0.04;
+      fg += `<path d="M${x1} ${y1} Q${(x1 + x2) / 2} ${(y1 + y2) / 2 + dir * bow * 1.6} ${x2} ${y2}" fill="none" stroke="${cut && o.count === 1 ? '#2c5bbf' : '#1c2433'}" stroke-width="${0.2 * sp}" stroke-linecap="round" ${cut && o.count === 1 ? 'stroke-dasharray="7 4"' : ''}/>`;
+    } else {
+      const y = top + 6.6 * sp, h = 0.6 * sp, a = q.type === 'cresc' ? [x1, x2] : [x2, x1];
+      fg += `<path d="M${a[1]} ${y - h} L${a[0]} ${y} L${a[1]} ${y + h}" fill="none" stroke="#1c2433" stroke-width="${0.14 * sp}"/>`;
+    }
+  }
+  if (o.ghost) fg += `<path d="M${o.ghost.x1} ${o.ghost.y1} Q${(o.ghost.x1 + o.ghost.x2) / 2} ${Math.min(o.ghost.y1, o.ghost.y2) - 2.4 * sp} ${o.ghost.x2} ${o.ghost.y2}" fill="none" stroke="#2c5bbf" stroke-width="2.5" stroke-dasharray="5 4" stroke-linecap="round"/>`;
+  let lines = '';
+  for (let i = 0; i < 5; i++) lines += `<line class="inkS" x1="${0.4 * sp}" x2="${x}" y1="${top + i * sp}" y2="${top + i * sp}" stroke-width="${0.1 * sp}"/>`;
+  const head = use('E050', 0.9 * sp, top + 3 * sp, sp) + use('E084', 4.6 * sp, top + sp, sp) + use('E084', 4.6 * sp, top + 3 * sp, sp) + `<rect data-score="1" x="0" y="0" width="${left - sp}" height="${H}" fill="transparent"/>`;
+  return { svg: `<svg viewBox="0 0 ${W} ${H.toFixed(1)}" role="img" aria-label="Score">${bg}${lines}${head}${fg}${hit}</svg>`, lay };
+}
+const icon = (d, rest) => `<svg width="22" height="30" viewBox="0 0 22 30" aria-hidden="true">${rest ? restSvg(7, 5, d, 5) : noteSvg(6, 24, d, 5, true)}</svg>`;
+
+
+// ---- Screen parts ----
+let LAY = null, drag = null;
+const width = () => Math.max(280, Math.min(374, ($('#screen').clientWidth || 398) - 24));
+function topbar() {
+  const f = flaggedBars();
+  return `<div class="titlerow"><button class="tbtn" data-a="stub" data-v="Back" aria-label="Back">‹</button><b>Study in C</b></div><div class="topbar">
+    ${matches() ? '<span class="check ok">Matches the book</span>' : f.length ? `<button class="check" data-a="next">${f.length} to check · Next</button>` : ''}<span class="sp"></span>
+    <button class="tbtn ic" data-a="play" aria-label="Play this bar">▶</button><button class="tbtn ic" data-a="undo" aria-label="Undo" ${s.undo.length ? '' : 'disabled'}>↶</button><button class="tbtn ic" data-a="redo" aria-label="Redo" ${s.redo.length ? '' : 'disabled'}>↷</button>
+    <button class="tbtn" data-a="full" aria-pressed="${s.full}">Full score</button></div>`;
+}
+const lineFirst = () => Math.floor(s.bar / PER) * PER;
+const photoFirst = () => Math.min(lineFirst(), Math.floor((TARGET.length - 1) / PER) * PER);
+const photo = (w) => `<button class="photo" data-a="photo" aria-label="Open the photo large"><span>From your photo</span><em>Tap to enlarge</em>${engrave(TARGET, { w, sp: 5, plain: true, top: 20, bottom: 13, first: photoFirst(), count: PER }).svg}</button>`;
+const SPN = { slur: 'Slur', tie: 'Tie', cresc: 'Crescendo', dim: 'Diminuendo' };
+function notice() {
+  if (!(s.armed && s.armed.k === 'span' && s.spanFrom)) return '';
+  const at = find(s.spanFrom);
+  return `<div class="fix wait"><span>${SPN[s.armed.v]} from bar ${at[0] + 1} · tap the last note</span><button data-a="cancelspan">Cancel</button></div>`;
+}
+const beatsChip = (b) => { const t = total(b); return `<span class="beats ${t === 16 ? 'good' : 'bad'}">${t === 16 ? '4 beats ✓' : t === 0 ? 'empty' : beatsText(t) + ' of 4'}</span>`; };
+function fixRow() {
+  const f = fixes(s.bar);
+  return f.length ? `<div class="fix"><span>Did you mean</span>${f.map((q, i) => `<button data-a="fix" data-v="${i}">${q.label}</button>`).join('')}</div>` : '';
+}
+function tray() {
+  const n = note(s.sel), armed = (k, v) => !!(s.armed && s.armed.k === k && s.armed.v === v);
+  if (s.tab === 'marks') {
+    const sp = spansOf(s.bar);
+    return `<div class="tray">
+      <div class="keys" style="grid-template-columns:repeat(6,1fr)">${MARKS.map(([k, l, g]) => `<button class="k sm x6" data-a="stamp" data-k="m" data-v="${k}" aria-pressed="${armed('m', k) || !!(n && n.m[k])}"><b>${g}</b>${l}</button>`).join('')}</div>
+      <div class="keys" style="grid-template-columns:repeat(4,1fr)">${SPANS.map(([k, l, g]) => `<button class="k sm" data-a="stamp" data-k="span" data-v="${k}" aria-pressed="${armed('span', k)}"><b>${g}</b>${l}</button>`).join('')}</div>
+      ${`<div class="keys" style="grid-template-columns:repeat(6,1fr)">${DYNS.map((d) => `<button class="k dyn" data-a="stamp" data-k="dyn" data-v="${d}" aria-pressed="${armed('dyn', d) || !!(n && n.dyn === d)}">${d}</button>`).join('')}</div>`}
+      ${sp.length ? `<div class="chips">${sp.map(({ q, i, a, z }) => (a === z ? `<span class="spn">${SPN[q.type]} ${nname(note(q.from))}–${nname(note(q.to))}<button data-a="unspan" data-v="${i}" aria-label="Remove">✕</button></span>` : `<span class="spn">${SPN[q.type]}, bars ${a + 1} to ${z + 1}<button data-a="gospan" data-v="${q.from}" aria-label="Go to its first bar">‹ ${a + 1}</button><button data-a="gospan" data-v="${q.to}" aria-label="Go to its last bar">${z + 1} ›</button><button data-a="unspan" data-v="${i}" aria-label="Remove">✕</button></span>`)).join('')}</div>` : ''}</div>`;
+  }
+  if (s.tab === 'bars') {
+    const e = s.ends[s.bar], eb = (v, g, l) => `<button class="k sm" data-a="bar" data-v="${v}" aria-pressed="${e === v}"><b>${g}</b>${l}</button>`;
+    return `<div class="tray">
+      <div class="keys" style="grid-template-columns:repeat(5,1fr)"><button class="k sm" data-a="bar" data-v="start" aria-pressed="${s.starts[s.bar]}"><b>‖:</b>Repeat from</button>${eb('n', '│', 'Normal')}${eb('d', '║', 'Double')}${eb('r', ':‖', 'Repeat')}${eb('f', '┃', 'End')}</div>
+      <div class="keys" style="grid-template-columns:1.3fr 1fr 1fr"><div class="stepper ${e === 'r' ? '' : 'off'}"><button data-a="bar" data-v="t-" aria-label="Fewer times">−</button><span>Play ${e === 'r' ? s.times[s.bar] : 2}×</span><button data-a="bar" data-v="t+" aria-label="More times">+</button></div><button class="k sm" data-a="bar" data-v="e1" aria-pressed="${s.endings[s.bar] === 1}">1st time only</button><button class="k sm" data-a="bar" data-v="e2" aria-pressed="${s.endings[s.bar] === 2}">2nd time only</button></div>
+      <div class="keys" style="grid-template-columns:repeat(5,1fr)"><button class="k sm" data-a="bar" data-v="addb">+ Bar before</button><button class="k sm" data-a="bar" data-v="add">+ Bar after</button><button class="k sm" data-a="bar" data-v="copy">Same as before</button><button class="k sm" data-a="bar" data-v="join">Join with next</button><button class="k sm danger" data-a="bar" data-v="del">Delete bar</button></div></div>`;
+  }
+  if (s.tab === 'score') {
+    const st = (l, v) => `<div class="stepper"><button data-a="stub" data-v="${l}">−</button><span>${l}: ${v}</span><button data-a="stub" data-v="${l}">+</button></div>`;
+    return `<div class="tray"><div class="keys" style="grid-template-columns:1fr 1fr">${st('Key', 'no sharps')}${st('Time', '4/4')}${st('Tempo', '♩ = 96')}<button class="k sm soft" data-a="stub" data-v="Add pages">+ Add pages</button></div><p class="hint">As in today's editor. Drawn only here.</p></div>`;
+  }
+  {
+    const base = baseOf(s.ink), ok = !!n, tone = ok && n.p !== null;
+    return `<div class="tray"><p class="hint">${ok ? 'Change the selected note:' : 'A tap on the staff or the grid adds:'}</p><div class="keys" style="grid-template-columns:repeat(7,1fr)">${[16, 8, 4, 2, 1].map((d) => `<button class="k" data-a="ink" data-v="${d}" aria-pressed="${(ok ? baseOf(n.d) : base) === d}" aria-label="${DNAME[d]}">${icon(d, ok ? n.p === null : s.inkRest)}</button>`).join('')}<button class="k" data-a="inkdot" aria-pressed="${ok ? baseOf(n.d) !== n.d : base !== s.ink}" aria-label="Dotted">${icon(6)}</button><button class="k soft" data-a="inkrest" aria-pressed="${ok ? n.p === null : s.inkRest}">Rest</button></div>
+      <div class="keys" style="grid-template-columns:repeat(7,1fr)"><button class="k sm" data-a="acc" data-v="-1" ${tone ? '' : 'disabled'} aria-pressed="${!!tone && n.acc === -1}"><b>♭</b></button><button class="k sm" data-a="acc" data-v="1" ${tone ? '' : 'disabled'} aria-pressed="${!!tone && n.acc === 1}"><b>♯</b></button><button class="k sm" data-a="ins" data-v="0" ${ok ? '' : 'disabled'}>+ Before</button><button class="k sm" data-a="ins" data-v="1" ${ok ? '' : 'disabled'}>+ After</button><button class="k sm soft" data-a="stub" data-v="Triplet">Triplet</button><button class="k sm soft" data-a="stub" data-v="Chord note">+ Chord</button><button class="k sm danger" data-a="del" ${ok ? '' : 'disabled'}>Delete</button></div></div>`;
+  }
+}
+const hintFor = () => {
+  if (s.msg) return s.msg;
+  if (s.tab === 'marks') return s.view === 'B' ? 'Tap a note, then a mark. Or mark first, then the notes. Slide sideways between two notes for a slur.' : 'Tap a block, then a mark. Loudness: tap the grey strip under a note, or slide along it.';
+  if (s.tab === 'score') return 'Key, time and tempo of the piece.';
+  if (s.tab === 'bars') return s.view === 'B' ? 'Tap a ✂ to put a bar line between two notes.' : 'Tap a ✂ on the ruler to put a bar line there.';
+  return s.view === 'B' ? 'Tap a note to change it, drag it up or down to move it. Tap an empty spot to add one.' : 'Tap a square to put a note there. Drag a block to move it, drag its end for the length.';
+};
+
+// ---- Notes view: one big bar ----
+const B = {
+  big() { const e = engrave(s.bars, { w: width(), sp: 13, first: s.bar, count: 1, sel: s.sel, from: s.spanFrom, top: 70, bottom: 66, s, cuts: s.tab === 'bars' ? s.bar : -1, ghost: s.ghost }); LAY = e.lay; return e.svg; },
+  slotAt(x) { const sp = LAY.sp; return LAY.bars[0].slots.find((q) => Math.abs(x - (q.nx + 0.6 * sp)) < 1.8 * sp); },
+  down(x, y) {
+    const L = LAY.bars[0], sp = LAY.sp, bar = s.bars[s.bar];
+    if (s.tab === 'bars') { const i = L.slots.findIndex((q, k) => k > 0 && Math.abs(x - q.x) < 17); if (i > 0) splitBar(s.bar, i); return; }
+    const slot = B.slotAt(x);
+    if (slot) { drag = { id: slot.id, x0: x, y0: y, mode: null }; return; }
+    if (x < L.x0) { s.msg = 'Clef · treble · bar 1. In the app a tap selects it, to change or delete it.'; return; }
+    if (s.tab !== 'notes' || x > L.x1) { s.sel = null; return; }
+    const i = L.ph && x >= L.ph.x ? bar.length : L.slots.filter((q) => q.nx + 0.6 * sp < x).length;
+    push();
+    const n = N(s.inkRest ? null : LAY.pAt(y), s.ink);
+    bar.splice(i, 0, n); s.sel = n.id; beep(n.p, 0, n.d);
+    drag = { id: n.id, x0: x, y0: y, mode: n.p === null ? 'none' : 'pitch', pushed: true };
+  },
+  move(x, y) {
+    if (!drag) return;
+    const dx = x - drag.x0, dy = y - drag.y0, n = note(drag.id);
+    if (!drag.mode) {
+      if (Math.hypot(dx, dy) < 7) return;
+      drag.mode = Math.abs(dx) > Math.abs(dy) * 1.3 && n.p !== null ? 'span' : s.tab === 'notes' ? 'pitch' : 'none';
+    }
+    if (drag.mode === 'pitch') {
+      const p = LAY.pAt(y);
+      s.sel = n.id;
+      if (p !== n.p) { if (!drag.pushed) { push(); drag.pushed = true; } n.p = p; n.acc = 0; beep(p, 0, 1); s.dragName = pname(p, 0); B.paint(); }
+    } else if (drag.mode === 'span') {
+      const a = LAY.bars[0].slots.find((q) => q.id === drag.id);
+      s.ghost = { x1: a.nx + 0.6 * LAY.sp, y1: LAY.yOf(n.p) - LAY.sp, x2: x, y2: y }; drag.x = x; B.paint();
+    }
+  },
+  up() {
+    if (!drag) return;
+    const d = drag; drag = null; s.ghost = null; s.dragName = '';
+    if (!d.mode) { if (s.armed) applyArmed(d.id); else { s.sel = s.sel === d.id ? null : d.id; const n = note(d.id); if (s.sel) beep(n.p, n.acc, n.d); } }
+    else if (d.mode === 'span') { const to = B.slotAt(d.x); if (to && to.id !== d.id && note(to.id).p !== null) addSpan(s.armed && s.armed.k === 'span' ? s.armed.v : 'slur', d.id, to.id); else s.msg = 'Slide from one note to another note to join them.'; }
+  },
+  bubble() {
+    const at = s.sel && find(s.sel);
+    if (!at || at[0] !== s.bar || s.tab !== 'notes') return '';
+    const n = s.bars[at[0]][at[1]], q = LAY.bars[0].slots[at[1]], ax = Math.max(14, Math.min(LAY.W - 14, q.nx + 8));
+    return `<div class="bubble" style="--ax:${(ax / LAY.W * 100).toFixed(1)}%"><button data-a="len" data-v="-1" ${n.d === 1 ? 'disabled' : ''}>Shorter</button><span class="len">${s.dragName || nname(n)}<br>${DNAME[n.d]}</span><button data-a="len" data-v="1" ${n.d === 16 ? 'disabled' : ''}>Longer</button><button data-a="acc" data-v="-1">♭</button><button data-a="acc" data-v="1">♯</button><button data-a="rest">${n.p === null ? 'Note' : 'Rest'}</button><button class="d" data-a="del">Del</button></div>`;
+  },
+  paint() { $('#big').innerHTML = B.big(); $('#bub').innerHTML = B.bubble(); },
+  surface() { const big = B.big(); return `<div class="card surface" id="big" data-surface="B">${big}</div><div id="bub">${B.bubble()}</div>`; },
+};
+
+// ---- Grid view: blocks on the beats, with a loudness strip under them ----
+const GR = { LW: 30, TOP: 24, RH: 16, HI: 40, LO: 28, LANE: 28 };
+const snapRep = (v) => REP.filter((r) => r <= Math.max(1, v)).pop();
+const G = {
+  evs(bar) { let pos = 0; const out = []; for (const n of bar) { if (n.p !== null) out.push({ ...n, start: pos }); pos += n.d; } return out; },
+  write(evs) {
+    evs.sort((a, b) => a.start - b.start);
+    const items = []; let pos = 0;
+    const fill = (to) => { while (pos < to) { const v = [16, 8, 4, 2, 1].find((r) => r <= to - pos && pos % r === 0); items.push(N(null, v)); pos += v; } };
+    for (const e of evs) { fill(e.start); const { start, ...n } = e; items.push(n); pos = start + n.d; }
+    fill(16);
+    s.bars[s.bar] = items;
+  },
+  geo() { const W = width(), cols = Math.max(16, total(s.bars[s.bar])); return { W, cols, cw: (W - GR.LW - 2) / cols, laneY: GR.TOP + (GR.HI - GR.LO + 1) * GR.RH + 4 }; },
+  bounds() { let pos = 0; return s.bars[s.bar].map((n) => (pos += n.d)).slice(0, -1); },
+  grid() {
+    const { W, cols, cw, laneY } = G.geo(), H = laneY + GR.LANE + 2, X = (c) => GR.LW + c * cw, Y = (p) => GR.TOP + (GR.HI - p) * GR.RH, evs = G.evs(s.bars[s.bar]);
+    let o = '';
+    for (let p = GR.HI; p >= GR.LO; p--) {
+      const y = Y(p), isLine = p >= 30 && p <= 38 && p % 2 === 0;
+      o += `<rect x="${GR.LW}" y="${y}" width="${W - GR.LW - 2}" height="${GR.RH}" fill="${p % 2 ? '#f6f8fa' : '#ffffff'}"/>`;
+      if (isLine) o += `<line x1="${GR.LW}" x2="${W - 2}" y1="${y + GR.RH / 2}" y2="${y + GR.RH / 2}" stroke="#9aa3b1" stroke-width="1"/>`;
+      if (p === 28 || p === 40) o += `<line x1="${GR.LW}" x2="${W - 2}" y1="${y + GR.RH / 2}" y2="${y + GR.RH / 2}" stroke="#c3cad5" stroke-width="1" stroke-dasharray="3 4"/>`;
+      o += `<text x="${GR.LW - 4}" y="${y + GR.RH / 2 + 4}" text-anchor="end" font-size="10.5" fill="${isLine ? '#1c2433' : '#5c6472'}" font-weight="${isLine ? 600 : 400}">${pname(p, 0)}</text>`;
+    }
+    o += `<rect x="${GR.LW}" y="${laneY}" width="${W - GR.LW - 2}" height="${GR.LANE}" fill="#eef1f5" rx="3"/><text x="${GR.LW - 4}" y="${laneY + 17}" text-anchor="end" font-size="9.5" fill="#5c6472">loud</text>`;
+    if (cols > 16) o += `<rect x="${X(16)}" y="${GR.TOP}" width="${X(cols) - X(16)}" height="${laneY - GR.TOP - 4}" fill="#b7791f" opacity="0.22"/><text x="${X(16) + 3}" y="${GR.TOP - 6}" font-size="9.5" fill="#8a5a12" font-weight="600">too long</text>`;
+    for (let c = 0; c <= cols; c++) {
+      o += `<line x1="${X(c)}" x2="${X(c)}" y1="${GR.TOP}" y2="${laneY - 4}" stroke="${c % 4 ? '#e3e7ed' : c === 16 ? '#1c2433' : '#b3bdcd'}" stroke-width="${c === 16 || c === 0 ? 1.6 : 1}"/>`;
+      if (c % 4 === 0 && c < 16) o += `<text x="${X(c) + 3}" y="${GR.TOP - 6}" font-size="10" fill="#5c6472" font-weight="600">${c / 4 + 1}</text>`;
+    }
+    if (s.tab === 'bars') for (const c of G.bounds()) o += `<line x1="${X(c)}" x2="${X(c)}" y1="${GR.TOP}" y2="${laneY - 4}" stroke="#2c5bbf" stroke-width="1.5" stroke-dasharray="4 4"/><circle cx="${X(c)}" cy="12" r="11" fill="#fff" stroke="#2c5bbf" stroke-width="1.5"/><text x="${X(c)}" y="16.5" text-anchor="middle" font-size="12" fill="#2c5bbf">✂</text>`;
+    const at = {};
+    for (const e of evs) {
+      if (e.p > GR.HI || e.p < GR.LO) continue;
+      const x = X(e.start) + 1, y = Y(e.p) + 1.5, w = e.d * cw - 2, on = s.sel === e.id || s.spanFrom === e.id, fill = on ? '#1c2433' : '#2c5bbf';
+      const marks = MARKS.filter(([k]) => e.m[k]).map((q) => q[2]).join('');
+      if (e.m.stac || e.m.stacc) o += `<rect x="${x}" y="${y}" width="${w}" height="${GR.RH - 3}" rx="3" fill="${fill}" opacity="0.3"/><rect x="${x}" y="${y}" width="${Math.max(8, w * 0.5)}" height="${GR.RH - 3}" rx="3" fill="${fill}"/>`;
+      else o += `<rect x="${x}" y="${y}" width="${w}" height="${GR.RH - 3}" rx="3" fill="${fill}"/>`;
+      if (e.m.acc || e.m.marc) o += `<rect x="${x}" y="${y}" width="4" height="${GR.RH - 3}" rx="1" fill="#0f1524"/>`;
+      if (w > 30) o += `<text x="${x + 6}" y="${y + 10.5}" font-size="10" fill="#fff" font-weight="600">${pname(e.p, e.acc)}</text>`;
+      if (marks) o += `<text x="${x + w / 2}" y="${y - 2}" text-anchor="middle" font-size="11" fill="#1c2433" font-weight="700">${marks}</text>`;
+      o += `<line x1="${x + w - 4}" x2="${x + w - 4}" y1="${y + 4}" y2="${y + GR.RH - 7}" stroke="#fff" stroke-width="2" opacity="0.7"/>`;
+      if (e.dyn) o += `<text x="${x + 3}" y="${laneY + 19}" font-size="15" fill="#1c2433" font-style="italic" font-weight="700" font-family="Georgia, serif">${e.dyn}</text>`;
+      at[e.id] = { x1: x, x2: x + w, y };
+    }
+    for (const q of s.spans) {
+      const A = at[q.from], Bp = at[q.to];
+      if (!A && !Bp) continue;
+      if (q.type === 'slur' || q.type === 'tie') {
+        const x1 = A ? (A.x1 + A.x2) / 2 : GR.LW, x2 = Bp ? (Bp.x1 + Bp.x2) / 2 : W - 2, y1 = (A || Bp).y - 1, y2 = (Bp || A).y - 1;
+        o += `<path d="M${x1} ${y1} Q${(x1 + x2) / 2} ${Math.min(y1, y2) - 20} ${x2} ${y2}" fill="none" stroke="#1c2433" stroke-width="${q.type === 'tie' ? 1.5 : 2.2}" stroke-linecap="round" ${q.type === 'tie' ? 'stroke-dasharray="1 0"' : ''}/>`;
+      } else {
+        const x1 = (A ? A.x1 : GR.LW) + 18, x2 = Bp ? Bp.x2 - 2 : W - 4, y = laneY + GR.LANE / 2, a = q.type === 'cresc' ? [x1, x2] : [x2, x1];
+        o += `<path d="M${a[1]} ${y - 8} L${a[0]} ${y} L${a[1]} ${y + 8}" fill="none" stroke="#1c2433" stroke-width="1.6"/>`;
+      }
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Bar as blocks">${o}</svg>`;
+  },
+  evAt(evs, col) { return evs.find((e) => e.start <= col && col < e.start + e.d); },
+  down(x, y) {
+    const { cols, cw, laneY } = G.geo(), col = Math.floor((x - GR.LW) / cw), p = GR.HI - Math.floor((y - GR.TOP) / GR.RH), evs = G.evs(s.bars[s.bar]);
+    if (y < GR.TOP) { if (s.tab === 'bars') { const c = (x - GR.LW) / cw, b = G.bounds().findIndex((q) => Math.abs(q - c) * cw < 16); if (b >= 0) splitBar(s.bar, b + 1); } return; }
+    if (col < 0 || col >= cols) return;
+    if (y >= laneY) { drag = { kind: 'lane', col0: col, col }; return; }
+    if (p > GR.HI || p < GR.LO) return;
+    const hit = G.evAt(evs, col);
+    if (s.tab !== 'notes') { if (hit && hit.p === p) drag = { kind: 'tap', id: hit.id }; else s.sel = null; return; }
+    if (hit && hit.p === p) {
+      const edge = GR.LW + (hit.start + hit.d) * cw - x < Math.max(9, Math.min(16, hit.d * cw * 0.4));
+      drag = { kind: edge ? 'len' : 'move', id: hit.id, x0: x, y0: y, evs0: JSON.stringify(evs), ripple: total(s.bars[s.bar]) > 16, moved: false, pushed: false };
+      return;
+    }
+    push();
+    if (hit) { hit.p = p; hit.acc = 0; s.sel = hit.id; beep(p, 0, hit.d); }
+    else {
+      const prev = evs.filter((e) => e.start + e.d <= col).pop(), next = evs.find((e) => e.start > col);
+      const g = s.def >= 4 ? 4 : s.def >= 2 ? 2 : 1, start = Math.max(prev ? prev.start + prev.d : 0, col - (col % g));
+      const n = { ...N(p, snapRep(Math.min(s.def, (next ? next.start : Math.max(16, start + 1)) - start))), start };
+      evs.push(n); s.sel = n.id; beep(p, 0, n.d);
+    }
+    G.write(evs);
+  },
+  move(x, y) {
+    if (!drag) return;
+    const { cw } = G.geo();
+    if (drag.kind === 'lane') { drag.col = Math.floor((x - GR.LW) / cw); return; }
+    if (drag.kind === 'tap') return;
+    if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < 6) return;
+    drag.moved = true;
+    const evs = JSON.parse(drag.evs0), i = evs.findIndex((e) => e.id === drag.id), e = evs[i], prev = evs[i - 1], next = evs[i + 1], p0 = e.p;
+    const was = JSON.stringify(G.evs(s.bars[s.bar]));
+    if (drag.kind === 'len') {
+      const d0 = e.d;
+      e.d = snapRep(Math.round((x - GR.LW) / cw) - e.start);
+      if (drag.ripple) for (const l of evs.slice(i + 1)) l.start += e.d - d0;
+      else e.d = snapRep(Math.min(e.d, (next ? next.start : 16) - e.start));
+      s.def = e.d; s.ink = e.d;
+    } else {
+      e.p = Math.max(GR.LO, Math.min(GR.HI, GR.HI - Math.floor((y - GR.TOP) / GR.RH)));
+      if (e.p !== p0) e.acc = 0;
+      const lo = prev ? prev.start + prev.d : 0, hi = (next ? next.start : Math.max(16, e.start + e.d)) - e.d;
+      e.start = Math.max(lo, Math.min(hi, e.start + Math.round((x - drag.x0) / cw)));
+    }
+    if (!drag.pushed) { push(); drag.pushed = true; }
+    G.write(evs); s.sel = e.id;
+    if (JSON.stringify(G.evs(s.bars[s.bar])) !== was) { if (drag.lastP !== e.p) beep(e.p, 0, 1); drag.lastP = e.p; G.paint(); }
+  },
+  up() {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (d.kind === 'lane') {
+      const evs = G.evs(s.bars[s.bar]), a = G.evAt(evs, d.col0), b = G.evAt(evs, d.col);
+      if (!a) s.msg = 'Loudness goes under a note.';
+      else if (!b || a.id === b.id) { push(); const n = note(a.id), cyc = ['', 'p', 'mf', 'f']; n.dyn = cyc[(cyc.indexOf(n.dyn) + 1) % cyc.length] ?? ''; }
+      else addSpan(d.col > d.col0 ? 'cresc' : 'dim', a.id, b.id);
+    } else if (d.kind === 'tap') { if (s.armed) applyArmed(d.id); else s.sel = s.sel === d.id ? null : d.id; }
+    else if (!d.moved) { s.sel = s.sel === d.id ? null : d.id; const n = note(d.id); if (s.sel) beep(n.p, n.acc, n.d); }
+  },
+  paint() { $('#grid').innerHTML = G.grid(); $('#line').innerHTML = line(); },
+  surface() { return `<div class="card surface" id="grid" data-surface="G">${G.grid()}</div>`; },
+};
+const line = () => engrave(s.bars, { w: width() - 56, sp: 5.4, active: s.bar, sel: s.sel, from: s.spanFrom, barHits: true, top: 30, bottom: 20, s, first: lineFirst(), count: PER }).svg;
+const fullScore = () => { let o = ''; for (let f = 0; f < s.bars.length; f += PER) o += engrave(s.bars, { w: width(), sp: 5.6, active: s.bar, sel: s.sel, from: s.spanFrom, barHits: true, top: 30, bottom: 22, s, first: f, count: PER }).svg; return o; };
+
+function act(a, v) {
+  const at = s.sel && find(s.sel), n = at && s.bars[at[0]][at[1]];
+  if (a === 'ink') { if (n) { push(); n.d = +v; beep(n.p, n.acc, n.d); } else { s.ink = +v; s.inkRest = false; s.def = s.ink; } }
+  else if (a === 'inkdot') { if (n) { const b = baseOf(n.d); if (b >= 2) { push(); n.d = b === n.d ? b * 1.5 : b; } } else { const b = baseOf(s.ink); if (b >= 2) s.ink = b === s.ink ? b * 1.5 : b; s.def = s.ink; } }
+  else if (a === 'inkrest') { if (n) { push(); n.p = n.p === null ? 34 : null; beep(n.p, 0, n.d); } else s.inkRest = !s.inkRest; }
+  else if (a === 'full') s.full = !s.full;
+  else if (a === 'photo') s.photoBig = !s.photoBig;
+  else if (a === 'cancelspan') { s.armed = null; s.spanFrom = null; }
+  else if (a === 'line') { const f = lineFirst() + +v * PER; if (f >= 0 && f < s.bars.length) { s.bar = f; s.sel = null; } }
+  else if (a === 'gospan') { const at = find(v); if (at) { s.bar = at[0]; s.sel = v; } }
+  else if (a === 'ins' && n) { push(); const m = N(n.p, n.d); s.bars[at[0]].splice(at[1] + +v, 0, m); s.sel = m.id; beep(m.p, 0, m.d); }
+  else if (a === 'go') { s.bar = Math.max(0, Math.min(s.bars.length - 1, s.bar + +v)); s.sel = null; }
+  else if (a === 'play') playBar(s.bars[s.bar]);
+  else if (a === 'view') s.view = v;
+  else if (a === 'tab') { s.tab = v; s.armed = null; s.spanFrom = null; }
+  else if (a === 'stamp') stamp(el_k, v);
+  else if (a === 'unspan') { push(); s.spans.splice(+v, 1); }
+  else if (a === 'bar') barAct(v);
+  else if (a === 'fix') { const f = fixes(s.bar)[+v]; if (f.split !== undefined) splitBar(s.bar, f.split); else if (f.join) joinBar(s.bar); else { push(); f.run(); } }
+  else if (a === 'sheet') s.sheet = !s.sheet;
+  else if (!n) return;
+  else if (a === 'len') { const i = REP.indexOf(n.d) + +v; if (REP[i]) { push(); n.d = REP[i]; beep(n.p, n.acc, n.d); } }
+  else if (a === 'acc' && n.p !== null) { push(); n.acc = n.acc === +v ? 0 : +v; beep(n.p, n.acc, n.d); }
+  else if (a === 'rest') { push(); n.p = n.p === null ? 34 : null; beep(n.p, 0, n.d); }
+  else if (a === 'del') { push(); if (s.view === 'G') G.write(G.evs(s.bars[s.bar]).filter((e) => e.id !== n.id)); else s.bars[at[0]].splice(at[1], 1); s.sel = null; }
+}
+let el_k = '';
+function render() {
+  tidy();
+  const w = width(), V = s.view === 'B' ? B : G, seg = (a, cur, opts) => `<span class="seg">${opts.map(([v, l]) => `<button data-a="${a}" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</span>`;
+  const foot = `<div class="foot"><button class="save" data-a="stub" data-v="Save &amp; practice">Save &amp; practice</button></div>`;
+  if (s.full) {
+    $('#screen').innerHTML = `${topbar()}<div class="body">${notice()}<div class="fullhead"><span>Tap a bar to go there</span><button class="k soft" style="min-height:34px;padding:0 12px" data-a="full">Back to bar ${s.bar + 1}</button></div><div class="card fullscore" data-surface="full">${fullScore()}</div></div>${foot}`;
+    const cur = $('.fullscore svg:nth-child(' + (Math.floor(s.bar / PER) + 1) + ')'); if (cur) cur.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  const surface = V.surface(), lf = lineFirst(), pf = photoFirst();
+  $('#screen').innerHTML = `${topbar()}<div class="body">${photo(w)}<div class="lrow"><button class="k lz" data-a="line" data-v="-1" ${lf ? '' : 'disabled'} aria-label="Line before">‹</button><div class="card staff" id="line" data-surface="line">${line()}</div><button class="k lz" data-a="line" data-v="1" ${lf + PER < s.bars.length ? '' : 'disabled'} aria-label="Next line">›</button></div>
+    <div class="barnav"><button class="k" data-a="go" data-v="-1" ${s.bar ? '' : 'disabled'} aria-label="Bar before">‹</button><span class="where">Bar ${s.bar + 1} of ${s.bars.length}</span>${beatsChip(s.bars[s.bar])}<button class="k" data-a="go" data-v="1" ${s.bar < s.bars.length - 1 ? '' : 'disabled'} aria-label="Next bar">›</button><span style="flex:1"></span>${seg('view', s.view, [['B', 'Notes'], ['G', 'Grid']])}</div>
+    ${notice() || fixRow()}${surface}<p class="msg">${hintFor()}</p><div class="grow"></div>
+    <div class="tabs">${[['notes', 'Notes'], ['marks', 'Marks'], ['bars', 'Bars'], ['score', 'Score']].map(([v, l]) => `<button data-a="tab" data-v="${v}" aria-pressed="${s.tab === v}">${l}</button>`).join('')}</div>
+    ${tray()}
+</div>
+    ${foot}
+    ${s.photoBig ? `<div class="sheet" data-a="photo"><div><h4>From your photo · bars ${pf + 1} to ${Math.min(TARGET.length, pf + PER)}</h4><div class="zoom">${engrave(TARGET, { w: 820, sp: 12, plain: true, top: 44, bottom: 40, first: pf, count: PER }).svg}</div><p class="hint">In the app this is the real photo, and you pinch to zoom.</p><button class="k" data-a="photo">Close</button></div></div>` : ''}`;
+}
+
+// ---- The page around the phone ----
+const T = (on) => `<span class="tag ${on ? 'on' : ''}">${on ? 'works' : 'drawn only'}</span>`;
+function renderCase() {
+  $('#names').innerHTML = [['cde', 'C D E'], ['sol', 'Do Re Mi']].map(([v, l]) => `<button data-n="${v}" aria-pressed="${NAMES === v}">${l}</button>`).join('');
+  $('#case').innerHTML = `<div><h2>What to try</h2></div>
+    <div><h3>Getting around</h3><dl>
+      <dt>Full score ${T(1)}</dt><dd>Top right. Shows the whole piece; tap a bar to go there, or go back.</dd>
+      <dt>The line above the bar ${T(1)}</dt><dd>Tap a bar in it, or use its arrows to jump a line.</dd>
+      <dt>The photo ${T(1)}</dt><dd>Tap it to open it large. Here it is a drawing; in the app it is your photo.</dd>
+      <dt>3 to check · Next ${T(1)}</dt><dd>Bar 3 is empty, bar 4 misses a dot, bar 11 misses a bar line.</dd>
+    </dl></div>
+    <div><h3>A slur over several bars</h3><dl>
+      <dt>Make one ${T(1)}</dt><dd>Marks, tap Slur, tap a note in bar 1. A blue notice says the slur is waiting. Go to bar 6 any way you like, also through Full score: the notice stays. Tap a note there. Cancel stops it.</dd>
+      <dt>See one ${T(1)}</dt><dd>Go to bar 3: the slur passes through as a dashed line, and Marks lists "Slur, bars 1 to 6" with keys to go to either end or remove it.</dd>
+    </dl></div>
+    <div><h3>Marks</h3><dl>
+      <dt>All four ways ${T(1)}</dt><dd>Note first; mark first and paint; slide between two notes in Notes; the loudness strip in Grid.</dd>
+      <dt>New marks ${T(1)}</dt><dd>Breath and Caesura, and <i>pp</i> to <i>ff</i> in both views.</dd>
+    </dl></div>
+    <div><h3>Bars</h3><dl>
+      <dt>Did you mean ${T(1)}</dt><dd>Up to four. The ones that touch no note come first: bar 11 offers the bar line.</dd>
+      <dt>1st and 2nd time only ${T(1)}</dt><dd>Mark bar 4 as 1st time only: it gets a bracket and a repeat sign. Then mark bar 5 as 2nd time only. Try 2nd time only on bar 8: it is refused.</dd>
+      <dt>Play 3× ${T(1)}</dt><dd>Set a bar's end to Repeat, then use − and +.</dd>
+      <dt>End bar line, + Bar before, + Bar after, Same as before, Join, Delete ${T(1)}</dt><dd>All in the Bars tab. Scissors show between the notes while Bars is open.</dd>
+    </dl></div>
+    <div><h3>Notes tools</h3><dl>
+      <dt>One tray for both views ${T(1)}</dt><dd>With a note selected the keys change it; with nothing selected they set what a tap adds. + Before and + After insert next to the selected note.</dd>
+      <dt>Score tab ${T(0)}</dt><dd>Key, time, tempo and Add pages stay as in today's editor.</dd>
+    </dl></div>
+    <div><h3>Not in this sketch</h3><p>Chords, two hands, voices and the part switch; triplets and grace notes (locked blocks in Grid); playing the endings and repeats; saving. A short first bar is not flagged in the app; this piece has none. The app does not fill a short bar with rests on save: it stays flagged.</p></div>`;
+  $('#borrowed').innerHTML = BORROWED.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+}
+const BORROWED = [["Select a note, then tap a mark. Tap again to take it off.","<a href=\"https://handbook.musescore.org/notation/expressive-markings/articulations\">MuseScore</a> palettes, <a href=\"https://help.flat.io/en/music-notation-software/articulation\">Flat</a>","Marks 1"],["Pick a mark and put it on many notes.","Closest known: dragging a palette item onto a note in MuseScore. Painting by tapping is an extension of that.","Marks 2"],["Draw a slur as an arc over the notes.","<a href=\"https://staffpad.zendesk.com/hc/en-us/articles/360002334057\">StaffPad</a>","Marks 3"],["A slur or hairpin from a first and a last note.","<a href=\"https://handbook.musescore.org/notation/expressive-markings/slurs\">MuseScore</a>, <a href=\"https://www.soundslice.com/help/en/creating/notations/104/slurs\">Soundslice</a>","Marks 3, across bars"],["Loudness shown and changed right at the note blocks.","Piano rolls in <a href=\"https://support.apple.com/guide/logicpro-ipad/lpipf0998b33/ipados\">Logic Pro for iPad</a> and GarageBand","Marks 4"],["Cut a bar at a chosen note; join two bars by taking the bar line away.","<a href=\"https://handbook.musescore.org/notation/rhythm-meter-and-measures/measures\">MuseScore</a>","Bars 2"],["Add and remove whole bars from the selected bar.","<a href=\"https://staffpad.zendesk.com/hc/en-us/articles/360002336598\">StaffPad</a>, <a href=\"https://www.soundslice.com/help/en/creating/notations/95/bars\">Soundslice</a>, Noteflight","Bars 4"],["Bars with the wrong number of beats are marked.","<a href=\"https://scanscore.zendesk.com/hc/en-us/articles/360019816160\">ScanScore</a>, MuseScore","Bars 1. I found no editor that also offers the fix; \"Did you mean\" goes one step further."]];
+function svgPoint(wrap, e) { const svg = wrap.querySelector('svg'), r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; return [(e.clientX - r.left) * vb.width / r.width, (e.clientY - r.top) * vb.height / r.height]; }
+
+$('#names').addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; NAMES = b.dataset.n; try { localStorage.setItem('names', NAMES); } catch {} renderCase(); render(); });
+$('#screen').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-a]'), surf = e.target.closest('[data-surface]');
+  if (el) {
+    const a = el.dataset.a, v = el.dataset.v;
+    s.msg = '';
+    if (el.classList.contains('sheet') && e.target.closest('.sheet > div')) return;
+    if (a === 'stub') { s.msg = `${v}: drawn only in this sketch.`; }
+    else if (a === 'undo') undo(true);
+    else if (a === 'redo') undo(false);
+    else if (a === 'next') { const f = flaggedBars(); s.bar = f.find((b) => b > s.bar) ?? f[0]; s.sel = null; }
+    else { el_k = el.dataset.k || ''; act(a, v); }
+  } else if (surf && (surf.dataset.surface === 'line' || surf.dataset.surface === 'full')) {
+    s.msg = '';
+    if (e.target.dataset.bar) { s.bar = +e.target.dataset.bar; s.sel = null; s.full = false; } else return;
+  } else return;
+  render();
+});
+$('#screen').addEventListener('pointerdown', (e) => {
+  const wrap = e.target.closest('[data-surface="B"],[data-surface="G"]');
+  if (!wrap) return;
+  e.preventDefault();
+  const V = s.view === 'B' ? B : G, [x, y] = svgPoint(wrap, e);
+  s.msg = '';
+  V.down(x, y);
+  try { wrap.setPointerCapture(e.pointerId); } catch {}
+  const mv = (ev) => { const [mx, my] = svgPoint(wrap, ev); V.move(mx, my); };
+  const up = () => { wrap.removeEventListener('pointermove', mv); wrap.removeEventListener('pointerup', up); wrap.removeEventListener('pointercancel', up); V.up(); render(); };
+  wrap.addEventListener('pointermove', mv); wrap.addEventListener('pointerup', up); wrap.addEventListener('pointercancel', up);
+  tidy(); V.paint();
+});
+$('#reset').addEventListener('click', () => { Object.assign(s, fresh(), { undo: [], redo: [], sel: null, bar: 0, armed: null, spanFrom: null, full: false, photoBig: false, msg: '' }); render(); });
+window.addEventListener('resize', render);
+window.__mock = { s, total, matches, note };
+renderCase(); render();
+</script>
